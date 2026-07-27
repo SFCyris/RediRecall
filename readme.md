@@ -174,6 +174,10 @@ export DASHSCOPE_API_KEY=...    # Qwen
 
 RediRecall has **no built-in authentication**. The **local runtime** (`start.sh`) binds to `127.0.0.1` (localhost only) by default. The **Docker Compose** setup, however, publishes port 8420 on all host interfaces (`0.0.0.0`), so it *is* reachable from your network — run it only on a trusted network, bind it to localhost by changing the mapping to `127.0.0.1:8420:8420` in [`docker-compose.yml`](docker-compose.yml), or put a reverse proxy with authentication in front of it (see [`deploy/docker-compose.https.yml`](deploy/docker-compose.https.yml) for a Caddy + automatic-HTTPS setup). **Never expose the port on an untrusted network without an auth layer.**
 
+**Untrusted content.** Model and RAG output is treated as untrusted: rendered Markdown and every SVG/diagram is sanitised (DOMPurify) before it reaches the DOM, the `geometry` block accepts data only — never expressions — and a Content-Security-Policy restricts scripts to the app itself plus the two CDNs the renderers come from. Ingested pages can carry prompt injections, so this matters in normal use, not just under attack.
+
+One deliberate trade-off: `img-src` permits any `https:` source, because answers legitimately show images from the pages and documents you ingest, plus map tiles. In principle that is an exfiltration channel if script execution were ever achieved; `connect-src` is restricted to `'self'`, so it is the only one. If your deployment does not need remote images, tighten `img-src` in `_CSP` (`redirecall/main.py`) to `'self' data: blob:`.
+
 ---
 
 ## Documentation
