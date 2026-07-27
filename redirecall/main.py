@@ -46,6 +46,7 @@ import re
 import shutil
 import socket
 import sys
+import threading
 import time
 import uuid
 import zipfile
@@ -248,6 +249,11 @@ CACHE_PREFIX = "semcache:"
 
 # Shared SemanticCache instance — lazily created, reset when Redis config changes.
 _semantic_cache: "SemanticCache | None" = None
+# Building the cache's HF vectorizer takes ~3 s (model load). The background warm
+# (_bg_init) does it off the request path, but Uvicorn serves immediately, so a chat in
+# the first few seconds after a restart would otherwise pay that build inline. This flag
+# lets cache_lookup/store treat the not-yet-warm cache as a miss until the warm finishes.
+_semantic_cache_ready = False
 
 # Per-endpoint Search module availability cache.
 # Key = endpoint name ("default" for primary).  Value = True/False/None (None = unchecked).
@@ -276,7 +282,7 @@ Draw a chart ONLY when the user asks for one (graph/plot/chart/diagram/visualise
 
 === VISUAL BLOCKS — pick the RIGHT fence; the app renders each one ===
 Always prefer one of these over hand-drawing an SVG: you supply a short description and the app does the drawing exactly.
-- ```plot — a function graph. Body: `y = x^2 + 3x - 2` (one function per line; optional `x = -5 .. 5`).
+- ```plot — a function graph. Body: `y = x^2 + 3x - 2` (one function per line; optional `x = -5 .. 5`). To let the reader explore, declare a parameter and the app renders a live slider that re-plots instantly with no further request: `y = a*sin(b*x)` then `param: a = 0.5 .. 3 (1)` and `param: b = 1 .. 5 (2)`. Prefer this over answering the same question again for a different value.
 - ```chart — data chart (bar/line/pie/doughnut/scatter/radar). Body: Chart.js JSON, e.g. {"type":"bar","data":{"labels":["Q1","Q2"],"datasets":[{"label":"Sales","data":[120,150]}]}}
 - ```mermaid — flowchart, sequence, class, state, ER or Gantt diagram. Body: mermaid syntax, e.g. `graph TD` then `A[Start] --> B{Choice}`.
 - ```dot — a graph best drawn by automatic layout (dependencies, call graphs). Body: Graphviz DOT, e.g. `digraph G { A -> B }`.
@@ -284,6 +290,13 @@ Always prefer one of these over hand-drawing an SVG: you supply a short descript
 - ```map — a map. Body: JSON {"center":[lat,lng],"zoom":11,"markers":[{"lat":..,"lng":..,"label":".."}]} (optional "geojson").
 - ```plot3d — a 3-D surface/scatter. For a formula, let the app compute it: {"zfunction":"x*y","x":[-5,5],"y":[-5,5],"layout":{"title":"…"}}. For explicit data use Plotly JSON {"data":[{"type":"surface","z":[[1,2],[3,4]]}]} — z must be NUMBERS; never write an expression such as [[x*y]] inside JSON.
 - ```molecule — a chemical structure. Body: one SMILES string, e.g. CC(=O)Oc1ccccc1C(=O)O
+- ```calc — arithmetic, unit conversion, dates, matrices. Body: one expression per line, e.g. `5 km/h to m/s` or `(1250 * 1.19) / 3`. Never do multi-step arithmetic in prose — emit it here and the app computes it exactly.
+- ```stats — descriptive statistics and linear regression. Body: `data: 4, 8, 15, 16, 23, 42` (optionally `x:` and `y:` lines for regression). The app computes mean/median/sd/quartiles/correlation — do not compute them yourself.
+- ```solve — symbolic algebra. Body: one per line — `derivative: x^3 + 2x` , `simplify: (x^2-1)/(x-1)` , `solve: x^2 - 5x + 6 = 0` , `evaluate: ...`.
+- ```table — a sortable, filterable data table with computed totals and CSV export. Body: JSON {"columns":["Item","Qty","Price"],"rows":[["A",2,9.99]],"total":["Price"]} — never add up a column yourself; list `total` and the app sums it.
+- ```diff — compare two texts. Body: `--- before` / lines / `--- after` / lines. The app computes the real diff.
+- ```regex — test a pattern. Body: `pattern: \d{4}-\d{2}` then `test:` lines. The app runs it and shows real matches.
+- ```truth — truth table for a boolean expression, e.g. `(A and B) or not C`. The app enumerates every row.
 - ```abc — music notation (see below). ```svg — only for a custom diagram none of the above can express.
 Use ordinary ```language fences for code (they are syntax-highlighted). One block per figure; put explanation as prose outside the block.
 
@@ -300,33 +313,9 @@ x = -6.28 .. 6.28
 ```
 Syntax: standard math — ^ for powers, * optional (3x is fine), functions sin cos tan asin acos atan sqrt exp log log10 abs floor ceil, constants pi and e. One function per line; set the range with a line like `x = a .. b`. This is far more reliable than drawing an SVG polyline by hand — use it for ANY formula.
 
-=== INLINE SVG CHARTS — follow exactly or it shows up as raw text or blank ===
-
-1) RENDER GATE. Put each drawing in ONE fenced code block whose language tag is exactly `svg` (lowercase — NOT `xml`, NOT `html`, NOT a bare ``` fence). Inside the fence the FIRST characters are `<svg` and the LAST are `</svg>`. Nothing before `<svg` (no `<?xml?>`, no `<!DOCTYPE>`, no comment). NEVER wrap the SVG in `<div>`, `<h3>`, `<p>`, `<html>`, or `<body>` — that makes it print as source code. No "Here is", no apology inside the fence.
-
-2) ROOT + CANVAS. The root must carry viewBox, width, height, xmlns:
-   <svg width="640" height="360" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">
-   The card background is ALWAYS WHITE (even in dark mode), so give every shape and every <text> an explicit non-white colour, and start with a white background rect: <rect x="0" y="0" width="640" height="360" fill="#ffffff"/>.
-
-3) ALLOWED TAGS ONLY (everything else is stripped): svg, g, path, line, polyline, polygon, rect, circle, ellipse, text, tspan, defs, linearGradient, radialGradient, stop, clipPath, marker, use, title, desc. Style with presentation attributes (fill, stroke, stroke-width, stroke-dasharray, opacity, font-size, font-family, font-weight, text-anchor, transform). FORBIDDEN (silently removed, breaks the drawing): a <style> element, <script>, <foreignObject>, any on* handler, javascript:/external URLs, and animation. Deliver a correct STATIC picture.
-
-4) PLOT AREA. Inside the 640x360 canvas use plot rectangle Left=48, Right=616, Top=24, Bottom=312. Every point, bar, axis, and label must stay inside 0..640 x 0..360.
-
-5) TEXT AND BOUNDS. SVG <text> is drawn literally: it does NOT wrap and does NOT render LaTeX or Markdown. Never put $...$, \\(...\\), **bold**, or a long sentence inside <text> — the dollar signs/asterisks show as-is and long text runs off the edge. Use plain characters and Unicode superscripts for math labels (a², b², c², x², r²), and keep each <text> to a few words. Put any real explanation as normal prose OUTSIDE the ```svg block, not inside the drawing. Keep EVERY element fully on-canvas: for each <rect> confirm x+width <= 640 and y+height <= 360; do not place text near the right edge. When you use <polygon> for a triangle/square, give it distinct non-collinear points (a "square" needs 4 corners of equal side length, not a zero-area point list).
-
---- LINE PLOTS for a RAW DATA SERIES (a given list of points, not a formula — for a formula use ```plot above) ---
-- Domain X_MIN..X_MAX from the request. Range Y_MIN..Y_MAX = the true min/max of the values you will plot, each padded ~10%.
-- Scales: X_SCALE = 568/(X_MAX-X_MIN); Y_SCALE = 288/(Y_MAX-Y_MIN).
-- Map EVERY point: screen_x = 48 + (x-X_MIN)*X_SCALE ; screen_y = 312 - (y-Y_MIN)*Y_SCALE. The minus is the mandatory Y-FLIP (SVG y grows downward): the largest value gets the SMALLEST screen_y (top). Self-check before drawing: a positive value must sit ABOVE a negative one.
-- NEVER freehand a curve and NEVER use a curved path command (C, S, Q, T, A). Build a value table, then join the mapped points with ONE <polyline points="x1,y1 x2,y2 ..." fill="none" stroke="COLOR" stroke-width="2"/> (or a <path> using only M and L). For sin/cos, sample every 15 degrees and read magnitudes from this table (do not estimate): sin 0,.259,.5,.707,.866,.966,1 ; cos 1,.966,.866,.707,.5,.259,0 — extend with sin(-a)=-sin a, cos(-a)=cos a, repeat every 360 degrees, sign by quadrant; radians = degrees*0.01745. For any other f(x), take ~40 evenly spaced x-values and compute f(x) exactly.
-- Draw order: white background rect -> light grid <line stroke="#e5e7eb"> -> axes <line stroke="#888888"> (x-axis at the screen_y of y=0; y-axis at the screen_x of x=0) -> tick labels <text fill="#444444"> -> the data polyline(s) -> a short title/legend.
-
---- BAR CHARTS (counts, comparisons, "summarise the data as a bar graph") ---
-- For N categories: slot = 568/N ; bar_w = slot*0.7 ; bar i (i=0..N-1) has left x = 48 + i*slot + (slot-bar_w)/2 and centre = 48 + i*slot + slot/2.
-- Value scale: V_MAX = the largest value padded ~10% ; Y_SCALE = 288/V_MAX. Each bar: height = value*Y_SCALE ; top y = 312 - height (this subtraction is the flip — a bigger value gives a smaller y, so the bar grows UP from the baseline). Draw <rect x=".." y=".." width="bar_w" height=".." fill="#2563eb"/>.
-- Baseline: <line x1="48" y1="312" x2="616" y2="312" stroke="#888888"/>. Under each bar a centred label <text x="centre" y="330" text-anchor="middle" font-size="11" fill="#444444">name</text>; optionally the value just above each bar. Add a few y gridlines/labels from 0 to V_MAX and a short title.
-
-Keep segment/point/bar counts modest so the output is not truncated. Round coordinates to 1 decimal.
+=== CUSTOM SVG — only when no lane above fits ===
+Every chart, diagram, plot, map and construction has a dedicated lane above; use it. Hand-drawn SVG is a last resort for a bespoke illustration, because coordinates you compute by hand are frequently wrong.
+If you must: one ```svg block, root `<svg width="640" height="360" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">`, a white background `<rect>`, and explicit non-white colours on every shape (the card is white in both themes). Allowed: svg g path line polyline polygon rect circle ellipse text tspan defs linearGradient radialGradient stop clipPath marker use title desc, styled with presentation attributes. Stripped, so never used: <style>, <script>, <foreignObject>, on* handlers, external URLs. <text> does not wrap and does not render LaTeX or Markdown — keep labels short, use Unicode superscripts (a², x²), and keep everything inside 0..640 x 0..360.
 
 === MUSIC / SHEET NOTATION ===
 For music or sheet-music notation, do NOT draw notes as SVG. Output ABC notation in a fenced block whose language tag is exactly `abc` (lowercase) — the app renders it to a proper score. Emit valid ABC: an information header, then the tune body. Minimal template:
@@ -607,6 +596,29 @@ def save_config(cfg: dict):
         to_save.setdefault("gemini", {})["api_key"] = ""
     with open(CONFIG_PATH, "w") as f:
         json.dump(to_save, f, indent=2)
+
+
+# ── Provider SDK client reuse ────────────────────────────────────────────────
+# A fresh SDK client per request means a fresh connection pool and a fresh TLS
+# handshake on every turn (~30 ms per cloud provider, measured) — and a first-turn
+# conversation pays it three times (answer + title + HyDE). Cache by credentials so
+# a key change still creates a new client.
+_provider_clients: dict = {}
+
+def _cached_client(kind: str, api_key: str, base_url: str):
+    """Return a pooled SDK client for (kind, key, base_url), creating it on first use."""
+    ck = (kind, api_key, base_url)
+    c = _provider_clients.get(ck)
+    if c is None:
+        c = (_anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
+             if kind == "anthropic" else
+             _AsyncOpenAI(api_key=api_key, base_url=base_url))
+        _provider_clients[ck] = c
+    return c
+
+def invalidate_provider_clients():
+    """Drop cached clients (called on config save, since keys may have changed)."""
+    _provider_clients.clear()
 
 
 def compose_system_prompt(client_system: str | None) -> str:
@@ -1255,14 +1267,11 @@ async def search_rag_parallel(
     enabled: list[str] = []
     for inst in instances:
         try:
-            rc_inst  = rc_for_instance(inst)
-            meta_raw = rc_inst.get(f"rag_meta:{inst}")
+            meta, ep = await _rag_meta_cached_async(inst)   # cached; miss resolves off-loop
             enabled_flag = True
-            if meta_raw:
-                meta = json.loads(meta_raw)
+            if meta:
                 enabled_flag = meta.get("enabled", True)
-                ep = meta.get("redis_endpoint", "default")
-                # Skip if endpoint is known to be offline
+                # Skip if the owning endpoint is known to be offline
                 if not _endpoint_health.get(ep, True):
                     continue
             if enabled_flag:
@@ -1383,6 +1392,10 @@ def cache_lookup(query: str, threshold: float = 0.92) -> dict | None:
     Look up the nearest cached response via redisvl SemanticCache.
     Returns {"response": str, "score": float} or None.
     """
+    # During the first few seconds after a restart the background warm may not have built
+    # the vectorizer yet; treat that as a cache miss rather than paying the ~3 s build here.
+    if _semantic_cache is None and not _semantic_cache_ready:
+        return None
     cache = _get_semantic_cache()
     if cache is None:
         return None
@@ -1408,6 +1421,9 @@ def cache_store(query: str, response: str, chunks: list | None = None):
     """Store a query→response pair in the SemanticCache with TTL.
     Chunks are stored as JSON metadata so they can be re-displayed on cache hits.
     """
+    # Skip storing during the warm window rather than triggering the ~3 s inline build.
+    if _semantic_cache is None and not _semantic_cache_ready:
+        return
     cache = _get_semantic_cache()
     if cache is None:
         return
@@ -1675,28 +1691,41 @@ async def ingest_file(
     """
     text = ""
     suffix = path.suffix.lower()
+
+    # File parsing (a big PDF is seconds of CPU) and the embed+Redis write in ingest_text
+    # are both synchronous — run them off the event loop so a large upload never freezes
+    # concurrent chat sessions or the WS receive loop.
+    def _extract_txt():
+        return path.read_text(errors="ignore")
+
+    def _extract_csv():
+        rows = []
+        with open(path, newline="", errors="ignore") as f:
+            for row in csv.reader(f):
+                rows.append(" | ".join(row))
+        return "\n".join(rows)
+
+    def _extract_pdf():
+        doc = fitz.open(str(path))
+        return "\n".join(p.get_text() for p in doc)
+
     try:
         if suffix == ".txt":
-            text = path.read_text(errors="ignore")
+            text = await asyncio.to_thread(_extract_txt)
 
         elif suffix == ".csv":
-            rows = []
-            with open(path, newline="", errors="ignore") as f:
-                for row in csv.reader(f):
-                    rows.append(" | ".join(row))
-            text = "\n".join(rows)
+            text = await asyncio.to_thread(_extract_csv)
 
         elif suffix == ".pdf":
             if HAS_PYMUPDF:
-                doc = fitz.open(str(path))
-                text = "\n".join(p.get_text() for p in doc)
+                text = await asyncio.to_thread(_extract_pdf)
             else:
                 return {"source": source, "status": "error", "error": "PyMuPDF not installed (pip install pymupdf)"}
 
         else:
             return {"source": source, "status": "skipped", "error": f"Unsupported type: {suffix}"}
 
-        n = ingest_text(instance, text, source, rc)
+        n = await asyncio.to_thread(ingest_text, instance, text, source, rc)
         entry = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "instance": instance,
@@ -2049,16 +2078,16 @@ async def crawl_url(
     if force_reindex:
         # Wipe the URL skip-list so every page is fetched and re-embedded fresh
         try:
-            _crawl_rc.delete(_indexed_urls_key)
+            await asyncio.to_thread(_crawl_rc.delete, _indexed_urls_key)
         except Exception:
             pass
         _indexed_urls_mem: set[str] = set()
     else:
         try:
-            _indexed_urls_mem = {
-                u.decode() if isinstance(u, bytes) else u
-                for u in _crawl_rc.smembers(_indexed_urls_key)
-            }
+            # Loading the whole indexed-URL set is one sync command; keep it off the loop
+            # so a large skip-list doesn't stall chat at crawl start.
+            members = await asyncio.to_thread(_crawl_rc.smembers, _indexed_urls_key)
+            _indexed_urls_mem = {u.decode() if isinstance(u, bytes) else u for u in members}
         except Exception:
             _indexed_urls_mem = set()
 
@@ -2078,7 +2107,7 @@ async def crawl_url(
                     pipe = _crawl_rc.pipeline(transaction=False)
                     for fu in to_flush:
                         pipe.sadd(_indexed_urls_key, fu)
-                    pipe.execute()
+                    await asyncio.to_thread(pipe.execute)   # only the round-trip blocks
                 except Exception:
                     pass
 
@@ -2283,7 +2312,7 @@ async def crawl_url(
                 pipe = _crawl_rc.pipeline(transaction=False)
                 for u in _newly_indexed:
                     pipe.sadd(_indexed_urls_key, u)
-                pipe.execute()
+                await asyncio.to_thread(pipe.execute)   # only the round-trip blocks
             except Exception:
                 pass
 
@@ -2621,7 +2650,7 @@ async def claude_stream(messages: list, model: str):
             claude_msgs.append({"role": m["role"], "content": _to_claude_content(m["content"])})
 
     try:
-        client = _anthropic.AsyncAnthropic(api_key=api_key, base_url=base_url)
+        client = _cached_client("anthropic", api_key, base_url)
         kwargs: dict = {"model": model, "messages": claude_msgs, "max_tokens": 4096}
         if system_msg:
             kwargs["system"] = system_msg
@@ -2665,7 +2694,7 @@ async def openai_models() -> list[dict]:
         return OPENAI_MODELS_STATIC
 
     try:
-        client = _AsyncOpenAI(api_key=api_key, base_url=f"{base_url}/v1")
+        client = _cached_client("openai", api_key, f"{base_url}/v1")
         page = await client.models.list()
         models = []
         for m in sorted(page.data, key=lambda x: x.id):
@@ -2698,7 +2727,7 @@ async def openai_stream(messages: list, model: str):
         return
 
     try:
-        client = _AsyncOpenAI(api_key=api_key, base_url=f"{base_url}/v1")
+        client = _cached_client("openai", api_key, f"{base_url}/v1")
         stream = await client.chat.completions.create(
             model=model, messages=messages, stream=True,
         )
@@ -2754,7 +2783,7 @@ async def qwen_stream(messages: list, model: str):
 
     try:
         # DashScope base_url already includes /v1 path — pass it directly to the SDK
-        client = _AsyncOpenAI(api_key=api_key, base_url=base_url)
+        client = _cached_client("openai", api_key, base_url)
         stream = await client.chat.completions.create(
             model=model, messages=messages, stream=True,
         )
@@ -2791,7 +2820,7 @@ async def groq_models() -> list[dict]:
     if not api_key or not _OPENAI_SDK_AVAILABLE:
         return GROQ_MODELS_STATIC
     try:
-        client = _AsyncOpenAI(api_key=api_key, base_url=f"{base_url}/v1")
+        client = _cached_client("openai", api_key, f"{base_url}/v1")
         page = await client.models.list()
         models = []
         for m in sorted(page.data, key=lambda x: x.id):
@@ -2824,7 +2853,7 @@ async def groq_stream(messages: list, model: str):
         return
 
     try:
-        client = _AsyncOpenAI(api_key=api_key, base_url=f"{base_url}/v1")
+        client = _cached_client("openai", api_key, f"{base_url}/v1")
         stream = await client.chat.completions.create(
             model=model, messages=messages, stream=True,
         )
@@ -3145,33 +3174,83 @@ def reset_rag(instance: str, rc: redis.Redis | None = None):
     })
 
 
-def rc_for_instance(instance: str) -> redis.Redis:
-    """
-    Return the Redis client that owns a specific RAG instance.
-    Searches the default endpoint first, then all configured extras.
-    Falls back to the default client if not found anywhere.
-    """
-    # Check default redis first
+# ── rag_meta read-through cache ──────────────────────────────────────────────
+# rag_meta:{instance} = {"enabled": bool, "redis_endpoint": str, ...}. It is read on
+# every chat turn — to pick the owning endpoint and check the enabled flag — but written
+# only when an instance is created, toggled or deleted. Reading it fresh each turn cost
+# up to two Redis round trips per instance (rc_for_instance re-read the same key), which
+# is pure latency against a remote Redis. This short-TTL in-process cache turns the hot
+# path into a dict lookup; writes invalidate explicitly, so the TTL only bounds staleness
+# in the (unexpected) event an invalidation is ever missed.
+_RAG_META_TTL = 3.0                       # seconds
+_rag_meta_cache: dict[str, tuple[float, tuple[dict | None, str]]] = {}
+# The cache is read from the event loop AND from to_thread / FastAPI-threadpool workers,
+# and writes to rag_meta invalidate it. A generation counter guarded by a lock closes the
+# resolve-then-store race: if an invalidation lands while a resolve is in flight, the stale
+# value is not cached (we re-resolve on the next read instead).
+_rag_meta_lock = threading.Lock()
+_rag_meta_gen = 0
+
+def _resolve_rag_meta(instance: str) -> tuple[dict | None, str]:
+    """Find an instance's rag_meta across endpoints. Returns (meta_or_None, endpoint_name).
+    One GET on the default endpoint in the common case; extra endpoints are consulted only
+    when the instance is not on the default. Mirrors the old rc_for_instance search order."""
     try:
         meta_raw = r().get(f"rag_meta:{instance}")
         if meta_raw:
             meta = json.loads(meta_raw)
-            ep = meta.get("redis_endpoint", "default")
-            return r_for(ep)
+            return meta, meta.get("redis_endpoint", "default")
     except Exception:
         pass
-    # Check all additional configured endpoints
     for ep in _config.get("redis_endpoints", []):
         ep_name = ep.get("name", "")
         if ep_name and ep_name != "default":
             try:
-                rc = r_for(ep_name)
-                meta_raw = rc.get(f"rag_meta:{instance}")
+                meta_raw = r_for(ep_name).get(f"rag_meta:{instance}")
                 if meta_raw:
-                    return rc
+                    return json.loads(meta_raw), ep_name
             except Exception:
                 pass
-    return r()
+    return None, "default"
+
+def _rag_meta_cached(instance: str) -> tuple[dict | None, str]:
+    """Cached (meta, endpoint) for an instance. Cache hit performs no Redis I/O."""
+    ent = _rag_meta_cache.get(instance)
+    if ent and (time.time() - ent[0]) < _RAG_META_TTL:
+        return ent[1]
+    with _rag_meta_lock:
+        gen_before = _rag_meta_gen
+    val = _resolve_rag_meta(instance)                 # Redis I/O outside the lock
+    with _rag_meta_lock:
+        if _rag_meta_gen == gen_before:               # no invalidation raced us
+            _rag_meta_cache[instance] = (time.time(), val)
+    return val
+
+async def _rag_meta_cached_async(instance: str) -> tuple[dict | None, str]:
+    """Same as _rag_meta_cached, but a cache miss resolves off the event loop."""
+    ent = _rag_meta_cache.get(instance)
+    if ent and (time.time() - ent[0]) < _RAG_META_TTL:
+        return ent[1]
+    return await asyncio.to_thread(_rag_meta_cached, instance)
+
+def invalidate_rag_meta(instance: str | None = None):
+    """Drop cached rag_meta after a write so the next read reflects it immediately."""
+    global _rag_meta_gen
+    with _rag_meta_lock:
+        _rag_meta_gen += 1                             # cancels any in-flight resolve's store
+        if instance is None:
+            _rag_meta_cache.clear()
+        else:
+            _rag_meta_cache.pop(instance, None)
+
+def rc_for_instance(instance: str) -> redis.Redis:
+    """
+    Return the Redis client that owns a specific RAG instance.
+    Endpoint is resolved via the cached rag_meta (default endpoint first, then extras),
+    falling back to the default client if the instance is not found anywhere.
+    """
+    _meta, ep = _rag_meta_cached(instance)
+    return r_for(ep)
 
 def _rc_for(instance: str, endpoint: str | None = None) -> redis.Redis:
     """
@@ -3366,6 +3445,26 @@ async def startup():
         except Exception as e:
             log.warning(f"  Embedding model warmup failed: {e}")
 
+        # 2b. Warm the semantic cache and (if enabled) the cross-encoder reranker.
+        # Both used to initialise lazily inside handle_chat, ON the event loop, so the
+        # first question after a restart stalled seconds while the whole server froze.
+        try:
+            await asyncio.to_thread(_get_semantic_cache)
+            log.info("  Semantic cache ready")
+        except Exception as e:
+            log.warning(f"  Semantic cache warmup failed: {e}")
+        finally:
+            # Warm done (success or not): from here cache_lookup/store use the cache
+            # normally instead of skipping to avoid the inline build.
+            global _semantic_cache_ready
+            _semantic_cache_ready = True
+        if _config.get("reranker", {}).get("enabled", False):
+            try:
+                await asyncio.to_thread(get_reranker)
+                log.info("  Reranker ready")
+            except Exception as e:
+                log.warning(f"  Reranker warmup failed: {e}")
+
         # 3. Ensure FT indexes only on reachable endpoints
         try:
             instances = await asyncio.to_thread(list_rag_instances)
@@ -3440,6 +3539,7 @@ async def api_save_config(payload: dict):
 
     save_config(_config)      # strips env keys before writing to disk
     invalidate_redis_clients()
+    invalidate_provider_clients()   # keys/base URLs may have changed
     _embed_model = None       # force model reload on next request
 
     log.info(
@@ -3643,7 +3743,7 @@ async def api_openai_status(key: str | None = None):
     if not _OPENAI_SDK_AVAILABLE:
         return {"ok": False, "error": "openai package not installed. Run: pip install openai"}
     try:
-        client = _AsyncOpenAI(api_key=api_key, base_url=f"{base_url}/v1")
+        client = _cached_client("openai", api_key, f"{base_url}/v1")
         await client.models.list()
         return {"ok": True}
     except Exception as e:
@@ -3682,7 +3782,7 @@ async def api_groq_status(key: str | None = None):
     if not _OPENAI_SDK_AVAILABLE:
         return {"ok": False, "error": "openai package not installed. Run: pip install openai"}
     try:
-        client = _AsyncOpenAI(api_key=api_key, base_url=f"{base_url}/v1")
+        client = _cached_client("openai", api_key, f"{base_url}/v1")
         await client.models.list()
         return {"ok": True}
     except Exception as e:
@@ -3854,13 +3954,18 @@ def api_discover_endpoint(name: str):
 
     discovered: dict[str, dict] = {}
     try:
-        for k in rc.keys("rag:*:chunk:*"):
+        # SCAN can return the same key more than once under concurrent writes, so count
+        # DISTINCT chunk keys per instance rather than incrementing on every hit.
+        seen_chunks: dict[str, set] = {}
+        for k in rc.scan_iter("rag:*:chunk:*", count=500):   # SCAN, not KEYS (O(N) blocks Redis)
             parts = k.decode().split(":")
             if len(parts) >= 3:
                 inst = parts[1]
-                discovered.setdefault(inst, {"name": inst, "chunks": 0, "has_meta": False})
-                discovered[inst]["chunks"] += 1
-        for mk in rc.keys("rag_meta:*"):
+                seen_chunks.setdefault(inst, set()).add(k)
+        for inst, keys in seen_chunks.items():
+            discovered.setdefault(inst, {"name": inst, "chunks": 0, "has_meta": False})
+            discovered[inst]["chunks"] = len(keys)
+        for mk in rc.scan_iter("rag_meta:*", count=500):     # SCAN, not KEYS
             inst = mk.decode().replace("rag_meta:", "")
             discovered.setdefault(inst, {"name": inst, "chunks": 0, "has_meta": False})
             discovered[inst]["has_meta"] = True
@@ -3895,6 +4000,7 @@ def api_register_discovered(name: str, payload: dict):
             meta.setdefault("color", "#6366f1")
             meta.setdefault("enabled", True)
             rc.set(f"rag_meta:{inst_name}", json.dumps(meta))
+            invalidate_rag_meta(inst_name)
             ensure_rag_index(inst_name, rc)
             registered += 1
         except Exception as e:
@@ -3935,10 +4041,10 @@ async def api_test_redis_adhoc(payload: dict):
             socket_timeout=3,
             decode_responses=False,
         )
-        info = rc.info()
+        info = await asyncio.to_thread(rc.info)   # keep the sync client off the event loop
         # Use a unique key so the probe result doesn't pollute the saved-endpoint cache
         probe_key = f"__adhoc_{payload.get('host')}:{payload.get('port')}"
-        search_ok = probe_search(rc, probe_key)
+        search_ok = await asyncio.to_thread(probe_search, rc, probe_key)
         # Don't persist this ad-hoc probe result permanently
         _search_available.pop(probe_key, None)
         return {
@@ -3958,8 +4064,8 @@ async def api_test_endpoint(name: str):
     """Test connectivity to a named Redis endpoint (uses saved config)."""
     try:
         rc = r_for(name)
-        info = rc.info()
-        search_ok = probe_search(rc, name)
+        info = await asyncio.to_thread(rc.info)
+        search_ok = await asyncio.to_thread(probe_search, rc, name)
         return {
             "ok":               True,
             "version":          info.get("redis_version"),
@@ -4009,11 +4115,17 @@ def api_cache_clear():
             return {"deleted": "all"}
         except Exception:
             pass  # fall through to manual key deletion
-    keys = r().keys(f"{CACHE_PREFIX}*")
-    if keys:
-        r().delete(*keys)
+    rc = r()
+    deleted = 0
+    batch: list = []
+    for k in rc.scan_iter(f"{CACHE_PREFIX}*", count=500):   # SCAN, not KEYS (O(N) blocks Redis)
+        batch.append(k)
+        if len(batch) >= 500:
+            rc.delete(*batch); deleted += len(batch); batch = []
+    if batch:
+        rc.delete(*batch); deleted += len(batch)
     _semantic_cache = None  # reset so it re-indexes on next use
-    return {"deleted": len(keys)}
+    return {"deleted": deleted}
 
 
 @app.delete("/api/cache/entry")
@@ -4098,8 +4210,9 @@ async def api_create_instance(payload: dict):
         "created":         datetime.now(timezone.utc).isoformat(),
         "redis_endpoint":  ep_name,
     }
-    rc.set(f"rag_meta:{name}", json.dumps(meta))
-    ensure_rag_index(name, rc)
+    await asyncio.to_thread(rc.set, f"rag_meta:{name}", json.dumps(meta))
+    invalidate_rag_meta(name)
+    await asyncio.to_thread(ensure_rag_index, name, rc)
     return {"name": name, **meta}
 
 
@@ -4108,6 +4221,7 @@ def api_delete_instance(instance: str, endpoint: str | None = None):
     rc = _rc_for(instance, endpoint)
     reset_rag(instance, rc)
     rc.delete(f"rag_meta:{instance}")
+    invalidate_rag_meta(instance)
     return {"ok": True}
 
 
@@ -4119,6 +4233,7 @@ def api_toggle_rag(instance: str, payload: dict, endpoint: str | None = None):
     meta     = json.loads(meta_raw) if meta_raw else {}
     meta["enabled"] = bool(payload.get("enabled", True))
     rc.set(f"rag_meta:{instance}", json.dumps(meta))
+    invalidate_rag_meta(instance)
     return {"ok": True, "enabled": meta["enabled"]}
 
 
@@ -4133,7 +4248,12 @@ def api_rag_chunks(instance: str, limit: int = 50, endpoint: str | None = None):
     """Return a sample of stored chunks for inspection."""
     rc     = _rc_for(instance, endpoint)
     prefix = rag_prefix(instance)
-    keys   = rc.keys(f"{prefix}:chunk:*")[:limit]
+    # SCAN and stop at `limit` — never pull the whole keyspace into memory the way KEYS did.
+    keys = []
+    for k in rc.scan_iter(f"{prefix}:chunk:*", count=500):
+        keys.append(k)
+        if len(keys) >= limit:
+            break
     chunks = []
     for k in keys:
         d = rc.hgetall(k)
@@ -4606,43 +4726,49 @@ async def api_import_rag(instance: str, file: UploadFile = File(...), endpoint: 
     # recorded in the ZIP (which may be from a different server entirely).
     rc = _rc_for(instance, endpoint)
 
-    # Preserve the current instance's endpoint and display settings.
-    existing_meta_raw = rc.get(f"rag_meta:{instance}")
-    if existing_meta_raw:
-        existing_meta = json.loads(existing_meta_raw)
-        meta["redis_endpoint"] = existing_meta.get("redis_endpoint", "default")
-        meta.setdefault("color",   existing_meta.get("color",   "#6366f1"))
-        meta.setdefault("enabled", existing_meta.get("enabled", True))
-
-    rc.set(f"rag_meta:{instance}", json.dumps(meta))
-    ensure_rag_index(instance, rc)
-
     prefix = rag_prefix(instance)
-    pipe   = rc.pipeline(transaction=False)
-    for ch in chunks_raw:
-        emb_b64   = ch.get("embedding_b64", "")
-        emb_bytes = (
-            base64.b64decode(emb_b64)
-            if emb_b64
-            else embed(ch["text"]).astype(np.float32).tobytes()
-        )
-        pipe.hset(f"{prefix}:chunk:{ch['id']}", mapping={
-            "text":      ch["text"].encode(),
-            "source":    ch.get("source", "").encode(),
-            "chunk_id":  str(ch["id"]),
-            "embedding": emb_bytes,
-        })
-    pipe.execute()
 
-    # Sync the chunk counter so future additions don't collide with imported IDs.
-    max_id = -1
-    for ch in chunks_raw:
-        try:
-            max_id = max(max_id, int(ch["id"]))
-        except (ValueError, TypeError):
-            pass
-    if max_id >= 0:
-        rc.set(f"rag:{instance}:chunk_counter", str(max_id + 1))
+    def _do_import():
+        # The whole import — read existing meta, write meta, build the index, embed and
+        # pipeline the chunks, sync the counter — is synchronous Redis/CPU work. Run it in
+        # one thread so a large import never blocks the event loop (nor other sessions).
+        existing_meta_raw = rc.get(f"rag_meta:{instance}")
+        if existing_meta_raw:
+            existing_meta = json.loads(existing_meta_raw)
+            meta["redis_endpoint"] = existing_meta.get("redis_endpoint", "default")
+            meta.setdefault("color",   existing_meta.get("color",   "#6366f1"))
+            meta.setdefault("enabled", existing_meta.get("enabled", True))
+        rc.set(f"rag_meta:{instance}", json.dumps(meta))
+
+        ensure_rag_index(instance, rc)
+        pipe = rc.pipeline(transaction=False)
+        for ch in chunks_raw:
+            emb_b64   = ch.get("embedding_b64", "")
+            emb_bytes = (
+                base64.b64decode(emb_b64)
+                if emb_b64
+                else embed(ch["text"]).astype(np.float32).tobytes()
+            )
+            pipe.hset(f"{prefix}:chunk:{ch['id']}", mapping={
+                "text":      ch["text"].encode(),
+                "source":    ch.get("source", "").encode(),
+                "chunk_id":  str(ch["id"]),
+                "embedding": emb_bytes,
+            })
+        pipe.execute()
+
+        # Sync the chunk counter so future additions don't collide with imported IDs.
+        max_id = -1
+        for ch in chunks_raw:
+            try:
+                max_id = max(max_id, int(ch["id"]))
+            except (ValueError, TypeError):
+                pass
+        if max_id >= 0:
+            rc.set(f"rag:{instance}:chunk_counter", str(max_id + 1))
+
+    await asyncio.to_thread(_do_import)
+    invalidate_rag_meta(instance)   # in-process; the write above has completed
 
     return {"ok": True, "chunks": len(chunks_raw)}
 
@@ -4927,7 +5053,7 @@ async def ws_chat(ws: WebSocket, sid: str):
     """
     await mgr.connect(ws, sid)
     if sid not in _sessions:
-        _sessions[sid] = load_session(sid)
+        _sessions[sid] = await asyncio.to_thread(load_session, sid)
     try:
         while True:
             raw = await ws.receive_text()
@@ -5025,7 +5151,10 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     await ws.send_json({"type": "status", "phase": "cache"})
     cache_threshold = _config.get("cache", {}).get("similarity_threshold", 0.92)
     t_cache_start   = time.time()
-    hit             = cache_lookup(query, cache_threshold) if not images and not bypass_cache and not wants_visual(query) else None
+    # Off the event loop: while these run, no other session's tokens can flush and
+    # the WS receive loop cannot read an {'type':'abort'} frame (Stop goes dead).
+    hit             = (await asyncio.to_thread(cache_lookup, query, cache_threshold)
+                       if not images and not bypass_cache and not wants_visual(query) else None)
     t_cache         = round(time.time() - t_cache_start, 3)
 
     if hit:
@@ -5046,16 +5175,21 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     rag_threshold = rag_cfg.get("similarity_threshold", 0.75)
     top_k         = rag_cfg.get("top_k", 5)
     hybrid_search = rag_cfg.get("hybrid_search", True)
-    t_rag_start   = time.time()
-
-    # ── HyDE: generate a hypothetical answer and use its embedding for search
+    # ── HyDE: generate a hypothetical answer and use its embedding for search.
+    # Timed on its own — it is an LLM generation, not a Redis/vector cost — so the
+    # latency badge attributes it to HyDE instead of silently inflating "rag".
+    t_hyde = 0.0
     search_vec: "np.ndarray | None" = None
     if rag_instances and _config.get("hyde", {}).get("enabled", False):
         await ws.send_json({"type": "status", "phase": "hyde"})
+        t_hyde_start = time.time()
         hypothesis = await hyde_generate(query, provider, model)
         if hypothesis:
-            search_vec = embed(hypothesis).astype(np.float32)
+            search_vec = (await asyncio.to_thread(embed, hypothesis)).astype(np.float32)
             log.info(f"HyDE hypothesis ({len(hypothesis)} chars) embedded for RAG search")
+        t_hyde = round(time.time() - t_hyde_start, 3)
+
+    t_rag_start   = time.time()   # retrieval + rerank only; HyDE is timed above
 
     if parallel_mode:
         # Multi-instance parallel query — search all requested instances simultaneously.
@@ -5064,12 +5198,11 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     elif rag_instances:
         # Single-instance query (normal mode)
         rag_inst = rag_instances[0]
-        rag_enabled = True
-        meta_raw = rc_for_instance(rag_inst).get(f"rag_meta:{rag_inst}")
-        if meta_raw:
-            rag_enabled = json.loads(meta_raw).get("enabled", True)
+        meta, _ep = await _rag_meta_cached_async(rag_inst)   # primes the cache off-loop
+        rag_enabled = (meta or {}).get("enabled", True)
         chunks = (
-            search_rag(rag_inst, query, top_k, rag_threshold, rc_for_instance(rag_inst), hybrid_search, search_vec)
+            await asyncio.to_thread(search_rag, rag_inst, query, top_k, rag_threshold,
+                                    rc_for_instance(rag_inst), hybrid_search, search_vec)
             if rag_enabled else []
         )
     else:
@@ -5082,7 +5215,7 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     # ── Cross-encoder reranking (runs after fast retrieval, before LLM)
     if chunks:
         top_n = _config.get("reranker", {}).get("top_n", top_k)
-        chunks = rerank_chunks(query, chunks, top_n)
+        chunks = await asyncio.to_thread(rerank_chunks, query, chunks, top_n)
 
     t_rag = round(time.time() - t_rag_start, 3)
 
@@ -5117,7 +5250,7 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     # stream_start MUST fire first so the frontend creates the message element
     # and sets currentAiMsgId before rag_context arrives.
     await ws.send_json({"type": "stream_start"})
-    await ws.send_json({"type": "rag_context", "chunks": chunks, "latency": {"cache": t_cache, "rag": t_rag}})
+    await ws.send_json({"type": "rag_context", "chunks": chunks, "latency": {"cache": t_cache, "hyde": t_hyde, "rag": t_rag}})
 
     full_response = ""
     stream_error  = False
@@ -5152,7 +5285,12 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
         raise
     except Exception as e:
         await ws.send_json({"type": "error", "content": str(e)})
-        await ws.send_json({"type": "stream_end", "latency": {"cache": t_cache, "rag": 0, "llm": 0, "total": round(time.time() - t0, 3)}, "title": None})
+        # Report the real phase timings we already have (cache/hyde/rag ran before the
+        # LLM error); llm is however far the failed stream got.
+        await ws.send_json({"type": "stream_end", "latency": {
+            "cache": t_cache, "hyde": t_hyde, "rag": t_rag,
+            "llm": round(time.time() - t_llm_start, 3),
+            "total": round(time.time() - t0, 3)}, "title": None})
         return
 
     t_llm  = round(time.time() - t_llm_start, 3)
@@ -5161,9 +5299,26 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     # ── Store turn in session (memory + Redis) ──────────────────────────────
     _sessions[sid].append({"role": "user",      "content": query})
     _sessions[sid].append({"role": "assistant", "content": full_response})
-    save_session(sid, _sessions[sid])
+    await asyncio.to_thread(save_session, sid, _sessions[sid])
 
-    # ── 5. Auto-title generation (first turn only) ──────────────────────────
+    # ── 5. Release the client FIRST ─────────────────────────────────────────
+    # stream_end unlocks the composer. Auto-titling is a second, full LLM call
+    # (measured at ~423 ms on local gemma4, seconds on a large model) and the cache
+    # store touches Redis — neither is something the user should wait behind while
+    # staring at a finished answer. Send stream_end now; the title arrives later as
+    # its own event.
+    await ws.send_json({
+        "type":    "stream_end",
+        "latency": {"cache": t_cache, "hyde": t_hyde, "rag": t_rag, "llm": t_llm, "total": total},
+        "title":   None,
+    })
+    _chat_tasks.pop(sid, None)
+
+    # ── 6. Cache store — off the critical path ──────────────────────────────
+    if not stream_error and not images and not wants_visual(query):
+        await asyncio.to_thread(cache_store, query, full_response, chunks)
+
+    # ── 7. Auto-title (first turn only), delivered as a follow-up event ─────
     title_msg = None
     if len(_sessions[sid]) == 2:
         try:
@@ -5216,17 +5371,11 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
         except Exception:
             pass   # title generation is non-critical
 
-    # ── 6. Cache store (skip errors, vision requests, and chart requests) ────
-    if not stream_error and not images and not wants_visual(query):
-        cache_store(query, full_response, chunks)
-
-    await ws.send_json({
-        "type":    "stream_end",
-        "latency": {"cache": t_cache, "rag": t_rag, "llm": t_llm, "total": total},
-        "title":   title_msg,
-    })
-    # Remove ourselves from the active-task registry now that we completed normally
-    _chat_tasks.pop(sid, None)
+    if title_msg:
+        try:
+            await ws.send_json({"type": "session_title", "title": title_msg})
+        except Exception:
+            pass   # client may have navigated away; the title is non-critical
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ROUTES — BATCH CHAT (non-streaming REST)
@@ -5267,7 +5416,7 @@ async def api_chat(payload: dict):
 
     # Ensure session exists in memory
     if sid not in _sessions:
-        _sessions[sid] = load_session(sid)
+        _sessions[sid] = await asyncio.to_thread(load_session, sid)
 
     # Model fallback
     if not model:
@@ -5289,7 +5438,7 @@ async def api_chat(payload: dict):
     # Semantic cache — skip for vision requests and chart requests (see wants_visual)
     if use_cache and not images and not wants_visual(query):
         cache_threshold = _config.get("cache", {}).get("similarity_threshold", 0.92)
-        hit = cache_lookup(query, cache_threshold)
+        hit = await asyncio.to_thread(cache_lookup, query, cache_threshold)
         if hit:
             return {"session_id": sid, "response": hit["response"], "chunks": hit.get("chunks", []), "cache_hit": True, "cache_score": hit["score"]}
 
@@ -5312,18 +5461,20 @@ async def api_chat(payload: dict):
     if rag_instances and _config.get("hyde", {}).get("enabled", False):
         hypothesis = await hyde_generate(query, provider, model)
         if hypothesis:
-            search_vec = embed(hypothesis).astype(np.float32)
+            search_vec = (await asyncio.to_thread(embed, hypothesis)).astype(np.float32)
 
     # RAG retrieval
     if parallel_mode:
         chunks = await search_rag_parallel(rag_instances, query, top_k, rag_threshold, hybrid_search, search_vec)
     elif rag_instances:
         inst = rag_instances[0]
-        meta_raw = rc_for_instance(inst).get(f"rag_meta:{inst}")
-        rag_enabled = True
-        if meta_raw:
-            rag_enabled = json.loads(meta_raw).get("enabled", True)
-        chunks = search_rag(inst, query, top_k, rag_threshold, rc_for_instance(inst), hybrid_search, search_vec) if rag_enabled else []
+        meta, _ep = await _rag_meta_cached_async(inst)       # primes the cache off-loop
+        rag_enabled = (meta or {}).get("enabled", True)
+        chunks = (
+            await asyncio.to_thread(search_rag, inst, query, top_k, rag_threshold,
+                                    rc_for_instance(inst), hybrid_search, search_vec)
+            if rag_enabled else []
+        )
     else:
         chunks = []
 
@@ -5331,7 +5482,7 @@ async def api_chat(payload: dict):
         chunks = [c for c in chunks if source_filter.lower() in c.get("source", "").lower()]
 
     top_n = _config.get("reranker", {}).get("top_n", top_k)
-    chunks = rerank_chunks(query, chunks, top_n)
+    chunks = await asyncio.to_thread(rerank_chunks, query, chunks, top_n)
 
     if file_context:
         file_parts = [f"[File: {f['name']}]\n{f['text']}" for f in file_context if f.get("text")]
@@ -5383,10 +5534,10 @@ async def api_chat(payload: dict):
 
     _sessions[sid].append({"role": "user",      "content": query})
     _sessions[sid].append({"role": "assistant", "content": full_response})
-    save_session(sid, _sessions[sid])
+    await asyncio.to_thread(save_session, sid, _sessions[sid])
 
     if not stream_error and not images and not wants_visual(query):
-        cache_store(query, full_response, chunks)
+        await asyncio.to_thread(cache_store, query, full_response, chunks)
 
     return {"session_id": sid, "response": full_response, "chunks": chunks, "cache_hit": False}
 

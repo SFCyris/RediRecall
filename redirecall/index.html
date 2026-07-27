@@ -420,6 +420,47 @@ table.data-table tr:last-child td{border-bottom:none}
 .plot-render-wrap{margin:10px 0;border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;background:var(--glass)}
 .plot-src-pre{margin:0;border-top:1px solid var(--border);background:rgba(0,0,0,.04);padding:10px 12px;display:none}
 [data-theme="dark"] .plot-src-pre{background:rgba(0,0,0,.25)}
+
+/* ── Compute lanes (calc / solve / stats / truth / table / diff / regex) ── */
+.calc-table{width:100%;border-collapse:collapse;font-size:13px}
+.calc-table td,.calc-table th{padding:6px 10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+.calc-table th{font-weight:600;color:var(--text2);font-size:11px;text-transform:uppercase;letter-spacing:.5px}
+.calc-expr{font-family:'SF Mono','Fira Code',monospace;color:var(--text1);white-space:pre-wrap;word-break:break-word}
+.calc-val{font-family:'SF Mono','Fira Code',monospace;font-weight:600;color:var(--accent3);text-align:right;white-space:pre-wrap}
+.calc-bad{color:var(--red);font-weight:400}
+.truth-table td{text-align:center;font-family:'SF Mono',monospace}
+.tt-true{color:var(--green);font-weight:700}.tt-false{color:var(--text2)}
+.dtable-wrap{width:100%}
+.dtable-bar{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--border)}
+.dtable-filter{flex:1;min-width:0;width:auto;font-size:12px;padding:5px 9px;border:1px solid var(--border);border-radius:var(--r3);background:var(--glass2);color:var(--text0)}
+.dtable-count{font-size:11px;color:var(--text2);white-space:nowrap}
+.dtable{width:100%;border-collapse:collapse;font-size:13px}
+.dtable th{position:sticky;top:0;background:var(--glass);cursor:pointer;user-select:none;font-size:11px;
+  text-transform:uppercase;letter-spacing:.5px;color:var(--text2);padding:7px 10px;border-bottom:1px solid var(--border2);text-align:left}
+.dtable th:hover{color:var(--accent3)}
+.dtable td{padding:6px 10px;border-bottom:1px solid var(--border)}
+.dtable .dt-num{text-align:right;font-variant-numeric:tabular-nums}
+.dtable tfoot td{font-weight:700;border-top:2px solid var(--border2);background:rgba(124,111,247,.06)}
+.diff-box,.rx-box{width:100%;font-size:12.5px}
+.diff-head,.rx-head{padding:6px 10px;font-family:'SF Mono',monospace;color:var(--text2);border-bottom:1px solid var(--border)}
+.diff-body{margin:0;padding:0;overflow-x:auto;background:transparent}
+.dl{font-family:'SF Mono','Fira Code',monospace;padding:1px 10px;white-space:pre}
+.dl-add{background:rgba(74,222,128,.14);color:var(--green)}
+.dl-del{background:rgba(248,113,113,.14);color:var(--red)}
+.dl-ctx{color:var(--text2)}
+.rx-row{padding:7px 10px;border-bottom:1px solid var(--border)}
+.rx-subject{font-family:'SF Mono','Fira Code',monospace;white-space:pre-wrap;word-break:break-word;margin-top:3px}
+.rx-subject mark{background:rgba(251,191,36,.35);color:inherit;border-radius:3px;padding:0 2px}
+.rx-tag{font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px}
+.rx-hit{background:rgba(74,222,128,.15);color:var(--green)}
+.rx-miss{background:rgba(248,113,113,.13);color:var(--red)}
+.rx-groups{font-size:11px;color:var(--text2);font-family:'SF Mono',monospace;margin-top:3px}
+/* ── plot parameter sliders: re-evaluate locally, no LLM round trip ── */
+.plot-params{display:flex;flex-wrap:wrap;gap:12px;padding:8px 12px;border-top:1px solid var(--border);background:rgba(124,111,247,.05)}
+.pp{display:flex;align-items:center;gap:7px;font-size:12px}
+.pp label{font-family:'SF Mono',monospace;color:var(--accent3);font-weight:700;min-width:14px}
+.pp input[type=range]{width:110px}
+.pp output{font-family:'SF Mono',monospace;min-width:44px;text-align:right;color:var(--text1);font-variant-numeric:tabular-nums}
 .plot-src-pre code{font-family:'SF Mono','Fira Code',monospace;font-size:12px;white-space:pre;color:var(--text1);display:block;overflow-x:auto}
 /* Lazy rich lanes (mermaid / chart / dot / geometry / map / plot3d / molecule) */
 /* An explicit width is required: map/chart/plot3d/geometry render into an empty
@@ -2318,6 +2359,15 @@ function handleWSMsg(msg){
       if(msg.title){S.sessions[S.sessionId].title=msg.title;document.getElementById('session-title').textContent=msg.title;renderSessionList();}
       if(!msg.aborted){S.chatMetrics.misses++;S.chatMetrics.latencies.push(msg.latency?.total||0);}
       break;
+    case 'session_title':
+      // Arrives after stream_end so the composer is never held hostage to the
+      // second (title) generation.
+      if(msg.title&&S.sessions[S.sessionId]){
+        S.sessions[S.sessionId].title=msg.title;
+        document.getElementById('session-title').textContent=msg.title;
+        renderSessionList();
+      }
+      break;
     case 'cache_hit':
       _setStreamingUI(false);
       removeTyping();
@@ -2537,7 +2587,10 @@ function buildRagInspector(chunks,latency,openByDefault=false,query=''){
 function updateLatencyBadge(msgId,latency){
   const el=document.getElementById(msgId);if(!el||!latency)return;
   const meta=el.querySelector('.msg-meta');
-  if(meta)meta.insertAdjacentHTML('beforeend',`<span class="latency-badge" title="cache:${latency.cache*1000|0}ms rag:${latency.rag*1000|0}ms llm:${latency.llm*1000|0}ms">⏱ ${latency.total*1000|0}ms</span>`);
+  if(meta){
+    const hyde=latency.hyde?` hyde:${latency.hyde*1000|0}ms`:'';   // shown only when HyDE ran
+    meta.insertAdjacentHTML('beforeend',`<span class="latency-badge" title="cache:${latency.cache*1000|0}ms${hyde} rag:${latency.rag*1000|0}ms llm:${latency.llm*1000|0}ms">⏱ ${latency.total*1000|0}ms</span>`);
+  }
 }
 
 // ── Send message ──────────────────────────────────────────────────────────────
@@ -3675,6 +3728,33 @@ function _geoAttrs(type,attrs){
   return out;
 }
 
+
+// Roots for `solve: <expr> = <expr>`. Handles linear and quadratic exactly; falls
+// back to a numeric scan so the browser still gives a real answer rather than the
+// model's recollection.
+function _solveRoots(expr){
+  const [lhs,rhs]=expr.split('=');
+  const f=math.compile('('+lhs+')-('+(rhs===undefined?'0':rhs)+')');
+  const at=x=>f.evaluate({x});
+  const a=(at(1)+at(-1))/2-at(0), b=(at(1)-at(-1))/2, c=at(0);
+  const near=(p,q)=>Math.abs(p-q)<1e-9;
+  const fmt=n=>String(Math.round(n*1e10)/1e10);
+  if(near(a,0)&&!near(b,0)&&near(at(2),2*b+c))return 'x = '+fmt(-c/b);
+  if(!near(a,0)&&near(at(2),4*a+2*b+c)){
+    const d=b*b-4*a*c;
+    if(d<0)return 'no real roots (discriminant '+fmt(d)+')';
+    const r1=(-b+Math.sqrt(d))/(2*a), r2=(-b-Math.sqrt(d))/(2*a);
+    return near(r1,r2)?'x = '+fmt(r1)+' (double root)':'x = '+fmt(r1)+' , '+fmt(r2);
+  }
+  const found=[];
+  for(let x=-100;x<=100;x+=0.01){
+    const y0=at(x), y1=at(x+0.01);
+    if(isFinite(y0)&&isFinite(y1)&&y0*y1<=0&&!found.some(r=>Math.abs(r-x)<0.05))found.push(x);
+    if(found.length>=6)break;
+  }
+  return found.length? 'x ≈ '+found.map(x=>fmt(Math.round(x*1000)/1000)).join(' , ')
+                     : 'no root found in [-100, 100]';
+}
 const RICH_LANES={
   mermaid:{
     label:'⬗ Diagram',
@@ -3815,6 +3895,256 @@ const RICH_LANES={
       await Plotly.newPlot(host, spec.data, {autosize:true,margin:{l:0,r:0,t:40,b:0},...(spec.layout||{})},
         {displayModeBar:false,responsive:true});
       out._richInst={kind:'plot3d',obj:host};
+    }},
+  // ── Compute lanes ──────────────────────────────────────────────────────────
+  // Same principle as ```plot: the model states WHAT to compute, the browser
+  // computes it. Removes a class of model error (arithmetic, algebra, matching)
+  // at zero token cost. All of these use math.js, which is already loaded.
+  calc:{
+    label:'🧮 Calc',
+    load:()=>Promise.resolve(),
+    async draw(out,src){
+      if(!window.math)throw new Error('math.js unavailable');
+      const rows=src.split('\n').map(s=>s.trim()).filter(s=>s&&!s.startsWith('#'));
+      if(!rows.length)throw new Error('nothing to calculate');
+      const scope={};
+      const t=document.createElement('table'); t.className='calc-table';
+      rows.forEach(line=>{
+        const tr=document.createElement('tr');
+        const e=document.createElement('td'); e.className='calc-expr'; e.textContent=line;
+        const v=document.createElement('td'); v.className='calc-val';
+        try{
+          const r=math.evaluate(line,scope);
+          v.textContent=(r===undefined||r===null)?'':math.format(r,{precision:12});
+        }catch(err){ v.textContent='✕ '+err.message.slice(0,60); v.classList.add('calc-bad'); }
+        tr.appendChild(e); tr.appendChild(v); t.appendChild(tr);
+      });
+      out.appendChild(t);
+    }},
+  solve:{
+    label:'∑ Solve',
+    load:()=>Promise.resolve(),
+    async draw(out,src){
+      if(!window.math)throw new Error('math.js unavailable');
+      const t=document.createElement('table'); t.className='calc-table';
+      src.split('\n').map(s=>s.trim()).filter(Boolean).forEach(line=>{
+        const m=line.match(/^(derivative|simplify|solve|evaluate|expand)\s*:\s*(.+)$/i);
+        const tr=document.createElement('tr');
+        const a=document.createElement('td'); a.className='calc-expr';
+        const b=document.createElement('td'); b.className='calc-val';
+        if(!m){ a.textContent=line; b.textContent='✕ expected  derivative: | simplify: | solve: | evaluate:'; b.classList.add('calc-bad'); }
+        else{
+          const [,op,expr]=m; a.textContent=op+': '+expr;
+          try{
+            if(/^derivative$/i.test(op))      b.textContent=math.derivative(expr,'x').toString();
+            else if(/^simplify$/i.test(op))   b.textContent=math.simplify(expr).toString();
+            else if(/^expand$/i.test(op))     b.textContent=math.simplify(expr,{},{exactFractions:false}).toString();
+            else if(/^evaluate$/i.test(op))   b.textContent=math.format(math.evaluate(expr),{precision:12});
+            else                              b.textContent=_solveRoots(expr);
+          }catch(err){ b.textContent='✕ '+err.message.slice(0,70); b.classList.add('calc-bad'); }
+        }
+        tr.appendChild(a); tr.appendChild(b); t.appendChild(tr);
+      });
+      out.appendChild(t);
+    }},
+  stats:{
+    label:'📐 Stats',
+    load:()=>Promise.resolve(),
+    async draw(out,src){
+      if(!window.math)throw new Error('math.js unavailable');
+      const nums=s=>s.split(/[,\s]+/).map(Number).filter(n=>isFinite(n));
+      let data=null,xs=null,ys=null;
+      src.split('\n').forEach(l=>{
+        const m=l.match(/^\s*(data|x|y)\s*:\s*(.+)$/i);
+        if(!m)return;
+        const v=nums(m[2]);
+        if(/^data$/i.test(m[1]))data=v; else if(/^x$/i.test(m[1]))xs=v; else ys=v;
+      });
+      if(!data&&!(xs&&ys))throw new Error('expected  data: 1, 2, 3   (or x: … and y: …)');
+      const t=document.createElement('table'); t.className='calc-table';
+      const row=(k,v)=>{const tr=document.createElement('tr');
+        const a=document.createElement('td');a.className='calc-expr';a.textContent=k;
+        const b=document.createElement('td');b.className='calc-val';b.textContent=v;
+        tr.appendChild(a);tr.appendChild(b);t.appendChild(tr);};
+      const fmt=n=>Number.isFinite(n)?(Math.round(n*1e6)/1e6).toString():'—';
+      if(data&&data.length){
+        const sorted=[...data].sort((a,b)=>a-b);
+        row('n',data.length); row('sum',fmt(math.sum(data))); row('mean',fmt(math.mean(data)));
+        row('median',fmt(math.median(data)));
+        row('std dev (sample)',fmt(data.length>1?math.std(data):NaN));
+        row('variance',fmt(data.length>1?math.variance(data):NaN));
+        row('min / max',fmt(sorted[0])+' / '+fmt(sorted[sorted.length-1]));
+        const q=p=>{const i=(sorted.length-1)*p,lo=Math.floor(i),hi=Math.ceil(i);
+                    return sorted[lo]+(sorted[hi]-sorted[lo])*(i-lo);};
+        row('Q1 / Q3',fmt(q(0.25))+' / '+fmt(q(0.75)));
+      }
+      if(xs&&ys&&xs.length===ys.length&&xs.length>1){
+        const n=xs.length,mx=math.mean(xs),my=math.mean(ys);
+        let sxy=0,sxx=0,syy=0;
+        for(let i=0;i<n;i++){sxy+=(xs[i]-mx)*(ys[i]-my);sxx+=(xs[i]-mx)**2;syy+=(ys[i]-my)**2;}
+        const slope=sxy/sxx, inter=my-slope*mx, r=sxy/Math.sqrt(sxx*syy);
+        row('regression',`y = ${fmt(slope)}x ${inter>=0?'+':'−'} ${fmt(Math.abs(inter))}`);
+        row('r / r²',fmt(r)+' / '+fmt(r*r));
+      }
+      out.appendChild(t);
+    }},
+  truth:{
+    label:'⊤ Truth table',
+    load:()=>Promise.resolve(),
+    async draw(out,src){
+      const expr=src.split('\n').map(s=>s.trim()).filter(Boolean)[0]||'';
+      if(!expr)throw new Error('no expression');
+      const vars=[...new Set((expr.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g)||[])
+        .filter(v=>!['and','or','not','xor','true','false','implies'].includes(v.toLowerCase())))];
+      if(!vars.length)throw new Error('no variables found');
+      if(vars.length>10)throw new Error(vars.length+' variables is too many (max 10)');
+      const t=document.createElement('table'); t.className='calc-table truth-table';
+      const hd=document.createElement('tr');
+      vars.concat([expr]).forEach(h=>{const th=document.createElement('th');th.textContent=h;hd.appendChild(th);});
+      t.appendChild(hd);
+      for(let i=0;i<(1<<vars.length);i++){
+        const scope={},tr=document.createElement('tr');
+        vars.forEach((v,j)=>{ scope[v]=!!(i&(1<<(vars.length-1-j)));
+          const td=document.createElement('td'); td.textContent=scope[v]?'T':'F'; tr.appendChild(td); });
+        const td=document.createElement('td');
+        try{ const r=math.evaluate(expr,scope); td.textContent=r?'T':'F'; td.className=r?'tt-true':'tt-false'; }
+        catch(e){ td.textContent='✕'; td.className='calc-bad'; }
+        tr.appendChild(td); t.appendChild(tr);
+      }
+      out.appendChild(t);
+    }},
+  table:{
+    label:'▦ Table',
+    load:()=>Promise.resolve(),
+    async draw(out,src){
+      const spec=JSON.parse(src);
+      const cols=spec.columns||[], rows=(spec.rows||[]).map(r=>Array.isArray(r)?r:[r]);
+      if(!cols.length)throw new Error('no "columns"');
+      const totalOf=new Set((spec.total||[]).map(String));
+      const wrap=document.createElement('div'); wrap.className='dtable-wrap';
+      const bar=document.createElement('div'); bar.className='dtable-bar';
+      const flt=document.createElement('input'); flt.type='text'; flt.placeholder='Filter…'; flt.className='dtable-filter';
+      const csv=document.createElement('button'); csv.className='svg-act-btn'; csv.textContent='⬇ CSV';
+      const cnt=document.createElement('span'); cnt.className='dtable-count';
+      bar.appendChild(flt); bar.appendChild(cnt); bar.appendChild(csv);
+      const t=document.createElement('table'); t.className='dtable';
+      const thead=document.createElement('thead'), hr=document.createElement('tr');
+      let sortCol=-1, sortAsc=true;
+      cols.forEach((c,i)=>{ const th=document.createElement('th'); th.textContent=c;
+        th.title='Click to sort'; th.onclick=()=>{ sortAsc = sortCol===i ? !sortAsc : true; sortCol=i; render(); };
+        hr.appendChild(th); });
+      thead.appendChild(hr); t.appendChild(thead);
+      const tb=document.createElement('tbody'); t.appendChild(tb);
+      const tf=document.createElement('tfoot'); t.appendChild(tf);
+      const num=v=>{ const n=parseFloat(String(v).replace(/[^0-9.eE+-]/g,'')); return isFinite(n)?n:null; };
+      function view(){
+        const q=flt.value.trim().toLowerCase();
+        let r=q? rows.filter(row=>row.some(c=>String(c).toLowerCase().includes(q))) : rows.slice();
+        if(sortCol>=0)r.sort((a,b)=>{ const x=num(a[sortCol]),y=num(b[sortCol]);
+          const c=(x!==null&&y!==null)?x-y:String(a[sortCol]).localeCompare(String(b[sortCol]));
+          return sortAsc?c:-c; });
+        return r;
+      }
+      function render(){
+        const r=view(); tb.innerHTML=''; tf.innerHTML='';
+        r.forEach(row=>{ const tr=document.createElement('tr');
+          cols.forEach((_,i)=>{ const td=document.createElement('td');
+            td.textContent=row[i]===undefined?'':String(row[i]);
+            if(num(row[i])!==null)td.className='dt-num'; tr.appendChild(td); });
+          tb.appendChild(tr); });
+        cols.forEach((c,i)=>{ if(!hr.children[i])return;
+          hr.children[i].textContent=c+(sortCol===i?(sortAsc?' ▲':' ▼'):''); });
+        if(totalOf.size){
+          const tr=document.createElement('tr');
+          cols.forEach((c,i)=>{ const td=document.createElement('td');
+            if(i===0)td.textContent='Total';
+            else if(totalOf.has(String(c))){
+              // Totals are COMPUTED here, never taken from the model's arithmetic.
+              const sum=r.reduce((a,row)=>{const n=num(row[i]);return n===null?a:a+n;},0);
+              td.textContent=(Math.round(sum*1e6)/1e6).toString(); td.className='dt-num';
+            }
+            tr.appendChild(td); });
+          tf.appendChild(tr);
+        }
+        cnt.textContent=r.length===rows.length?`${rows.length} rows`:`${r.length} of ${rows.length}`;
+      }
+      flt.oninput=render;
+      csv.onclick=()=>{ const esc=v=>/[",\n]/.test(String(v))?'"'+String(v).replace(/"/g,'""')+'"':String(v);
+        const body=[cols.map(esc).join(',')].concat(view().map(r=>cols.map((_,i)=>esc(r[i]===undefined?'':r[i])).join(','))).join('\n');
+        const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([body],{type:'text/csv'}));
+        a.download='table.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); };
+      wrap.appendChild(bar); wrap.appendChild(t); out.appendChild(wrap); render();
+    }},
+  diff:{
+    label:'± Diff',
+    load:()=>Promise.resolve(),
+    async draw(out,src){
+      const m=src.split(/^---\s*after\s*$/mi);
+      if(m.length<2)throw new Error('expected  --- before  …  --- after  …');
+      const A=m[0].replace(/^---\s*before\s*$/mi,'').replace(/^\n+|\n+$/g,'').split('\n');
+      const B=m[1].replace(/^\n+|\n+$/g,'').split('\n');
+      // Longest common subsequence — a real diff, not the model's guess at one.
+      const n=A.length,mm=B.length;
+      if(n*mm>400000)throw new Error('inputs too large to diff in the browser');
+      const dp=Array.from({length:n+1},()=>new Uint32Array(mm+1));
+      for(let i=n-1;i>=0;i--)for(let j=mm-1;j>=0;j--)
+        dp[i][j]=A[i]===B[j]?dp[i+1][j+1]+1:Math.max(dp[i+1][j],dp[i][j+1]);
+      const rows=[]; let i=0,j=0;
+      while(i<n&&j<mm){ if(A[i]===B[j]){rows.push([' ',A[i]]);i++;j++;}
+        else if(dp[i+1][j]>=dp[i][j+1]){rows.push(['-',A[i]]);i++;}
+        else {rows.push(['+',B[j]]);j++;} }
+      while(i<n)rows.push(['-',A[i++]]);
+      while(j<mm)rows.push(['+',B[j++]]);
+      const add=rows.filter(r=>r[0]==='+').length, del=rows.filter(r=>r[0]==='-').length;
+      const box=document.createElement('div'); box.className='diff-box';
+      const hd=document.createElement('div'); hd.className='diff-head';
+      hd.textContent=`+${add} −${del}`; box.appendChild(hd);
+      const pre=document.createElement('pre'); pre.className='diff-body';
+      rows.forEach(([k,line])=>{ const d=document.createElement('div');
+        d.className='dl '+(k==='+'?'dl-add':k==='-'?'dl-del':'dl-ctx');
+        d.textContent=k+' '+line; pre.appendChild(d); });
+      box.appendChild(pre); out.appendChild(box);
+    }},
+  regex:{
+    label:'⌗ Regex',
+    load:()=>Promise.resolve(),
+    async draw(out,src){
+      let pat=null,flags='g',tests=[];
+      src.split('\n').forEach(l=>{
+        let m=l.match(/^\s*pattern\s*:\s*(.+)$/i);
+        if(m){ let p=m[1].trim(); const d=p.match(/^\/(.*)\/([gimsuy]*)$/);
+               if(d){p=d[1];flags=d[2].includes('g')?d[2]:d[2]+'g';} pat=p; return; }
+        m=l.match(/^\s*flags\s*:\s*(.+)$/i); if(m){ flags=m[1].trim(); if(!flags.includes('g'))flags+='g'; return; }
+        m=l.match(/^\s*test\s*:\s*(.*)$/i); if(m){ tests.push(m[1]); return; }
+      });
+      if(!pat)throw new Error('expected  pattern: …  and one or more  test: …');
+      let re; try{ re=new RegExp(pat,flags); }catch(e){ throw new Error('invalid pattern — '+e.message); }
+      const box=document.createElement('div'); box.className='rx-box';
+      const hd=document.createElement('div'); hd.className='rx-head'; hd.textContent='/'+pat+'/'+flags;
+      box.appendChild(hd);
+      if(!tests.length)tests=[''];
+      tests.forEach(t=>{
+        const row=document.createElement('div'); row.className='rx-row';
+        re.lastIndex=0;
+        const ms=[...t.matchAll(re)];
+        const line=document.createElement('div'); line.className='rx-subject';
+        let last=0;
+        ms.forEach(mt=>{ if(mt.index>last)line.appendChild(document.createTextNode(t.slice(last,mt.index)));
+          const sp=document.createElement('mark'); sp.textContent=mt[0]||'∅'; line.appendChild(sp);
+          last=mt.index+(mt[0]?mt[0].length:0); });
+        line.appendChild(document.createTextNode(t.slice(last)));
+        const tag=document.createElement('span');
+        tag.className='rx-tag '+(ms.length?'rx-hit':'rx-miss');
+        tag.textContent=ms.length? `${ms.length} match${ms.length>1?'es':''}` : 'no match';
+        row.appendChild(tag); row.appendChild(line);
+        if(ms.length&&ms[0].length>1){
+          const g=document.createElement('div'); g.className='rx-groups';
+          g.textContent='groups: '+ms[0].slice(1).map((x,i)=>`$${i+1}=${x===undefined?'∅':x}`).join('  ');
+          row.appendChild(g);
+        }
+        box.appendChild(row);
+      });
+      out.appendChild(box);
     }},
   molecule:{
     label:'⬢ Molecule', fixed:'320px',
@@ -4181,20 +4511,66 @@ function renderPlotBlocks(el){
     const spec=(wrap.querySelector('.plot-src-pre code')?.textContent||'').trim();
     if(!spec) return;
     out.dataset.rendered='1';
-    try{ out.innerHTML=_buildFunctionPlot(spec); }
+    try{
+      const params=_parsePlotParams(spec);
+      out.innerHTML=_buildFunctionPlot(spec, params.values);
+      // Declared parameters become live sliders. Dragging one re-evaluates the
+      // formula in the browser — no WebSocket round trip, no tokens, no wait.
+      if(params.list.length)_attachPlotParams(wrap,out,spec,params);
+    }
     catch(err){ out.dataset.rendered=''; out.textContent='Plot error: '+((err&&err.message)||err); }
   });
+}
+
+// `param: a = 1 .. 5 (2)`  →  a slider bound to `a` in the plotted expression.
+function _parsePlotParams(spec){
+  const list=[], values={};
+  spec.split('\n').forEach(line=>{
+    const m=line.trim().match(/^param\s*:\s*([A-Za-z]\w*)\s*=\s*(-?[\d.]+)\s*(?:\.\.|to)\s*(-?[\d.]+)\s*(?:\(\s*(-?[\d.]+)\s*\))?$/i);
+    if(!m)return;
+    const [,name,lo,hi,init]=m;
+    const min=parseFloat(lo), max=parseFloat(hi);
+    const val=init!==undefined?parseFloat(init):(min+max)/2;
+    list.push({name,min,max,val}); values[name]=val;
+  });
+  return {list,values};
+}
+
+function _attachPlotParams(wrap,out,spec,params){
+  const bar=document.createElement('div'); bar.className='plot-params';
+  let raf=0;
+  params.list.forEach(p=>{
+    const box=document.createElement('div'); box.className='pp';
+    const lab=document.createElement('label'); lab.textContent=p.name;
+    const inp=document.createElement('input'); inp.type='range';
+    const step=(p.max-p.min)/200;
+    inp.min=p.min; inp.max=p.max; inp.step=step>0?step:0.01; inp.value=p.val;
+    const val=document.createElement('output'); val.textContent=(+p.val).toFixed(2);
+    inp.oninput=()=>{
+      params.values[p.name]=parseFloat(inp.value);
+      val.textContent=parseFloat(inp.value).toFixed(2);
+      // Throttle with a timer rather than requestAnimationFrame: rAF is suspended
+      // when the page is not actively painting (background tab, embedded preview),
+      // which would leave the slider updating its label but never the curve.
+      if(raf)return;
+      raf=setTimeout(()=>{ raf=0;
+        try{ out.innerHTML=_buildFunctionPlot(spec, params.values); }catch(e){}
+      },16);
+    };
+    box.appendChild(lab); box.appendChild(inp); box.appendChild(val); bar.appendChild(box);
+  });
+  out.parentNode.insertBefore(bar, out.nextSibling);
 }
 function _plotNum(s){ try{ return Number(math.evaluate(String(s))); }catch(e){ return NaN; } }
 function _plotTicks(min,max,n){ const a=[]; for(let i=0;i<=n;i++) a.push(min+(max-min)*i/n); return a; }
 function _plotFmt(v){ if(Math.abs(v)<1e-9) return '0'; const a=Math.abs(v); if(a>=10000||a<0.001) return (+v.toExponential(1)).toString(); return String(Math.round(v*1000)/1000); }
 function _plotEsc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
-function _buildFunctionPlot(spec){
+function _buildFunctionPlot(spec, params){
   const W=640,H=360,L=52,Rr=624,T=22,Bb=316;
   const colors=['#2563eb','#dc2626','#059669','#d97706','#7c3aed'];
   let xmin=NaN,xmax=NaN; const fns=[];
   spec.split(/\n+/).forEach(line=>{
-    line=line.trim(); if(!line||line[0]==='#') return;
+    line=line.trim(); if(!line||line[0]==='#'||/^param\s*:/i.test(line)) return;
     // domain: "x = a..b", "x from a to b", "domain: a..b", or a bare "a..b"
     let m=line.match(/^(?:x\s*=|x\s+(?:from|in)|domain)\s*:?\s*\[?\s*(.+?)\s*(?:\.\.|\bto\b|,|;)\s*(.+?)\s*\]?$/i)
         || line.match(/^\s*(-?[\w.+\-*/^()\s]+?)\s*\.\.\s*(-?[\w.+\-*/^()\s]+?)\s*$/);
@@ -4211,7 +4587,8 @@ function _buildFunctionPlot(spec){
   const series=fns.map((f,i)=>{
     let code; try{ code=math.compile(f.expr); }catch(e){ throw new Error('cannot parse "'+f.expr+'"'); }
     const pts=[];
-    for(let k=0;k<=N;k++){ const x=xmin+(xmax-xmin)*k/N; let y; try{ y=code.evaluate({x}); }catch(e){ y=NaN; }
+    for(let k=0;k<=N;k++){ const x=xmin+(xmax-xmin)*k/N; let y;
+      try{ y=code.evaluate(Object.assign({},params||{},{x})); }catch(e){ y=NaN; }
       y=(typeof y==='number'&&isFinite(y))?y:NaN; pts.push({x,y}); }
     return {label:f.label||('f'+(i+1)), color:colors[i%colors.length], pts};
   });

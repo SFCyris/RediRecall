@@ -43,7 +43,7 @@ The model writes a short, declarative block — the browser does the drawing. Th
 
 | Fence | Renders | The model writes |
 |---|---|---|
-| ` ```plot ` | Function graph (exact) | `y = x^2 + 3x - 2` |
+| ` ```plot ` | Function graph (exact), with optional live parameter **sliders** | `y = a*sin(b*x)` + `param: a = 0.5 .. 3 (1)` |
 | ` ```chart ` | Bar / line / pie / scatter / radar chart | Chart.js JSON |
 | ` ```mermaid ` | Flowchart, sequence, class, state, ER, Gantt | mermaid syntax |
 | ` ```dot ` | Auto-laid-out graph (dependencies, call graphs) | Graphviz DOT |
@@ -52,9 +52,18 @@ The model writes a short, declarative block — the browser does the drawing. Th
 | ` ```plot3d ` | 3-D surface / scatter | Plotly JSON |
 | ` ```molecule ` | Chemical structure | a SMILES string |
 | ` ```abc ` | Sheet music | ABC notation |
+| ` ```calc ` | Arithmetic, unit conversion, dates, matrices — **computed, not guessed** | `5 km/h to m/s` |
+| ` ```solve ` | Symbolic algebra — derivative, simplify, roots | `derivative: x^3 + 2x` |
+| ` ```stats ` | Descriptive statistics & linear regression | `data: 4, 8, 15, 16, 23` |
+| ` ```table ` | Sortable / filterable table with **computed** totals + CSV export | JSON: `columns`, `rows`, `total` |
+| ` ```diff ` | Real line diff of two texts | `--- before` … `--- after` … |
+| ` ```regex ` | Runs a pattern against samples, highlights matches | `pattern:` + `test:` lines |
+| ` ```truth ` | Truth table for a boolean expression | `(A and B) or not C` |
 | ` ```latex ` / `$…$` | Math formulas | LaTeX |
 | ` ```svg ` | Custom vector graphic | SVG (sanitised) |
 | ` ```<language> ` | Syntax-highlighted code | code |
+
+The bottom group (`calc`, `solve`, `stats`, `table`, `diff`, `regex`, `truth`) is computed in your browser rather than asserted by the model — so unit conversions, column totals and truth tables are exact instead of "usually right". Slider-equipped `plot` blocks re-graph instantly as you drag, with no new request to the model.
 
 <p align="center">
   <img src="screenshots/rendering/mermaid.png" alt="Mermaid flowchart rendered in a chat answer" width="32%">

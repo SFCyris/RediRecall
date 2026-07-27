@@ -156,7 +156,7 @@ Answers are rendered inline: the model writes a short, declarative block and the
 | *(none)* | Markdown | Full GFM: headings, bold, tables, blockquotes, lists | marked |
 | ` ```<language> ` | Code | Ordinary code | highlight.js |
 | ` ```latex ` / ` ```math ` / `$…$` | Math formula | LaTeX | KaTeX |
-| ` ```plot ` | **Function graph** (exact) | `y = x^2 + 3x - 2`, optional `x = -5 .. 5` | math.js |
+| ` ```plot ` | **Function graph** (exact); optional live parameter sliders | `y = a*sin(b*x)`, `x = -5 .. 5`, `param: a = 0.5 .. 3 (1)` | math.js |
 | ` ```chart ` | **Data chart** — bar, line, pie, doughnut, scatter, radar | Chart.js JSON | Chart.js |
 | ` ```mermaid ` | **Diagram** — flowchart, sequence, class, state, ER, Gantt | mermaid syntax | Mermaid |
 | ` ```dot ` | **Auto-laid-out graph** — dependency/call graphs | Graphviz DOT | Viz.js |
@@ -165,12 +165,21 @@ Answers are rendered inline: the model writes a short, declarative block and the
 | ` ```plot3d ` | **3-D surface / scatter** | Plotly JSON | Plotly |
 | ` ```molecule ` | **Chemical structure** | a SMILES string | SmilesDrawer |
 | ` ```abc ` | **Sheet music** | ABC notation | abcjs |
+| ` ```calc ` | **Computed arithmetic** — units, dates, matrices | one expression per line, e.g. `5 km/h to m/s` | math.js |
+| ` ```solve ` | **Symbolic algebra** — derivative, simplify, expand, roots, evaluate | `derivative: x^3 + 2x` | math.js |
+| ` ```stats ` | **Descriptive statistics** + linear regression | `data: 4, 8, 15` (or `x:` / `y:` lines) | math.js |
+| ` ```table ` | **Sortable / filterable table**, computed totals, CSV export | JSON: `columns`, `rows`, optional `total` | native |
+| ` ```diff ` | **Line diff** (LCS) of two texts | `--- before` / lines / `--- after` / lines | native |
+| ` ```regex ` | **Runs a pattern** against samples, highlights matches + groups | `pattern:` / `flags:` / `test:` lines | native |
+| ` ```truth ` | **Truth table** for a boolean expression (≤10 vars) | `(A and B) or not C` | math.js |
 | ` ```svg ` (or `xml` / raw `<svg>`) | Custom vector graphic | SVG markup (sanitised) | native |
 
 Notes:
 
 - Every rendered *figure* (chart, diagram, plot, map, molecule, score, SVG, LaTeX) carries a **Source** toggle and **Copy** button, so the underlying markup is always inspectable; SVG additionally offers **⬇ PNG**. Ordinary Markdown and code blocks are not figures — code blocks get a plain **Copy** button.
 - A raw `<svg>…</svg>` with no code fence is detected and rendered too.
+- **Computed, not asserted:** `calc`, `solve`, `stats`, `truth`, `table`, `diff` and `regex` are evaluated in your browser, not produced by the model. The model states *what* to compute (an expression, a data list, two texts); the browser returns the exact result — so unit conversions, column totals, derivatives and truth tables don't inherit the model's arithmetic mistakes. `calc`/`solve`/`stats`/`truth` use math.js (already loaded); `table`/`diff`/`regex` use no library at all.
+- **Interactive `plot`:** declare a parameter with `param: a = <lo> .. <hi> (<init>)` and the block renders a slider; dragging it re-evaluates the formula and redraws instantly, with no round trip to the model.
 - **Lazy loading:** the heavier renderers — Chart.js, Mermaid, Viz.js, JSXGraph, Leaflet, Plotly, SmilesDrawer and highlight.js — are fetched only the first time a block of that type appears, so they cost nothing at page load. Markdown, sanitising, math and music (marked, DOMPurify, KaTeX, math.js, abcjs) load with the page because they are needed for ordinary answers.
 - **Third-party requests:** all renderer libraries are served from a public CDN (cdnjs, plus jsDelivr for SmilesDrawer), so rendering is not fully offline. In addition, ` ```map ` fetches map tiles from `tile.openstreetmap.org` at view time — the only lane that sends *content-derived* data (the requested coordinates) to a third party. For an air-gapped deployment, vendor the libraries and serve them locally.
 - **Safety:** SVG and diagram output is sanitised (DOMPurify) before insertion, and ` ```geometry ` accepts data only — never function or code strings.
