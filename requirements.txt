@@ -1,0 +1,26 @@
+fastapi==0.111.0
+uvicorn[standard]>=0.29.0
+websockets>=13.0
+httpx>=0.28.1
+redis==7.3.0
+redisvl==0.16.0
+numpy==1.26.4
+sentence-transformers==2.7.0
+PyMuPDF==1.24.3
+trafilatura>=1.12.0
+beautifulsoup4==4.12.3
+Pillow>=10.4
+python-multipart==0.0.9
+aiofiles>=24.1.0
+urllib3>=2.0,<3 
+charset-normalizer>=3.0,<4
+google-genai>=1.0.0
+python-docx>=1.1.0
+openpyxl>=3.1.0
+anthropic>=0.50.0
+openai>=1.30.0
+groq>=0.11.0
+
+# Optional — JS rendering for crawling (SPAs, Docusaurus, VitePress, etc.)
+# pip install crawl4ai && playwright install chromium
+# crawl4ai>=0.4.0

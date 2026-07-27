@@ -1,0 +1,42 @@
+# Keep the build context (and image) lean — exclude everything the container
+# doesn't need at runtime. The bundled frontend (redirecall/index.html) IS needed.
+.git
+.gitignore
+.venv
+venv
+**/__pycache__
+**/*.pyc
+**/*.pyo
+node_modules
+
+# Vendored native Redis — the container uses the redis:8 service instead.
+.redis
+
+# Local runtime state / secrets — must NEVER be baked into the image.
+config.json
+.redirecall.env
+*.env
+!.env.example
+ingestion_logs.json
+feedback.json
+uploads
+exports
+
+# Working notes / backups / reviews — not part of the runtime image.
+internal
+_review
+_backup_pre_restructure_*
+
+# Editor / OS cruft, logs, build artifacts.
+.claude
+.vscode
+.idea
+*.log
+nohup.out
+.DS_Store
+.pytest_cache
+.mypy_cache
+.ruff_cache
+build
+dist
+*.egg-info

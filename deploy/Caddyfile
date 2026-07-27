@@ -1,0 +1,6 @@
+# Replace redirecall.example.com with your domain. Caddy fetches and renews a
+# Let's Encrypt certificate automatically and reverse-proxies to RediRecall on
+# the internal compose network.
+redirecall.example.com {
+	reverse_proxy redirecall:8420
+}

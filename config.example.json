@@ -1,0 +1,105 @@
+{
+  "redis": {
+    "host": "localhost",
+    "port": 6379,
+    "db": 0,
+    "password": "",
+    "ssl": false
+  },
+  "redis_endpoints": [],
+  "ollama": {
+    "host": "http://localhost",
+    "port": 11434,
+    "model": ""
+  },
+  "claude": {
+    "api_key": "",
+    "model": "claude-sonnet-4-6",
+    "base_url": "https://api.anthropic.com"
+  },
+  "openai": {
+    "api_key": "",
+    "model": "gpt-4o",
+    "base_url": "https://api.openai.com"
+  },
+  "qwen": {
+    "api_key": "",
+    "model": "qwen-plus",
+    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  },
+  "groq": {
+    "api_key": "",
+    "model": "llama-3.3-70b-versatile",
+    "base_url": "https://api.groq.com/openai"
+  },
+  "gemini": {
+    "api_key": "",
+    "model": "gemini-3-flash-preview"
+  },
+  "provider": "ollama",
+  "embedding": {
+    "model": "all-MiniLM-L6-v2",
+    "max_image_dim": 1024
+  },
+  "rag": {
+    "chunk_size": 512,
+    "chunk_overlap": 64,
+    "top_k": 5,
+    "similarity_threshold": 0.75,
+    "hybrid_search": true
+  },
+  "cache": {
+    "enabled": true,
+    "similarity_threshold": 0.92,
+    "ttl": 3600
+  },
+  "ui": {
+    "theme": "auto",
+    "show_rag_matches": false
+  },
+  "web_sources": [],
+  "base_instruction": "",
+  "prompt_templates": [
+    {
+      "name": "Default",
+      "system": "You are a helpful assistant."
+    },
+    {
+      "name": "Redis Expert",
+      "system": "You are a Redis expert. Answer concisely with examples."
+    },
+    {
+      "name": "ELI5",
+      "system": "Explain everything like I'm 5 years old, using simple analogies."
+    }
+  ],
+  "security": {
+    "password": "",
+    "enabled": false
+  },
+  "active_rag": "default",
+  "sessions": {
+    "persist": true,
+    "ttl": 86400
+  },
+  "reranker": {
+    "enabled": false,
+    "model": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "top_n": 5
+  },
+  "hyde": {
+    "enabled": false
+  },
+  "recrawl": {
+    "enabled": false,
+    "interval_minutes": 60
+  },
+  "scheduled_sources": [],
+  "crawl": {
+    "concurrency": 10,
+    "js_render": false,
+    "js_concurrency": 3,
+    "smart_mode": true,
+    "min_words": 100
+  }
+}

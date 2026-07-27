@@ -1,0 +1,61 @@
+# RediRecall — simplest self-host. `docker compose up -d`, then open :8420.
+#
+#   1. docker compose up -d
+#   2. Open http://<host>:8420
+#   3. Settings → Providers: add an LLM (or point Ollama at your host), then
+#      Web Sources / upload files to build a knowledge base.
+#
+# There is no built-in auth, so only publish the port on a trusted network.
+# For automatic HTTPS over the internet, see deploy/docker-compose.https.yml.
+
+services:
+  redirecall:
+    # Prebuilt multi-arch image (linux/amd64 + linux/arm64) from GitHub's registry.
+    image: ghcr.io/sfcyris/redirecall:latest
+    # ── Developers: build from source instead of pulling — comment `image:` above
+    #    and uncomment `build:` below, then run `docker compose up -d --build`. ──
+    # build: .
+    container_name: redirecall
+    ports:
+      - "8420:8420"
+    volumes:
+      - redirecall-data:/data        # config, uploads, logs, history (back this up)
+    environment:
+      - REDIRECALL_DATA_DIR=/data
+      - REDIRECALL_HOST=0.0.0.0
+      - REDIRECALL_PORT=8420
+      - REDIRECALL_REDIS_HOST=redis   # the redis service below
+      - REDIRECALL_REDIS_PORT=6379
+      # Optional provider keys (else set them in Settings):
+      # - ANTHROPIC_API_KEY=
+      # - OPENAI_API_KEY=
+      # - GEMINI_API_KEY=
+      # - GROQ_API_KEY=
+      # - TZ=Europe/Berlin
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # Redis 8 "Open Source" bundles the Query Engine (vector/text search) that
+  # RediRecall needs — no module install required. Verify on first start:
+  # `docker compose exec redis redis-cli FT._LIST` should not error, and the app's
+  # Settings → Status (or GET /api/status/redis) should show search available.
+  # If your registry's redis:8 is a core-only build, swap to a modules image:
+  #   image: redis/redis-stack-server:latest
+  redis:
+    image: redis:8
+    container_name: redirecall-redis
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redirecall-redis:/data       # AOF/RDB persistence for the vector index
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  redirecall-data:
+  redirecall-redis:

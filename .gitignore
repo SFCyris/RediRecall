@@ -1,0 +1,79 @@
+# ─── macOS metadata ────────────────────────────────────────────────────────
+.DS_Store
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+Icon?
+
+# ─── Python bytecode ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ─── Python packaging / build outputs ──────────────────────────────────────
+*.egg-info/
+*.egg
+build/
+dist/
+*.whl
+*.tar.gz
+pip-log.txt
+pip-wheel-metadata/
+.eggs/
+
+# ─── Virtual environments ──────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ─── Vendored, self-contained Redis 8 (binaries + modules) — like .venv, ────
+# platform-specific and rebuildable by install.sh; never committed.
+.redis/
+
+# ─── Test / lint / type-check caches ───────────────────────────────────────
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ─── Editors / IDEs ────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*.bak
+*.tmp
+*~
+
+# ─── Agent / working-notes (never part of the public source tree) ──────────
+.claude/
+internal/
+Internal/
+_review/
+_backup_pre_restructure_*/
+
+# ─── Secrets & local runtime state (MUST never be committed) ───────────────
+# The real config lives in the platform app-data dir, not here; only the
+# empty template (config.example.json) is tracked.
+config.json
+.redirecall.env
+*.env
+!.env.example
+
+# ─── Local runtime data (moved to the app-data dir; never tracked) ─────────
+ingestion_logs.json
+feedback.json
+uploads/
+exports/
+data/
+
+# ─── Logs ──────────────────────────────────────────────────────────────────
+*.log
+nohup.out

@@ -1,0 +1,64 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "redirecall"
+version = "1.0.0"
+description = "Self-hosted retrieval-augmented chat over your own documents and sites, backed by Redis vector search"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0-or-later" }
+authors = [{ name = "S.F. Cyris" }]
+readme = "readme.md"
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Text Processing :: Indexing",
+]
+dependencies = [
+    "fastapi==0.111.0",
+    "uvicorn[standard]>=0.29.0",
+    "websockets>=13.0",
+    "httpx>=0.28.1",
+    "redis==7.3.0",
+    "redisvl==0.16.0",
+    "numpy==1.26.4",
+    "sentence-transformers==2.7.0",
+    "PyMuPDF==1.24.3",
+    "trafilatura>=1.12.0",
+    "beautifulsoup4==4.12.3",
+    "Pillow>=10.4",
+    "python-multipart==0.0.9",
+    "aiofiles>=24.1.0",
+    "urllib3>=2.0,<3",
+    "charset-normalizer>=3.0,<4",
+    "google-genai>=1.0.0",
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+    "anthropic>=0.50.0",
+    "openai>=1.30.0",
+    "groq>=0.11.0",
+]
+
+[project.optional-dependencies]
+# JS rendering for crawling SPAs (Docusaurus, VitePress, …).
+crawl = ["crawl4ai>=0.4.0"]
+dev   = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+redirecall = "redirecall.main:cli"
+
+[project.urls]
+Homepage = "https://github.com/SFCyris/RediRecall"
+Source   = "https://github.com/SFCyris/RediRecall"
+Issues   = "https://github.com/SFCyris/RediRecall/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["redirecall*"]
+
+[tool.setuptools.package-data]
+"redirecall" = ["index.html"]
