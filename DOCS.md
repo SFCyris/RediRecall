@@ -164,6 +164,7 @@ Answers are rendered inline: the model writes a short, declarative block and the
 | ` ```map ` | **Map** with markers / GeoJSON | JSON: `center`, `zoom`, `markers` | Leaflet + OpenStreetMap |
 | ` ```plot3d ` | **3-D surface / scatter** | Plotly JSON | Plotly |
 | ` ```molecule ` | **Chemical structure** | a SMILES string | SmilesDrawer |
+| ` ```molecule3d ` | **3D structure**, rotatable/zoomable | XYZ format: atom count, comment line, then `Element x y z` per atom | 3Dmol.js |
 | ` ```abc ` | **Sheet music** | ABC notation | abcjs |
 | ` ```calc ` | **Computed arithmetic** — units, dates, matrices | one expression per line, e.g. `5 km/h to m/s` | math.js |
 | ` ```solve ` | **Symbolic algebra** — derivative, simplify, expand, roots, evaluate | `derivative: x^3 + 2x` | math.js |
@@ -180,7 +181,10 @@ Notes:
 - A raw `<svg>…</svg>` with no code fence is detected and rendered too.
 - **Computed, not asserted:** `calc`, `solve`, `stats`, `truth`, `table`, `diff` and `regex` are evaluated in your browser, not produced by the model. The model states *what* to compute (an expression, a data list, two texts); the browser returns the exact result — so unit conversions, column totals, derivatives and truth tables don't inherit the model's arithmetic mistakes. `calc`/`solve`/`stats`/`truth` use math.js (already loaded); `table`/`diff`/`regex` use no library at all.
 - **Interactive `plot`:** declare a parameter with `param: a = <lo> .. <hi> (<init>)` and the block renders a slider; dragging it re-evaluates the formula and redraws instantly, with no round trip to the model.
-- **Lazy loading:** the heavier renderers — Chart.js, Mermaid, Viz.js, JSXGraph, Leaflet, Plotly, SmilesDrawer and highlight.js — are fetched only the first time a block of that type appears, so they cost nothing at page load. Markdown, sanitising, math and music (marked, DOMPurify, KaTeX, math.js, abcjs) load with the page because they are needed for ordinary answers.
+- **Lazy loading:** the heavier renderers — Chart.js, Mermaid, Viz.js, JSXGraph, Leaflet, Plotly, SmilesDrawer, 3Dmol.js and highlight.js — are fetched only the first time a block of that type appears, so they cost nothing at page load. Markdown, sanitising, math and music (marked, DOMPurify, KaTeX, math.js, abcjs) load with the page because they are needed for ordinary answers.
+- **Maximize and save as image:** every visual card (chart, diagram, plot, map, geometry, molecule, 3D molecule) has an ⛶ **Maximize** button that opens it full-viewport, and most also have a ⬇ **PNG** button. Not offered on `map` (no rasteriser wired up) or the plain-data lanes (`table`, `diff`, `regex`, `calc`, `solve`, `stats`, `truth`) — those aren't rasterised images.
+
+  <p align="center"><img src="screenshots/rendering/maximize.png" alt="A rendered figure opened full-viewport with the Maximize button" width="70%"></p>
 - **Third-party requests:** all renderer libraries are served from a public CDN (cdnjs, plus jsDelivr for SmilesDrawer), so rendering is not fully offline. In addition, ` ```map ` fetches map tiles from `tile.openstreetmap.org` at view time — the only lane that sends *content-derived* data (the requested coordinates) to a third party. For an air-gapped deployment, vendor the libraries and serve them locally.
 - **Safety:** SVG and diagram output is sanitised (DOMPurify) before insertion, and ` ```geometry ` accepts data only — never function or code strings.
 
@@ -191,7 +195,7 @@ Notes:
 | ![Mermaid diagram](screenshots/rendering/mermaid.png) | ![Data chart](screenshots/rendering/chart.png) |
 | ![Graphviz graph](screenshots/rendering/dot.png) | ![Geometric construction](screenshots/rendering/geometry.png) |
 | ![Map](screenshots/rendering/map.png) | ![3D surface plot](screenshots/rendering/plot3d.png) |
-| ![Molecule](screenshots/rendering/molecule.png) | |
+| ![Molecule](screenshots/rendering/molecule.png) | ![3D molecule](screenshots/rendering/molecule3d.png) |
 
 ### RAG context inspector
 

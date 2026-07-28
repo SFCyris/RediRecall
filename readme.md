@@ -51,6 +51,7 @@ The model writes a short, declarative block — the browser does the drawing. Th
 | ` ```map ` | Map with markers / GeoJSON | `center`, `zoom`, `markers` |
 | ` ```plot3d ` | 3-D surface / scatter | Plotly JSON |
 | ` ```molecule ` | Chemical structure | a SMILES string |
+| ` ```molecule3d ` | 3D structure, rotatable/zoomable | XYZ format (atoms + coordinates) |
 | ` ```abc ` | Sheet music | ABC notation |
 | ` ```calc ` | Arithmetic, unit conversion, dates, matrices — **computed, not guessed** | `5 km/h to m/s` |
 | ` ```solve ` | Symbolic algebra — derivative, simplify, roots | `derivative: x^3 + 2x` |
@@ -76,7 +77,16 @@ The bottom group (`calc`, `solve`, `stats`, `table`, `diff`, `regex`, `truth`) i
   <img src="screenshots/rendering/molecule.png" alt="Chemical structure rendered in a chat answer" width="32%">
 </p>
 
-Every rendered figure gets a **Source** toggle and **Copy** button. The heavier renderers (Mermaid, Chart.js, Plotly, Leaflet, JSXGraph, Viz.js, SmilesDrawer, highlight.js) are **lazy-loaded on first use**, so they cost nothing at page load. All renderer libraries come from a public CDN; ` ```map ` additionally requests OpenStreetMap tiles for the coordinates shown. See [DOCS.md](DOCS.md#rich-content-rendering) for the full reference.
+Every rendered figure gets a **Source** toggle, **Copy** button, and an **⛶ Maximize** button that opens it full-viewport; most also have a **⬇ PNG** export.
+
+<p align="center">
+  <img src="screenshots/rendering/molecule3d.png" alt="Rotatable 3D molecule structure rendered in a chat answer" width="49%">
+  <img src="screenshots/rendering/maximize.png" alt="A rendered figure opened full-viewport with the Maximize button" width="49%">
+</p>
+
+<p align="center"><sub>Left: the ` ```molecule3d ` lane (3Dmol.js) — rotatable and zoomable. &nbsp;&bull;&nbsp; Right: any card opened full-viewport with the ⛶ Maximize button.</sub></p>
+
+The heavier renderers (Mermaid, Chart.js, Plotly, Leaflet, JSXGraph, Viz.js, SmilesDrawer, 3Dmol.js, highlight.js) are **lazy-loaded on first use**, so they cost nothing at page load. All renderer libraries come from a public CDN; ` ```map ` additionally requests OpenStreetMap tiles for the coordinates shown. See [DOCS.md](DOCS.md#rich-content-rendering) for the full reference.
 
 ---
 

@@ -68,9 +68,6 @@ body{background:radial-gradient(ellipse 120% 80% at 20% 0%,rgba(99,102,241,0.07)
 #sidebar-header{padding:20px 16px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
 .logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px}
 .logo-icon{width:32px;height:32px;background:linear-gradient(135deg,var(--accent),var(--blue));border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:16px;box-shadow:0 4px 12px rgba(124,111,247,.4)}
-.sidebar-status{display:flex;flex-wrap:wrap;gap:6px;row-gap:6px;margin-top:12px}
-.status-dot{display:flex;align-items:center;gap:4px;font-size:11px;color:var(--text2);padding:3px 8px;background:var(--glass2);border:1px solid var(--border);border-radius:20px;cursor:pointer;transition:var(--transition)}
-.status-dot:hover{border-color:var(--border2)}
 .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0;background:var(--text2)}
 .dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
 .dot.err{background:var(--red);box-shadow:0 0 6px var(--red)}
@@ -384,6 +381,33 @@ table.data-table tr:last-child td{border-bottom:none}
 #img-lightbox{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:none;align-items:center;justify-content:center;cursor:zoom-out}
 #img-lightbox.open{display:flex}
 #img-lightbox img{max-width:90vw;max-height:90vh;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,.6)}
+/* ── viz maximize overlay ── */
+/* The card's own output element is MOVED here (not cloned), so a live Chart.js /
+   Plotly / Leaflet / JSXGraph instance keeps its listeners and stays fully
+   interactive — reparenting within the same document doesn't tear anything down,
+   unlike moving it into a separate window would. */
+#viz-max-overlay{position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;display:none;align-items:center;justify-content:center;padding:4vh 3vw}
+#viz-max-overlay.open{display:flex}
+.viz-max-panel{width:94vw;height:92vh;max-width:1600px;background:var(--glass2);border-radius:var(--r2);box-shadow:0 24px 60px rgba(0,0,0,.35);display:flex;flex-direction:column;overflow:hidden;resize:both;min-width:340px;min-height:240px}
+[data-theme="dark"] .viz-max-panel{background:rgba(18,18,26,0.97)}
+.viz-max-header{display:flex;align-items:center;gap:8px;padding:8px 14px;background:rgba(0,0,0,.03);border-bottom:1px solid var(--border);flex-shrink:0}
+[data-theme="dark"] .viz-max-header{background:rgba(255,255,255,.04)}
+.viz-max-label{font-size:12px;font-weight:700;color:var(--accent3);flex:1}
+.viz-max-content{flex:1;overflow:auto;background:#fff;display:flex}
+[data-theme="dark"] .viz-max-content{background:rgba(255,255,255,.07)}
+.viz-max-content>*{width:100%;height:100%}
+/* A small diagram's own <svg> has max-width:100% (caps overflow) but no width:100%
+   (never stretches up) — so a tiny mermaid/dot/plot/molecule SVG just sat small and
+   centered in the big panel. Force it to fill; preserveAspectRatio (SVG's own default,
+   xMidYMid meet) keeps it undistorted. */
+/* #viz-max-overlay (ID) rather than .viz-max-content (class): several lanes have
+   their own higher-specificity rule for their SVG (e.g. mermaid/dot's
+   "max-width:none" for wide-diagram scrolling), which a class-only selector here
+   would lose to. An ID selector reliably outranks any number of classes. */
+#viz-max-overlay svg{width:100%;height:100%;max-width:none}
+/* placeholder left in the original card slot while its content is maximized elsewhere */
+.viz-restore-slot{display:flex;align-items:center;justify-content:center;gap:8px;padding:28px 14px;color:var(--text2);font-size:12px;border:1px dashed var(--border2);border-radius:var(--r3);margin:10px;cursor:pointer}
+.viz-restore-slot:hover{background:var(--glass2)}
 /* ── RAG used indicator ── */
 .rag-used-badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;padding:2px 9px;border-radius:10px;font-weight:600;background:rgba(124,111,247,.13);border:1px solid rgba(124,111,247,.28);color:var(--accent3);white-space:nowrap;cursor:pointer}
 .rag-used-badge:hover{background:rgba(124,111,247,.22)}
@@ -597,16 +621,6 @@ table.data-table tr:last-child td{border-bottom:none}
 <aside id="sidebar">
   <div id="sidebar-header">
     <div class="logo"><div class="logo-icon">⚡</div><span>RediRecall</span></div>
-    <div class="sidebar-status">
-      <div class="status-dot" onclick="openSettings('status')"><div class="dot checking" id="redis-dot"></div><span id="redis-label">Redis</span></div>
-      <div class="status-dot" onclick="openSettings('status')"><div class="dot checking" id="ollama-dot"></div><span id="ollama-label">Ollama</span></div>
-      <div class="status-dot" onclick="openSettings('claude')"><div class="dot" id="claude-dot" style="background:var(--text2)"></div><span id="claude-label">Claude</span></div>
-      <div class="status-dot" onclick="openSettings('openai')"><div class="dot" id="openai-dot" style="background:var(--text2)"></div><span id="openai-label">OpenAI</span></div>
-      <div class="status-dot" onclick="openSettings('qwen')"><div class="dot" id="qwen-dot" style="background:var(--text2)"></div><span id="qwen-label">Qwen</span></div>
-      <div class="status-dot" onclick="openSettings('mistral')"><div class="dot" id="mistral-dot" style="background:var(--text2)"></div><span id="mistral-label">Mistral</span></div>
-      <div class="status-dot" onclick="openSettings('groq')"><div class="dot" id="groq-dot" style="background:var(--text2)"></div><span id="groq-label">Groq</span></div>
-      <div class="status-dot" onclick="openSettings('gemini')"><div class="dot" id="gemini-dot" style="background:var(--text2)"></div><span id="gemini-label">Gemini</span></div>
-    </div>
   </div>
   <button class="new-chat-btn" onclick="newSession()">＋ New Chat</button>
   <div id="sidebar-body">
@@ -841,7 +855,7 @@ table.data-table tr:last-child td{border-bottom:none}
           </div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
             <button class="btn btn-secondary btn-sm" onclick="testOllama()">🔌 Test</button>
-            <button class="btn btn-secondary btn-sm" onclick="refreshModels()">🔄 Refresh Models</button>
+            <button class="btn btn-secondary btn-sm" onclick="loadOllamaModelTable()">🔄 Refresh Models</button>
             <div id="ollama-test-result" style="font-size:12px"></div>
           </div>
           <div style="margin-top:12px"><h4>Available Models</h4><div id="models-table">Loading…</div></div>
@@ -1258,6 +1272,15 @@ table.data-table tr:last-child td{border-bottom:none}
 
 <div id="toast-container"></div>
 <div id="img-lightbox" onclick="closeLightbox()"><img id="img-lightbox-img" src="" alt=""/></div>
+<div id="viz-max-overlay" onclick="if(event.target===this)closeMaximize()">
+  <div class="viz-max-panel">
+    <div class="viz-max-header">
+      <span class="viz-max-label" id="viz-max-label"></span>
+      <button class="svg-act-btn" data-act="viz-restore">✕ Restore</button>
+    </div>
+    <div class="viz-max-content" id="viz-max-content"></div>
+  </div>
+</div>
 
 <script>
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -1288,10 +1311,11 @@ function getWelcomeHTML(){
     <div class="welcome-title">RediRecall</div>
     <p class="welcome-sub">Powered by Ollama or Claude + Redis semantic search. Ask anything — I'll search your knowledge base and tell you when RAG or cache is used.</p>
     <div class="suggestion-chips">
-      <div class="chip" onclick="sendSuggestion('What is Redis and what can it do?')">What is Redis?</div>
-      <div class="chip" onclick="sendSuggestion('How does vector search work in Redis?')">Vector search in Redis</div>
       <div class="chip" onclick="sendSuggestion('Explain semantic caching')">Semantic caching</div>
-      <div class="chip" onclick="sendSuggestion('Show me Redis commands for hashes')">Redis hash commands</div>
+      <div class="chip" onclick="sendSuggestion('Sugar molecule in 2d and 3d')">Sugar molecule in 2d and 3d</div>
+      <div class="chip" onclick="sendSuggestion('Beginning of Old MacDonald')">Beginning of Old MacDonald</div>
+      <div class="chip" onclick="sendSuggestion('Visualize the theorem of Pythagoras')">Visualize the theorem of Pythagoras</div>
+      <div class="chip" onclick="sendSuggestion('Display Sin and Cos function')">Display Sin and Cos function</div>
     </div>
   </div>`;
 }
@@ -1309,8 +1333,7 @@ window.addEventListener('load',async()=>{
   clearChat(true);
   newSession();
   await Promise.all([loadModels(),checkStatus(),loadRagInstances(),loadTemplates()]);
-  setInterval(checkLocalStatus, 30000);   // Redis + Ollama — every 30 s
-  setInterval(checkCloudStatus, 300000);  // Cloud APIs  — every 5 min
+  setInterval(checkLocalStatus, 30000);   // Redis health + RAG-instance refresh — every 30 s
   setupKeyboardShortcuts();
   setupClipboardPaste();
   setupSpeechRecognition();
@@ -1588,7 +1611,7 @@ async function testMistral(){
     return;
   }
   try{
-    const qs=formKey?`?key=${encodeURIComponent(formKey)}`:'';
+    const qs=formKey?`?key=${encodeURIComponent(formKey)}&probe=1`:'?probe=1';
     const r=await fetch(`/api/status/mistral${qs}`).then(r=>r.json());
     if(r.ok){
       el.innerHTML=`<span style="color:var(--green)">✓ Connected${fromEnv?' (key from env)':''}</span>`;
@@ -1628,7 +1651,7 @@ async function testGemini(){
     return;
   }
   try{
-    const qs=formKey?`?key=${encodeURIComponent(formKey)}`:'';
+    const qs=formKey?`?key=${encodeURIComponent(formKey)}&probe=1`:'?probe=1';
     const r=await fetch(`/api/status/gemini${qs}`).then(r=>r.json());
     if(r.ok){
       el.innerHTML=`<span style="color:var(--green)">✓ Connected${fromEnv?' (key from env)':''}</span>`;
@@ -1643,6 +1666,22 @@ function selectModel(name){
   const m=S.models.find(x=>x.name===name);
   document.getElementById('vision-badge').style.display=m?.vision?'inline-flex':'none';
   document.getElementById('attach-btn').disabled=!m?.vision;
+}
+
+// Load the Settings → Ollama "Available Models" table independently of the
+// active provider. loadOllamaModels() can't be reused here because it also
+// rewrites the top-bar model-select dropdown — calling it while another
+// provider (e.g. Mistral) is active would clobber that provider's dropdown.
+// This only fills S.models + the table.
+async function loadOllamaModelTable(){
+  const el=document.getElementById('models-table');
+  if(el)el.textContent='Loading…';
+  try{
+    S.models=await fetch('/api/ollama/models').then(r=>r.json());
+    renderModelsTable();
+  }catch(e){
+    if(el)el.textContent='Ollama offline — start Ollama and click 🔄 Refresh Models.';
+  }
 }
 
 function renderModelsTable(){
@@ -1676,32 +1715,25 @@ function selectModelFromSettings(name){
   toast(`Model set to ${name} — Save Settings to keep it`,'success');
 }
 
-async function refreshModels(){await loadModels();toast('Models refreshed','success');}
 
 // ── Status ────────────────────────────────────────────────────────────────────
 // Local services (Redis, Ollama) are polled every 30 s — they can go offline
 // without notice so frequent checks make sense.
 // Cloud API providers are polled every 5 min — an API key doesn't change and
 // hitting external endpoints every 15 s wastes quota and creates noise in logs.
-const _setDot=(dotId,ok,dim=false)=>{
-  const el=document.getElementById(dotId);
-  el.className='dot '+(ok?'ok':dim?'':'err');
-  if(dim)el.style.background='var(--text2)';
-};
-
+// Poll Redis health for its side effects only (search-availability flags +
+// RAG-instance refresh). The old status-dot indicators this used to drive were
+// removed, so it no longer updates any UI element directly.
 async function checkLocalStatus(){
   try{
     const r=await fetch('/api/status/redis').then(r=>r.json());
-    _setDot('redis-dot',r.ok);
     S.searchAvail=S.searchAvail||{};
     if(r.ok && r.search_available===false) S.searchAvail['default']=false;
     else if(r.ok) S.searchAvail['default']=true;
     // Re-fetch RAG instances so reachable flags stay current after health refresh
     loadRagInstances().catch(()=>{});
   }
-  catch{_setDot('redis-dot',false);}
-  try{const o=await fetch('/api/status/ollama').then(r=>r.json());_setDot('ollama-dot',o.ok);}
-  catch{_setDot('ollama-dot',false);}
+  catch{}
   // Probe named Redis endpoints for Search availability (fire-and-forget)
   const eps=(S.config.redis_endpoints||[]).map(e=>e.name).filter(Boolean);
   eps.forEach(ep=>{
@@ -1712,48 +1744,8 @@ async function checkLocalStatus(){
   });
 }
 
-async function checkCloudStatus(){
-  const hasClaudeKey=S.config.claude?.api_key||S.config.claude_key_from_env;
-  if(!hasClaudeKey){_setDot('claude-dot',false,true);}
-  else{
-    try{const c=await fetch('/api/status/claude').then(r=>r.json());_setDot('claude-dot',c.ok);}
-    catch{_setDot('claude-dot',false);}
-  }
-  const hasOpenAIKey=S.config.openai?.api_key||S.config.openai_key_from_env;
-  if(!hasOpenAIKey){_setDot('openai-dot',false,true);}
-  else{
-    try{const o=await fetch('/api/status/openai').then(r=>r.json());_setDot('openai-dot',o.ok);}
-    catch{_setDot('openai-dot',false);}
-  }
-  const hasQwenKey=S.config.qwen?.api_key||S.config.qwen_key_from_env;
-  if(!hasQwenKey){_setDot('qwen-dot',false,true);}
-  else{
-    try{const q=await fetch('/api/status/qwen').then(r=>r.json());_setDot('qwen-dot',q.ok);}
-    catch{_setDot('qwen-dot',false);}
-  }
-  const hasMistralKey=S.config.mistral?.api_key||S.config.mistral_key_from_env;
-  if(!hasMistralKey){_setDot('mistral-dot',false,true);}
-  else{
-    try{const m=await fetch('/api/status/mistral').then(r=>r.json());_setDot('mistral-dot',m.ok);}
-    catch{_setDot('mistral-dot',false);}
-  }
-  const hasGroqKey=S.config.groq?.api_key||S.config.groq_key_from_env;
-  if(!hasGroqKey){_setDot('groq-dot',false,true);}
-  else{
-    try{const g=await fetch('/api/status/groq').then(r=>r.json());_setDot('groq-dot',g.ok);}
-    catch{_setDot('groq-dot',false);}
-  }
-  const hasGeminiKey=S.config.gemini?.api_key||S.config.gemini_key_from_env;
-  if(!hasGeminiKey){_setDot('gemini-dot',false,true);}
-  else{
-    try{const g=await fetch('/api/status/gemini').then(r=>r.json());_setDot('gemini-dot',g.ok);}
-    catch{_setDot('gemini-dot',false);}
-  }
-}
-
 async function checkStatus(){
   await checkLocalStatus();
-  await checkCloudStatus();
 }
 
 async function testRedis(){
@@ -1788,6 +1780,7 @@ async function testOllama(){
   try{
     const r=await fetch('/api/status/ollama').then(r=>r.json());
     el.innerHTML=r.ok?'<span style="color:var(--green)">✓ Connected</span>':`<span style="color:var(--red)">✗ ${r.error}</span>`;
+    if(r.ok)loadOllamaModelTable();   // populate the Available Models table on a good connection
   }catch(e){el.innerHTML=`<span style="color:var(--red)">✗ ${e.message}</span>`;}
 }
 
@@ -2736,7 +2729,7 @@ function appendMessage(role,content,meta={}){
         <button class="msg-action-btn" onclick="thumbs('${id}',1,this)">👍</button>
         <button class="msg-action-btn" onclick="thumbs('${id}',-1,this)">👎</button>
         <button class="msg-action-btn" onclick="pinMsg('${id}',this)">📌</button>
-        <button class="msg-action-btn" onclick="regenerate()">↻</button>
+        <button class="msg-action-btn" onclick="regenerate('${id}')" title="Re-run the question that produced this answer">↻</button>
         ${meta.cacheHit?`<span style="width:1px;height:14px;background:var(--border);display:inline-block;margin:0 2px"></span>
         <button class="msg-action-btn" id="${id}-uncache" onclick="deleteCacheEntry('${id}',this)" title="Remove this response from the cache">🗑 Uncache</button>
         <button class="msg-action-btn" onclick="rerunSkipCache('${id}')" title="Re-generate bypassing the cache (overwrites cached response)">↺ Re-run fresh</button>`:''}
@@ -2852,11 +2845,27 @@ async function copyMsg(id){
   if(bubble){await navigator.clipboard.writeText(bubble.innerText);toast('Copied!','success');}
 }
 
-async function regenerate(){
-  const sess=S.sessions[S.sessionId];if(!sess?.messages.length)return;
-  const lastUser=[...sess.messages].reverse().find(m=>m.role==='user');
-  if(!lastUser)return;
-  document.getElementById('msg-input').value=lastUser.content;sendMessage();
+async function regenerate(msgId){
+  // Re-ask the question THIS answer belongs to — not just the last query. Resolve it
+  // from (1) the cache-query data attribute cached answers carry, (2) the session
+  // array (streamed answers are stored with their id → take the preceding user turn),
+  // then (3) the DOM, falling back to the last user message only if all else fails.
+  const sess=S.sessions[S.sessionId];
+  const el=msgId?document.getElementById(msgId):null;
+  let query=null;
+  if(el?.dataset?.cacheQuery)query=el.dataset.cacheQuery;
+  if(query==null&&msgId&&sess?.messages?.length){
+    const ai=sess.messages.findIndex(m=>m.role==='assistant'&&m.meta?.id===msgId);
+    if(ai>0){for(let i=ai-1;i>=0;i--){if(sess.messages[i].role==='user'){query=sess.messages[i].content;break;}}}
+  }
+  if(query==null&&el){
+    let n=el.previousElementSibling;
+    while(n&&!(n.classList?.contains('msg-wrap')&&n.classList.contains('user')))n=n.previousElementSibling;
+    const b=n?.querySelector('.msg-bubble.user');if(b)query=b.textContent;
+  }
+  if(query==null&&sess?.messages?.length)query=[...sess.messages].reverse().find(m=>m.role==='user')?.content??null;
+  if(query==null){toast('Could not find the original query','error');return;}
+  document.getElementById('msg-input').value=query;sendMessage();
 }
 
 // ── Images ────────────────────────────────────────────────────────────────────
@@ -3015,6 +3024,7 @@ function openSettings(tab='general'){
   if(tab==='status')loadStatus();
   if(tab==='redis'){loadRedisMemory();loadRedisEndpoints();}
   if(tab==='websources')checkActiveCrawls();
+  loadOllamaModelTable();   // Ollama "Available Models" table — independent of the active provider
   loadCacheAnalytics();renderWebSources();
 }
 function toggleProvCard(name){
@@ -3187,9 +3197,12 @@ function populateSettingsForm(){
     setVal('s-gemini-key','');
     if(geminiKeyHint)geminiKeyHint.innerHTML='No key found. Get a free key at <a href="https://aistudio.google.com" target="_blank">aistudio.google.com</a> or set <code style="font-size:10px">GEMINI_API_KEY</code> env var.';
   }
-  // Update provider card model hints
+  // Update provider card model hints. Each card must show ITS OWN model — for
+  // Ollama that's the live model only when Ollama is the active provider,
+  // otherwise the remembered/saved Ollama model. (Using S.currentModel
+  // unconditionally showed whatever OTHER provider was active in the Ollama row.)
   const modelHints={
-    ollama:S.currentModel||S.config.ollama?.model||'',
+    ollama:(S.provider==='ollama'&&S.currentModel)||(S.providerModels||{}).ollama||S.config.ollama?.model||'',
     claude:S.config.claude?.model||'claude-sonnet-4-6',
     openai:S.config.openai?.model||'gpt-4o',
     qwen:S.config.qwen?.model||'qwen-plus',
@@ -3798,6 +3811,14 @@ const _GEO_ALIAS={fill:'fillColor','fill-color':'fillColor','fill-opacity':'fill
   'stroke-opacity':'strokeOpacity','font-size':'fontSize','text-anchor':'anchorX',
   colour:'strokeColor',label:'name'};
 const _GEO_ANCHOR={middle:'middle',center:'middle',start:'left',left:'left',end:'right',right:'right'};
+// Element types whose parents are 2-D points (segment/line between two points, a
+// polygon's vertices, the three points of an angle/arc/sector). Models sometimes
+// flatten "two points" into 4 raw numbers — e.g. a segment as [x1,y1,x2,y2] instead
+// of the nested [[x1,y1],[x2,y2]] JSXGraph expects — which JSXGraph rejects outright
+// ("Can't create line with parent types 'number' and 'number'"). Reshape rather than
+// erroring: the point of this lane is that the browser draws what was clearly meant,
+// not that the model has to get the exact nesting right.
+const _GEO_POINT_LIST_TYPES=new Set(['line','segment','arrow','vector','polygon','angle','arc','sector']);
 function _geoArgs(type,args,attrs){
   const a=Array.isArray(args)?args:[args];
   if(type==='text'){                       // JSXGraph needs [x, y, content]
@@ -3807,7 +3828,13 @@ function _geoArgs(type,args,attrs){
     const c=attrs&&(attrs.text!=null?attrs.text:(attrs.content!=null?attrs.content:attrs.name));
     return a.map(_geoNum).concat([_geoText(c==null?'':c)]);
   }
-  return a.map(_geoNum);
+  const nums=a.map(_geoNum);
+  if(_GEO_POINT_LIST_TYPES.has(type)&&nums.length>=4&&nums.length%2===0&&nums.every(n=>typeof n==='number')){
+    const pts=[];
+    for(let i=0;i<nums.length;i+=2)pts.push([nums[i],nums[i+1]]);
+    return pts;
+  }
+  return nums;
 }
 function _geoAttrs(type,attrs){
   const out={};
@@ -4260,6 +4287,34 @@ const RICH_LANES={
         setTimeout(()=>svg.childElementCount?res():rej(new Error('could not parse SMILES: '+smiles.slice(0,40))),600);
       });
     }},
+  molecule3d:{
+    label:'🧬 3D Molecule', fixed:'380px',
+    load:()=>_loadScript(CDN+'3Dmol/2.5.5/3Dmol-min.js'),
+    async draw(out,src){
+      const xyz=src.trim();
+      // First non-blank line must be the atom count (the xyz format's own header);
+      // catches an empty/garbled block before 3Dmol does, with a clearer message.
+      const n=parseInt((xyz.match(/^\s*(\d+)/)||[])[1],10);
+      if(!n)throw new Error('not valid XYZ — first line must be the atom count');
+      // position:relative makes `host` the containing block for 3Dmol's own
+      // position:absolute canvas. Without it the canvas resolves against the
+      // nearest positioned ancestor — inside the maximize modal that's the
+      // fixed overlay, so the render escapes to the viewport's top-left.
+      const host=document.createElement('div'); host.style.width='100%'; host.style.height='100%'; host.style.position='relative';
+      out.appendChild(host);
+      const viewer=$3Dmol.createViewer(host,{backgroundColor:'white'});
+      out._richInst={kind:'molecule3d',obj:viewer};
+      viewer.addModel(xyz,'xyz');
+      const model=viewer.getModel();
+      if(!model||model.selectedAtoms({}).length===0)throw new Error('no atoms parsed from XYZ data');
+      viewer.setStyle({},{stick:{radius:0.12},sphere:{scale:0.28}});
+      viewer.zoomTo();
+      viewer.render();
+      // On a HiDPI/Retina display 3Dmol's first sizing pass lands the canvas at
+      // half the host width; a resize once layout has settled corrects it. rAF is
+      // unreliable in some embedded webviews here, so defer with a timer.
+      setTimeout(()=>{try{viewer.resize();viewer.render();}catch(e){}},0);
+    }},
 };
 
 // Render every not-yet-drawn rich card inside `el`. Async + per-lane lazy load;
@@ -4301,6 +4356,9 @@ function destroyRichBlocks(root){
       else if(inst.kind==='map')inst.obj.remove();
       else if(inst.kind==='plot3d'&&window.Plotly)Plotly.purge(inst.obj);
       else if(inst.kind==='geometry'&&window.JXG)JXG.JSXGraph.freeBoard(inst.obj);
+      // 3Dmol has no explicit dispose/destroy call — clear() drops the scene's
+      // objects; the WebGL context itself is released when the canvas node is GC'd.
+      else if(inst.kind==='molecule3d')inst.obj.clear();
     }catch(e){}
     out._richInst=null;
   });
@@ -4367,8 +4425,9 @@ function _syncHljsTheme(create){
               <span class="katex-block-label">∑ LaTeX</span>
               <button class="svg-act-btn" data-act="tex-src">Source</button>
               <button class="svg-act-btn" data-act="tex-copy">Copy LaTeX</button>
+              <button class="svg-act-btn" data-act="viz-max">⛶ Maximize</button>
             </div>
-            <div class="katex-block-output">${rendered}</div>
+            <div class="katex-block-output viz-output-el">${rendered}</div>
             <pre class="katex-src-pre"><code>${esc}</code></pre>
           </div>`;
         }
@@ -4385,8 +4444,10 @@ function _syncHljsTheme(create){
               <span class="svg-render-label">♪ Music</span>
               <button class="svg-act-btn" data-act="abc-src">Source</button>
               <button class="svg-act-btn" data-act="abc-copy">Copy ABC</button>
+              <button class="svg-act-btn" data-act="rich-png">⬇ PNG</button>
+              <button class="svg-act-btn" data-act="viz-max">⛶ Maximize</button>
             </div>
-            <div class="abc-render-output"></div>
+            <div class="abc-render-output viz-output-el"></div>
             <pre class="abc-src-pre"><code>${esc}</code></pre>
           </div>`;
         }
@@ -4402,8 +4463,10 @@ function _syncHljsTheme(create){
               <span class="svg-render-label">📈 Graph</span>
               <button class="svg-act-btn" data-act="plot-src">Source</button>
               <button class="svg-act-btn" data-act="plot-copy">Copy</button>
+              <button class="svg-act-btn" data-act="rich-png">⬇ PNG</button>
+              <button class="svg-act-btn" data-act="viz-max">⛶ Maximize</button>
             </div>
-            <div class="plot-render-output svg-render-output"></div>
+            <div class="plot-render-output svg-render-output viz-output-el"></div>
             <pre class="plot-src-pre"><code>${esc}</code></pre>
           </div>`;
         }
@@ -4416,13 +4479,27 @@ function _syncHljsTheme(create){
           const src=code.trim();
           const esc=src.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
           const style=lane.fixed?` style="height:${lane.fixed}"`:'';
+          // PNG export only where it's a meaningful "image": lanes with a real inline
+          // <svg> use the generic SVG rasteriser; chart/plot3d use their own library's
+          // native export. Skipped for map (needs an extra rasterising plugin we
+          // haven't added) and the plain-DOM compute lanes (table/diff/etc, calc,
+          // solve, stats, truth, regex) — not meaningfully an "image" without adding
+          // a DOM-to-canvas dependency just for this.
+          const svgPngLanes=new Set(['mermaid','dot','geometry','molecule']);
+          const pngBtn = svgPngLanes.has(laneKey) ? `<button class="svg-act-btn" data-act="rich-png">⬇ PNG</button>`
+                       : laneKey==='chart' ? `<button class="svg-act-btn" data-act="chart-png">⬇ PNG</button>`
+                       : laneKey==='plot3d' ? `<button class="svg-act-btn" data-act="plot3d-png">⬇ PNG</button>`
+                       : laneKey==='molecule3d' ? `<button class="svg-act-btn" data-act="molecule3d-png">⬇ PNG</button>`
+                       : '';
           return `<div class="rich-wrap" data-kind="${laneKey}">
             <div class="svg-render-bar">
               <span class="svg-render-label">${lane.label}</span>
               <button class="svg-act-btn" data-act="rich-src">Source</button>
               <button class="svg-act-btn" data-act="rich-copy">Copy</button>
+              ${pngBtn}
+              <button class="svg-act-btn" data-act="viz-max">⛶ Maximize</button>
             </div>
-            <div class="rich-output"${style}></div>
+            <div class="rich-output viz-output-el"${style}></div>
             <pre class="rich-src-pre"><code>${esc}</code></pre>
           </div>`;
         }
@@ -4454,8 +4531,9 @@ function _syncHljsTheme(create){
             <button class="svg-act-btn" data-act="svg-src">Source</button>
             <button class="svg-act-btn" data-act="svg-copy">Copy SVG</button>
             <button class="svg-act-btn" data-act="svg-png">⬇ PNG</button>
+            <button class="svg-act-btn" data-act="viz-max">⛶ Maximize</button>
           </div>
-          <div class="svg-render-output">${safeSvg}</div>
+          <div class="svg-render-output viz-output-el">${safeSvg}</div>
           <pre class="svg-src-pre"><code>${esc}</code></pre>
         </div>`;
       }
@@ -4492,6 +4570,31 @@ document.addEventListener('click',function(e){
     if(img)downloadImgFromSrc(img.src,img.alt||'Generated Image');
   }else if(act==='img-zoom'){
     if(btn.tagName==='IMG')openLightbox(btn.src);
+  }else if(act==='viz-max'){
+    openMaximize(btn);
+  }else if(act==='viz-restore'){
+    closeMaximize();
+  }else if(act==='chart-png'){
+    const wrap=btn.closest('.rich-wrap'); const inst=wrap?.querySelector('.rich-output')?._richInst;
+    if(inst?.kind==='chart'){ const a=document.createElement('a'); a.href=inst.obj.toBase64Image(); a.download=`chart_${Date.now()}.png`; a.click(); toast('PNG downloaded','success'); }
+  }else if(act==='plot3d-png'){
+    const wrap=btn.closest('.rich-wrap'); const inst=wrap?.querySelector('.rich-output')?._richInst;
+    if(inst?.kind==='plot3d'&&window.Plotly){
+      Plotly.toImage(inst.obj,{format:'png',width:900,height:700}).then(url=>{
+        const a=document.createElement('a'); a.href=url; a.download=`plot3d_${Date.now()}.png`; a.click(); toast('PNG downloaded','success');
+      }).catch(()=>toast('PNG export failed','error'));
+    }
+  }else if(act==='molecule3d-png'){
+    const wrap=btn.closest('.rich-wrap'); const inst=wrap?.querySelector('.rich-output')?._richInst;
+    if(inst?.kind==='molecule3d'){
+      const a=document.createElement('a'); a.href=inst.obj.pngURI(); a.download=`molecule3d_${Date.now()}.png`; a.click();
+      toast('PNG downloaded','success');
+    }
+  }else if(act==='rich-png'){
+    const svg=btn.closest('.rich-wrap')?.querySelector('.rich-output svg')
+           || btn.closest('.plot-render-wrap')?.querySelector('.plot-render-output svg')
+           || btn.closest('.abc-render-wrap')?.querySelector('.abc-render-output svg');
+    if(svg&&window.downloadSvgAsPng)downloadSvgAsPng(svg);
   }else if(act==='model-use'){
     if(typeof selectModelFromSettings==='function')selectModelFromSettings(btn.dataset.model||'');
   }
@@ -4579,6 +4682,86 @@ function closeLightbox(){
   document.removeEventListener('keydown',_lbKeyClose);
 }
 function _lbKeyClose(e){if(e.key==='Escape')closeLightbox();}
+
+// ── Maximize / restore for any rich-render card ─────────────────────────────
+// Moves (reparents) the card's own output element into a full-viewport panel —
+// does NOT clone it, so a live Chart.js/Plotly/Leaflet/JSXGraph instance keeps
+// its listeners/canvas context and stays interactive (draggable geometry, a
+// pannable map, tooltips) inside the enlarged view. None of those libraries
+// auto-redraw when their container is resized by something else, so a resize
+// hook fires after the move — both growing into the panel and shrinking back.
+function _vizResize(outEl){
+  const inst=outEl._richInst;
+  if(!inst)return;
+  try{
+    if(inst.kind==='chart')inst.obj.resize();
+    else if(inst.kind==='map')inst.obj.invalidateSize();
+    else if(inst.kind==='plot3d'&&window.Plotly)Plotly.Plots.resize(inst.obj);
+    else if(inst.kind==='geometry'&&inst.obj.resizeContainer){
+      const host=inst.obj.containerObj;
+      if(host)inst.obj.resizeContainer(host.clientWidth,host.clientHeight,true);
+    }
+    else if(inst.kind==='molecule3d'){ inst.obj.resize(); inst.obj.render(); }
+  }catch(e){}
+}
+function openMaximize(btn){
+  const wrap=btn.closest('.rich-wrap,.plot-render-wrap,.abc-render-wrap,.svg-render-wrap,.katex-block-wrap');
+  const outEl=wrap?.querySelector('.viz-output-el');
+  const overlay=document.getElementById('viz-max-overlay');
+  const content=document.getElementById('viz-max-content');
+  if(!wrap||!outEl||!overlay||!content)return;
+  // A placeholder is left in the card's own slot — an empty card during
+  // maximize would look broken, and clicking it is a second way back.
+  const placeholder=document.createElement('div');
+  placeholder.className='viz-restore-slot';
+  placeholder.dataset.act='viz-restore';
+  placeholder.textContent='↗ Maximized elsewhere — click to restore';
+  // Some lanes (geometry/map/plot3d/chart/molecule) set a fixed inline height on
+  // their output — that beats the modal's CSS (inline style outranks a class
+  // selector), so it must be cleared here and put back on restore, or the
+  // content would stay pinned to its small card height inside the big panel.
+  // Mermaid (and potentially other SVG-producing libraries) stamps its OWN inline
+  // style="max-width:...px" on the root <svg> at render time, sized to that specific
+  // diagram — an inline style beats any selector-based CSS override, even an ID
+  // selector. Only overwriting the SAME inline property reliably wins, so each
+  // <svg>'s original style is stashed here and restored on close, rather than left
+  // permanently stretched in the small card.
+  const svgStyles=[...outEl.querySelectorAll('svg')].map(svg=>({svg,cssText:svg.style.cssText}));
+  svgStyles.forEach(({svg})=>{ svg.style.width='100%'; svg.style.height='100%'; svg.style.maxWidth='none'; });
+  outEl._maxOrigin={parent:outEl.parentNode,next:outEl.nextSibling,placeholder,height:outEl.style.height,svgStyles};
+  outEl.style.height='';
+  outEl.parentNode.replaceChild(placeholder,outEl);
+  const labelEl=wrap.querySelector('.svg-render-label,.katex-block-label');
+  document.getElementById('viz-max-label').textContent=labelEl?labelEl.textContent:'';
+  content.appendChild(outEl);
+  overlay.classList.add('open');
+  document.addEventListener('keydown',_vmKeyClose);
+  // Let the panel finish layout before asking the instance to measure it.
+  // A timer, not requestAnimationFrame: rAF is suspended when the page isn't
+  // actively painting (background tab, embedded preview) — the same trap hit
+  // and fixed earlier for the plot-slider redraw. rAF-based timing measured the
+  // container mid-transition and resized to the wrong, still-small dimensions
+  // (caught by comparing actual rendered pixel size before/after, not just
+  // checking the DOM moved). A short delay reliably outlives the layout pass.
+  setTimeout(()=>_vizResize(outEl),50);
+}
+function closeMaximize(){
+  const overlay=document.getElementById('viz-max-overlay');
+  const content=document.getElementById('viz-max-content');
+  const outEl=content?.querySelector('.viz-output-el');
+  if(outEl&&outEl._maxOrigin){
+    const {parent,next,placeholder,height,svgStyles}=outEl._maxOrigin;
+    outEl.style.height=height||'';
+    (svgStyles||[]).forEach(({svg,cssText})=>{ svg.style.cssText=cssText; });
+    parent.insertBefore(outEl,next||null);
+    placeholder.remove();
+    outEl._maxOrigin=null;
+    setTimeout(()=>_vizResize(outEl),50);
+  }
+  if(overlay)overlay.classList.remove('open');
+  document.removeEventListener('keydown',_vmKeyClose);
+}
+function _vmKeyClose(e){if(e.key==='Escape')closeMaximize();}
 function downloadImgFromSrc(src,label){
   const img=new Image();
   img.crossOrigin='anonymous';
@@ -4667,11 +4850,29 @@ function renderPlotBlocks(el){
 function _parsePlotParams(spec){
   const list=[], values={};
   spec.split('\n').forEach(line=>{
-    const m=line.trim().match(/^param\s*:\s*([A-Za-z]\w*)\s*=\s*(-?[\d.]+)\s*(?:\.\.|to)\s*(-?[\d.]+)\s*(?:\(\s*(-?[\d.]+)\s*\))?$/i);
-    if(!m)return;
-    const [,name,lo,hi,init]=m;
-    const min=parseFloat(lo), max=parseFloat(hi);
-    const val=init!==undefined?parseFloat(init):(min+max)/2;
+    line=line.trim();
+    if(!/^param\s*:/i.test(line))return;
+    // Bounds are math.js EXPRESSIONS, not just plain numbers — so a constant declared
+    // on an earlier param: line can be reused (`param: c = 299792458 .. 299792458 (…)`
+    // then `param: v = 0 .. 0.99c (0.01)`, "0.99c" = 0.99*c via implicit multiplication).
+    // A malformed line, or one whose bound depends on a symbol not yet declared, THROWS
+    // — a silently-dropped parameter is exactly what turned this class of bug into a
+    // confusing "wrong" error before: only the formula's undefined symbol was reported,
+    // while a parameter whose OWN bound failed to parse was dropped without a trace.
+    const m=line.match(/^param\s*:\s*([A-Za-z]\w*)\s*=\s*(.+?)\s*(?:\.\.|\bto\b)\s*(.+?)\s*(?:\(\s*(.+?)\s*\))?$/i);
+    if(!m)throw new Error(`cannot parse "${line}" — expected \`param: name = lo .. hi (init)\``);
+    const [,name,loExpr,hiExpr,initExpr]=m;
+    const scope=Object.assign({},values);   // params declared on earlier lines
+    const evalBound=(expr,label)=>{
+      let v;
+      try{ v=Number(math.evaluate(expr,scope)); }
+      catch(e){ throw new Error(`param '${name}': ${label} '${expr}' failed — ${e.message}. Declare any constant it uses with its own \`param:\` line first.`); }
+      if(!isFinite(v))throw new Error(`param '${name}': ${label} '${expr}' is not a finite number.`);
+      return v;
+    };
+    const min=evalBound(loExpr,'lower bound');
+    const max=evalBound(hiExpr,'upper bound');
+    const val=initExpr!==undefined?evalBound(initExpr,'initial value'):(min+max)/2;
     list.push({name,min,max,val}); values[name]=val;
   });
   return {list,values};
@@ -4727,10 +4928,20 @@ function _buildFunctionPlot(spec, params){
   const N=300;
   const series=fns.map((f,i)=>{
     let code; try{ code=math.compile(f.expr); }catch(e){ throw new Error('cannot parse "'+f.expr+'"'); }
-    const pts=[];
+    const pts=[]; let firstErr=null;
     for(let k=0;k<=N;k++){ const x=xmin+(xmax-xmin)*k/N; let y;
-      try{ y=code.evaluate(Object.assign({},params||{},{x})); }catch(e){ y=NaN; }
+      try{ y=code.evaluate(Object.assign({},params||{},{x})); }
+      catch(e){ y=NaN; if(firstErr==null)firstErr=e; }
       y=(typeof y==='number'&&isFinite(y))?y:NaN; pts.push({x,y}); }
+    // A symbol other than x (and any declared param) is undefined in every evaluation,
+    // so the whole series is NaN and the generic "no finite values" message below would
+    // hide the real, specific cause. Surface it directly — a missing `param:` line is
+    // by far the most common reason (e.g. a formula referencing a physical constant like
+    // c or G without declaring or substituting it).
+    if(firstErr&&!pts.some(p=>isFinite(p.y))){
+      const m=/^Undefined symbol (\w+)$/i.exec(firstErr.message||'');
+      if(m)throw new Error(`'${m[1]}' is not defined — add \`param: ${m[1]} = <lo> .. <hi> (<init>)\` for a slider, or replace it with a plain number.`);
+    }
     return {label:f.label||('f'+(i+1)), color:colors[i%colors.length], pts};
   });
   let ys=[]; series.forEach(s=>s.pts.forEach(p=>{ if(isFinite(p.y)) ys.push(p.y); }));

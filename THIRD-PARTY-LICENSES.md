@@ -55,6 +55,7 @@ These are **not** bundled with RediRecall or included in the Docker image. `redi
 | [Leaflet](https://leafletjs.com) | `map` maps | BSD-2-Clause |
 | [Plotly.js](https://plotly.com/javascript/) | `plot3d` 3-D plots | MIT |
 | [SmilesDrawer](https://github.com/reymond-group/smilesDrawer) | `molecule` structures | MIT |
+| [3Dmol.js](https://3dmol.csb.pitt.edu/) | `molecule3d` 3D structures | BSD-3-Clause |
 | [abcjs](https://www.abcjs.net) | `abc` sheet music | MIT |
 | [highlight.js](https://highlightjs.org) | code syntax highlighting | BSD-3-Clause |
 

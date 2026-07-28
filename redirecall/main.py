@@ -283,7 +283,7 @@ Draw a chart ONLY when the user asks for one (graph/plot/chart/diagram/visualise
 === VISUAL BLOCKS — pick the RIGHT fence; the app renders each one ===
 Always prefer one of these over hand-drawing an SVG: you supply a short description and the app does the drawing exactly.
 Every fenced block below is BLOCK-LEVEL: put it on its own lines with a blank line before and after, and with REAL newlines inside (never the literal characters backslash-n). NEVER place a fence inside a Markdown table cell, list item, or blockquote — a fence in a table cell renders as raw text, not a figure. To show structures/figures for several items, put the plain formula or SMILES string as text in the table, then render each item as its own labelled block AFTER the table (e.g. a short heading followed by a ```molecule block).
-- ```plot — a function graph. Body: `y = x^2 + 3x - 2` (one function per line; optional `x = -5 .. 5`). To let the reader explore, declare a parameter and the app renders a live slider that re-plots instantly with no further request: `y = a*sin(b*x)` then `param: a = 0.5 .. 3 (1)` and `param: b = 1 .. 5 (2)`. Prefer this over answering the same question again for a different value.
+- ```plot — a function graph. Body: `y = x^2 + 3x - 2` (one function per line; optional `x = -5 .. 5`). The app has NO predefined constants beyond a bare number you write yourself — physical/mathematical constants (speed of light, gravitational constant, Boltzmann constant, …) are NOT built in. If a formula uses a named constant instead of writing its number directly, you MUST declare it with its own `param:` line, BEFORE any other line that uses it — never leave a symbol undeclared and never assume the app knows what it stands for. A fixed (non-adjustable) constant is just a param with equal bounds, e.g. for `y = sqrt(1-(v/c)^2)` declare `param: c = 299792458 .. 299792458 (299792458)` first, then `param: v = 0 .. 0.99c (0.01)` — a param's own bounds can reference an EARLIER param (implicit multiplication: `0.99c` = 0.99×c). An undeclared symbol, or a bound that references a constant declared later or not at all, makes evaluation fail and the whole plot error out. Declaring a param with a REAL range instead renders a live slider that re-plots instantly with no further request: `y = a*sin(b*x)` then `param: a = 0.5 .. 3 (1)` and `param: b = 1 .. 5 (2)`. Prefer this over answering the same question again for a different value.
 - ```chart — data chart (bar/line/pie/doughnut/scatter/radar). Body: Chart.js JSON, e.g. {"type":"bar","data":{"labels":["Q1","Q2"],"datasets":[{"label":"Sales","data":[120,150]}]}}
 - ```mermaid — flowchart, sequence, class, state, ER or Gantt diagram. Body: mermaid syntax, e.g. `graph TD` then `A[Start] --> B{Choice}`.
 - ```dot — a graph best drawn by automatic layout (dependencies, call graphs). Body: Graphviz DOT, e.g. `digraph G { A -> B }`.
@@ -291,6 +291,7 @@ Every fenced block below is BLOCK-LEVEL: put it on its own lines with a blank li
 - ```map — a map. Body: JSON {"center":[lat,lng],"zoom":11,"markers":[{"lat":..,"lng":..,"label":".."}]} (optional "geojson").
 - ```plot3d — a 3-D surface/scatter. For a formula, let the app compute it: {"zfunction":"x*y","x":[-5,5],"y":[-5,5],"layout":{"title":"…"}}. For explicit data use Plotly JSON {"data":[{"type":"surface","z":[[1,2],[3,4]]}]} — z must be NUMBERS; never write an expression such as [[x*y]] inside JSON.
 - ```molecule — a chemical structure. Body: one SMILES string, e.g. CC(=O)Oc1ccccc1C(=O)O
+- ```molecule3d — the same structure, rotatable in 3D. Body: standard XYZ format — atom count, a comment line, then one `Element x y z` line per atom (plain numbers, Å). No bonds needed; they're inferred from distance.
 - ```calc — arithmetic, unit conversion, dates, matrices. Body: one expression per line, e.g. `5 km/h to m/s` or `(1250 * 1.19) / 3`. Never do multi-step arithmetic in prose — emit it here and the app computes it exactly.
 - ```stats — descriptive statistics and linear regression. Body: `data: 4, 8, 15, 16, 23, 42` (optionally `x:` and `y:` lines for regression). The app computes mean/median/sd/quartiles/correlation — do not compute them yourself.
 - ```solve — symbolic algebra. Body: one per line — `derivative: x^3 + 2x` , `simplify: (x^2-1)/(x-1)` , `solve: x^2 - 5x + 6 = 0` , `evaluate: ...`.
@@ -316,7 +317,7 @@ Syntax: standard math — ^ for powers, * optional (3x is fine), functions sin c
 
 === CUSTOM SVG — only when no lane above fits ===
 Every chart, diagram, plot, map and construction has a dedicated lane above; use it. Hand-drawn SVG is a last resort for a bespoke illustration, because coordinates you compute by hand are frequently wrong.
-If you must: one ```svg block, root `<svg width="640" height="360" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">`, a white background `<rect>`, and explicit non-white colours on every shape (the card is white in both themes). Allowed: svg g path line polyline polygon rect circle ellipse text tspan defs linearGradient radialGradient stop clipPath marker use title desc, styled with presentation attributes. Stripped, so never used: <style>, <script>, <foreignObject>, on* handlers, external URLs. <text> does not wrap and does not render LaTeX or Markdown — keep labels short, use Unicode superscripts (a², x²), and keep everything inside 0..640 x 0..360.
+If you must: one ```svg block, root `<svg width="640" height="360" viewBox="0 0 640 360" xmlns="http://www.w3.org/2000/svg">`, a white background `<rect>`, and explicit non-white colours on every shape (the card is white in both themes). Allowed: svg g path line polyline polygon rect circle ellipse text tspan defs linearGradient radialGradient stop clipPath marker use title desc animateTransform animateMotion, styled with presentation attributes. The app genuinely animates: nest an `<animateTransform>` (type="translate"/"rotate"/"scale"/"skewX") or `<animateMotion>` (a `path` to follow) inside the shape it moves, e.g. `<animateTransform attributeName="transform" type="translate" values="0,0; 100,0; 0,0" dur="2s" repeatCount="indefinite"/>` — use this whenever asked to animate, move, or bounce something. Stripped, so never used: <style>, <script>, <foreignObject>, plain `<animate>` (silently dropped — use animateTransform/animateMotion instead), on* handlers, external URLs. <text> does not wrap and does not render LaTeX or Markdown — keep labels short, use Unicode superscripts (a², x²), and keep everything inside 0..640 x 0..360.
 
 === MUSIC / SHEET NOTATION ===
 For music or sheet-music notation, do NOT draw notes as SVG. Output ABC notation in a fenced block whose language tag is exactly `abc` (lowercase) — the app renders it to a proper score. Emit valid ABC: an information header, then the tune body. Minimal template:
@@ -3829,6 +3830,13 @@ async def api_claude_status(key: str | None = None):
     Verify the Claude API key. Accepts an optional ?key= param so the UI
     can test an unsaved key without requiring a save-first workflow.
     """
+    # The Settings form pre-fills an already-saved key's field with
+    # _SECRET_SENTINEL (the redacted placeholder from GET /api/config), and the
+    # Test button sends whatever's in the field. Without this check, testing an
+    # already-saved key would send the literal sentinel string as the API key
+    # instead of falling back to the real one below.
+    if key == _SECRET_SENTINEL:
+        key = None
     api_key  = key or _config.get("claude", {}).get("api_key", "")
     base_url = _config.get("claude", {}).get("base_url", "https://api.anthropic.com").rstrip("/")
     if not api_key:
@@ -3859,6 +3867,8 @@ async def api_claude_status(key: str | None = None):
 @app.get("/api/status/openai")
 async def api_openai_status(key: str | None = None):
     """Verify the OpenAI API key using the native SDK. Accepts optional ?key= for testing unsaved keys."""
+    if key == _SECRET_SENTINEL:
+        key = None
     api_key  = key or _config.get("openai", {}).get("api_key", "")
     base_url = _config.get("openai", {}).get("base_url", "https://api.openai.com").rstrip("/")
     if not api_key:
@@ -3876,6 +3886,8 @@ async def api_openai_status(key: str | None = None):
 @app.get("/api/status/qwen")
 async def api_qwen_status(key: str | None = None):
     """Verify the Qwen API key. Accepts optional ?key= for testing unsaved keys."""
+    if key == _SECRET_SENTINEL:
+        key = None
     api_key  = key or _config.get("qwen", {}).get("api_key", "")
     base_url = _config.get("qwen", {}).get("base_url",
                            "https://dashscope.aliyuncs.com/compatible-mode/v1").rstrip("/")
@@ -3896,8 +3908,17 @@ async def api_qwen_status(key: str | None = None):
 
 
 @app.get("/api/status/mistral")
-async def api_mistral_status(key: str | None = None):
-    """Verify the Mistral API key. Accepts optional ?key= for testing unsaved keys."""
+async def api_mistral_status(key: str | None = None, probe: bool = False):
+    """Verify the Mistral API key. Accepts optional ?key= for testing unsaved keys.
+    The cheap check is GET /models; some free-tier keys are denied that specific
+    endpoint (401) while chat completions work fine, so a bare /models 401 is not
+    proof the key itself is invalid. The periodic background poll (checkCloudStatus,
+    every 5 min) relies on the cheap check alone and accepts that rare imprecision.
+    ?probe=1 — sent only by the user-initiated Settings "Test" button — confirms a
+    /models failure with one minimal real chat-completion call before reporting the
+    key as invalid."""
+    if key == _SECRET_SENTINEL:
+        key = None
     api_key  = key or _config.get("mistral", {}).get("api_key", "")
     base_url = _config.get("mistral", {}).get("base_url", "https://api.mistral.ai/v1").rstrip("/")
     if not api_key:
@@ -3915,7 +3936,17 @@ async def api_mistral_status(key: str | None = None):
                 msg = body.get("message") or body.get("error") or f"HTTP {res.status_code}"
             except Exception:
                 msg = f"HTTP {res.status_code}"
-            return {"ok": False, "error": msg}
+            if not probe or not _OPENAI_SDK_AVAILABLE:
+                return {"ok": False, "error": msg}
+            try:
+                model = _config.get("mistral", {}).get("model") or MISTRAL_MODELS_STATIC[0]["id"]
+                client2 = _cached_client("openai", api_key, base_url)
+                await client2.chat.completions.create(
+                    model=model, messages=[{"role": "user", "content": "hi"}], max_tokens=1,
+                )
+                return {"ok": True}
+            except Exception as e2:
+                return {"ok": False, "error": f"Mistral error: {e2}"}
     except Exception as e:
         return {"ok": False, "error": str(e)}
 
@@ -3923,6 +3954,8 @@ async def api_mistral_status(key: str | None = None):
 @app.get("/api/status/groq")
 async def api_groq_status(key: str | None = None):
     """Verify the Groq API key using the openai SDK. Accepts optional ?key= for testing unsaved keys."""
+    if key == _SECRET_SENTINEL:
+        key = None
     api_key  = key or _config.get("groq", {}).get("api_key", "")
     base_url = _config.get("groq", {}).get("base_url", "https://api.groq.com/openai").rstrip("/")
     if not api_key:
@@ -3938,20 +3971,37 @@ async def api_groq_status(key: str | None = None):
 
 
 @app.get("/api/status/gemini")
-async def api_gemini_status(key: str | None = None):
-    """Verify the Gemini API key using the native SDK. Accepts optional ?key= for unsaved keys."""
+async def api_gemini_status(key: str | None = None, probe: bool = False):
+    """Verify the Gemini API key using the native SDK. Accepts optional ?key= for
+    unsaved keys. The cheap check is models.list(); some keys are denied that
+    specific method (403 PERMISSION_DENIED) while generateContent still works
+    fine, so a bare list() failure is not proof the key itself is invalid. The
+    periodic background poll (checkCloudStatus, every 5 min) relies on the cheap
+    check alone and accepts that rare imprecision. ?probe=1 — sent only by the
+    user-initiated Settings "Test" button — confirms a list() failure with one
+    minimal real generateContent call before reporting the key as invalid."""
+    if key == _SECRET_SENTINEL:
+        key = None
     api_key = key or _config.get("gemini", {}).get("api_key", "")
     if not api_key:
         return {"ok": False, "error": "No API key configured. Get a free key at aistudio.google.com"}
     if not _GENAI_AVAILABLE:
         return {"ok": False, "error": "google-genai not installed. Run: pip install google-genai"}
+    client = _google_genai.Client(api_key=api_key)
     try:
-        client = _google_genai.Client(api_key=api_key)
         await asyncio.get_event_loop().run_in_executor(
             None, lambda: next(iter(client.models.list()), None))
         return {"ok": True}
     except Exception as e:
-        return {"ok": False, "error": _gemini_err_msg(e)}
+        if not probe:
+            return {"ok": False, "error": _gemini_err_msg(e)}
+        try:
+            model = _config.get("gemini", {}).get("model") or GEMINI_MODELS_STATIC[0]["id"]
+            await asyncio.get_event_loop().run_in_executor(
+                None, lambda: client.models.generate_content(model=model, contents="hi"))
+            return {"ok": True}
+        except Exception as e2:
+            return {"ok": False, "error": _gemini_err_msg(e2)}
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ROUTES — MODELS
