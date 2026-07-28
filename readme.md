@@ -8,7 +8,14 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg" alt="License: AGPL-3.0-or-later"></a>
+  <a href="https://github.com/SFCyris/RediRecall/releases/latest"><img src="https://img.shields.io/github/v/release/SFCyris/RediRecall?include_prereleases&sort=semver" alt="Latest release"></a>
+  <a href="https://github.com/SFCyris/RediRecall/pkgs/container/redirecall"><img src="https://img.shields.io/badge/ghcr.io-redirecall-2496ED?logo=docker&logoColor=white" alt="Docker image on GHCR"></a>
   <img src="https://img.shields.io/badge/python-3.11%2B-blue.svg" alt="Python 3.11+">
+</p>
+
+<p align="center">
+  <strong><a href="https://github.com/SFCyris/RediRecall/releases/latest/download/redirecall-latest.zip">⬇&nbsp; Download the latest release</a></strong>
+  &nbsp;·&nbsp; <a href="https://github.com/SFCyris/RediRecall/releases/latest">release notes</a>
 </p>
 
 ---
@@ -76,15 +83,11 @@ The bottom group (`calc`, `solve`, `stats`, `table`, `diff`, `regex`, `truth`) i
   <img src="screenshots/rendering/plot3d.png" alt="3D surface plot rendered in a chat answer" width="32%">
   <img src="screenshots/rendering/molecule.png" alt="Chemical structure rendered in a chat answer" width="32%">
 </p>
-
-Every rendered figure gets a **Source** toggle, **Copy** button, and an **⛶ Maximize** button that opens it full-viewport; most also have a **⬇ PNG** export.
-
 <p align="center">
-  <img src="screenshots/rendering/molecule3d.png" alt="Rotatable 3D molecule structure rendered in a chat answer" width="49%">
-  <img src="screenshots/rendering/maximize.png" alt="A rendered figure opened full-viewport with the Maximize button" width="49%">
+  <img src="screenshots/rendering/molecule3d.png" alt="Rotatable 3D molecule structure rendered in a chat answer" width="32%">
 </p>
 
-<p align="center"><sub>Left: the ` ```molecule3d ` lane (3Dmol.js) — rotatable and zoomable. &nbsp;&bull;&nbsp; Right: any card opened full-viewport with the ⛶ Maximize button.</sub></p>
+Every rendered figure gets a **Source** toggle, **Copy** button, and an **⛶ Maximize** button that opens it full-viewport; most also have a **⬇ PNG** export.
 
 The heavier renderers (Mermaid, Chart.js, Plotly, Leaflet, JSXGraph, Viz.js, SmilesDrawer, 3Dmol.js, highlight.js) are **lazy-loaded on first use**, so they cost nothing at page load. All renderer libraries come from a public CDN; ` ```map ` additionally requests OpenStreetMap tiles for the coordinates shown. See [DOCS.md](DOCS.md#rich-content-rendering) for the full reference.
 

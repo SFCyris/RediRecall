@@ -1,0 +1,60 @@
+name: Attach source zip to release
+
+# On every version tag (e.g. `git tag v1.3.1 && git push origin v1.3.1`), builds a
+# plain source zip and attaches it to the GitHub release as both a versioned name
+# and a constant "latest" name, so releases/latest/download/redirecall-latest.zip
+# is a stable one-click permalink. Runs alongside docker-publish.yml, which
+# handles the Docker image separately.
+#
+# This does NOT create the release itself — releases here are cut by hand with
+# hand-written notes once the Docker build is verified, which can take a while
+# after the tag lands. So this polls for the release to exist (up to ~20 min)
+# and uploads the zip once it does, instead of racing ahead with a generic
+# --generate-notes release that would then conflict with the real one.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  release-zip:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # upload assets to the (separately created) release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build source zip
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP="redirecall-${VERSION}.zip"
+          git archive --format=zip --prefix="redirecall-${VERSION}/" -o "$ZIP" HEAD
+          cp "$ZIP" redirecall-latest.zip
+          echo "Built $ZIP ($(du -h "$ZIP" | cut -f1))"
+
+      - name: Wait for the release to exist, then attach the zip
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP="redirecall-${VERSION}.zip"
+          for i in $(seq 1 40); do
+            if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+              gh release upload "${GITHUB_REF_NAME}" "$ZIP" redirecall-latest.zip --clobber
+              echo "Attached $ZIP and redirecall-latest.zip to ${GITHUB_REF_NAME}."
+              exit 0
+            fi
+            echo "Release ${GITHUB_REF_NAME} not published yet (attempt $i/40) — waiting 30s…"
+            sleep 30
+          done
+          echo "::warning::Release ${GITHUB_REF_NAME} never appeared within 20 minutes. Re-run this workflow (workflow_dispatch) once it's published."
+          exit 1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-zip
+          path: redirecall-*.zip
+          retention-days: 14
