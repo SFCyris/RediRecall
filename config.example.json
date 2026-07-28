@@ -27,6 +27,11 @@
     "model": "qwen-plus",
     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
   },
+  "mistral": {
+    "api_key": "",
+    "model": "mistral-small-latest",
+    "base_url": "https://api.mistral.ai/v1"
+  },
   "groq": {
     "api_key": "",
     "model": "llama-3.3-70b-versatile",

@@ -106,9 +106,39 @@ else
 fi
 
 # ── Status banner ─────────────────────────────────────────────────────────────
+# Version: read the same __version__ the app imports (they match right after start).
+APP_VERSION="$(sed -n 's/^__version__ *= *["'"'"']\(.*\)["'"'"']/\1/p' "${REPO_DIR}/redirecall/__init__.py" 2>/dev/null)"
+[ -z "${APP_VERSION}" ] && APP_VERSION="?"
+
+# Best-effort primary LAN IPv4, for the case where the app is bound to all interfaces.
+_lan_ip() {
+  local ip=""
+  if command -v ipconfig >/dev/null 2>&1; then
+    for _if in en0 en1 en2 en3; do ip="$(ipconfig getifaddr "${_if}" 2>/dev/null || true)"; [ -n "${ip}" ] && break; done
+  fi
+  [ -z "${ip}" ] && command -v hostname >/dev/null 2>&1 && ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+  printf '%s' "${ip}"
+}
+
+# Every URL the UI can be reached at, given the bind host.
+APP_URLS=()
+case "${APP_HOST}" in
+  0.0.0.0|::|"")
+    APP_URLS+=("http://localhost:${APP_PORT}")
+    _ip="$(_lan_ip)"; [ -n "${_ip}" ] && APP_URLS+=("http://${_ip}:${APP_PORT}  (LAN)")
+    ;;
+  127.0.0.1|localhost)
+    APP_URLS+=("http://127.0.0.1:${APP_PORT}" "http://localhost:${APP_PORT}")
+    ;;
+  *)
+    APP_URLS+=("http://${APP_HOST}:${APP_PORT}")
+    ;;
+esac
+
 c_info ""
-c_ok "══ RediRecall is running ══"
-c_info "  Web UI:   http://${APP_HOST}:${APP_PORT}"
+c_ok "══ RediRecall v${APP_VERSION} is running ══"
+c_info "  Web UI:   ${APP_URLS[0]}"
+for _u in "${APP_URLS[@]:1}"; do c_info "            ${_u}"; done
 c_info "  Redis:    127.0.0.1:${RPORT} (dedicated, AOF everysec)"
 c_info "  App log:  ${APP_LOG}"
 c_info "  Redis log:${REDIS_LOG}"

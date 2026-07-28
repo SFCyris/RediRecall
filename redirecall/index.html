@@ -370,6 +370,7 @@ table.data-table tr:last-child td{border-bottom:none}
 .provider-seg button.active.claude-active{background:linear-gradient(135deg,#d97706,#b45309);box-shadow:0 2px 8px rgba(217,119,6,.4)}
 .provider-seg button.active.openai-active{background:linear-gradient(135deg,#10a37f,#0d8c6d);box-shadow:0 2px 8px rgba(16,163,127,.4)}
 .provider-seg button.active.qwen-active{background:linear-gradient(135deg,#6366f1,#4f46e5);box-shadow:0 2px 8px rgba(99,102,241,.4)}
+.provider-seg button.active.mistral-active{background:linear-gradient(135deg,#ff7000,#fa500f);box-shadow:0 2px 8px rgba(250,80,15,.4)}
 .provider-seg button.active.groq-active{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 2px 8px rgba(249,115,22,.4)}
 .provider-seg button.active.gemini-active{background:linear-gradient(135deg,#1d9bf0,#1a8cd8);box-shadow:0 2px 8px rgba(29,155,240,.4)}
 /* ── Generated image card ── */
@@ -393,6 +394,7 @@ table.data-table tr:last-child td{border-bottom:none}
 .see-also-link:hover{color:var(--accent);border-bottom-color:var(--accent)}
 .rag-source-pill{display:inline-flex;align-items:center;gap:3px;font-size:10px;padding:1px 7px;border-radius:8px;background:rgba(124,111,247,.10);border:1px solid rgba(124,111,247,.2);color:var(--accent3);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* ── LaTeX block render ── */
+.rr-display{display:block;margin:8px 0}
 .katex-block-wrap{margin:10px 0;border:1px solid rgba(124,111,247,.25);border-radius:var(--r2);overflow:hidden;background:var(--glass)}
 .katex-block-bar{display:flex;align-items:center;gap:6px;padding:5px 12px;background:rgba(124,111,247,.07);border-bottom:1px solid rgba(124,111,247,.18)}
 .katex-block-label{font-size:10px;font-weight:700;color:var(--accent3);letter-spacing:.5px;flex:1;text-transform:uppercase}
@@ -601,6 +603,7 @@ table.data-table tr:last-child td{border-bottom:none}
       <div class="status-dot" onclick="openSettings('claude')"><div class="dot" id="claude-dot" style="background:var(--text2)"></div><span id="claude-label">Claude</span></div>
       <div class="status-dot" onclick="openSettings('openai')"><div class="dot" id="openai-dot" style="background:var(--text2)"></div><span id="openai-label">OpenAI</span></div>
       <div class="status-dot" onclick="openSettings('qwen')"><div class="dot" id="qwen-dot" style="background:var(--text2)"></div><span id="qwen-label">Qwen</span></div>
+      <div class="status-dot" onclick="openSettings('mistral')"><div class="dot" id="mistral-dot" style="background:var(--text2)"></div><span id="mistral-label">Mistral</span></div>
       <div class="status-dot" onclick="openSettings('groq')"><div class="dot" id="groq-dot" style="background:var(--text2)"></div><span id="groq-label">Groq</span></div>
       <div class="status-dot" onclick="openSettings('gemini')"><div class="dot" id="gemini-dot" style="background:var(--text2)"></div><span id="gemini-label">Gemini</span></div>
     </div>
@@ -646,6 +649,7 @@ table.data-table tr:last-child td{border-bottom:none}
         <button id="prov-claude" onclick="setProvider('claude')">✦ Claude</button>
         <button id="prov-openai" onclick="setProvider('openai')">◆ OpenAI</button>
         <button id="prov-qwen" onclick="setProvider('qwen')">◈ Qwen</button>
+        <button id="prov-mistral" onclick="setProvider('mistral')">◐ Mistral</button>
         <button id="prov-groq" onclick="setProvider('groq')">▲ Groq</button>
         <button id="prov-gemini" onclick="setProvider('gemini')">✧ Gemini</button>
       </div>
@@ -936,6 +940,38 @@ table.data-table tr:last-child td{border-bottom:none}
           <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
             <button class="btn btn-secondary btn-sm" onclick="testQwen()">🔌 Test</button>
             <div id="qwen-test-result" style="font-size:12px"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mistral -->
+      <div class="prov-card" id="pc-mistral">
+        <div class="prov-card-hd" onclick="toggleProvCard('mistral')">
+          <div class="dot" id="mistral-dot-cfg" style="width:9px;height:9px;border-radius:50%;background:var(--text3);flex-shrink:0"></div>
+          <span class="prov-name">◐ Mistral</span>
+          <span class="prov-tag tag-free">Free tier</span>
+          <span class="prov-model-hint" id="pc-mistral-sub"></span>
+          <button class="prov-use-btn" id="pc-mistral-use" onclick="event.stopPropagation();setProvider('mistral')">Use</button>
+          <span class="prov-chevron">›</span>
+        </div>
+        <div class="prov-card-bd" id="pc-mistral-bd">
+          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Mistral La Plateforme (EU-hosted, OpenAI-compatible). The free <strong>Experiment</strong> tier covers every model, needs no credit card (phone verification only). Get a free key at <a href="https://console.mistral.ai" target="_blank" style="color:var(--accent)">console.mistral.ai</a>.</p>
+          <div class="form-group"><label>API Key</label><input type="password" id="s-mistral-key" placeholder="… (or set MISTRAL_API_KEY env var)"/><div class="form-hint" id="mistral-key-hint">Get a free key at console.mistral.ai</div></div>
+          <div class="form-group"><label>Default Model</label>
+            <select id="s-mistral-model">
+              <option value="mistral-small-latest">mistral-small-latest — Free tier (recommended)</option>
+              <option value="open-mistral-nemo">open-mistral-nemo — Free tier</option>
+              <option value="mistral-large-latest">mistral-large-latest — Flagship</option>
+              <option value="codestral-latest">codestral-latest — Code</option>
+              <option value="ministral-8b-latest">ministral-8b-latest</option>
+              <option value="ministral-3b-latest">ministral-3b-latest</option>
+              <option value="pixtral-12b-2409">pixtral-12b — Vision</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Base URL</label><input type="text" id="s-mistral-base" placeholder="https://api.mistral.ai/v1"/><div class="form-hint">Mistral OpenAI-compatible endpoint</div></div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
+            <button class="btn btn-secondary btn-sm" onclick="testMistral()">🔌 Test</button>
+            <div id="mistral-test-result" style="font-size:12px"></div>
           </div>
         </div>
       </div>
@@ -1233,7 +1269,7 @@ const S={
   chatMetrics:{hits:0,misses:0,latencies:[]},msgIdCounter:0,
   provider:'ollama',ragAllMode:true,
   ragExportFormat: localStorage.getItem('ragExportFormat')||'zip',
-  providerModels:{ollama:'',claude:'',openai:'',qwen:'',groq:'',gemini:''}
+  providerModels:{ollama:'',claude:'',openai:'',qwen:'',mistral:'',groq:'',gemini:''}
 };
 const streamingContent={};
 // Streaming render is throttled (~14fps) instead of per-token to avoid O(n^2)
@@ -1351,6 +1387,8 @@ async function loadModels(){
     await loadOpenAIModels();
   } else if(S.provider==='qwen'){
     await loadQwenModels();
+  } else if(S.provider==='mistral'){
+    await loadMistralModels();
   } else if(S.provider==='groq'){
     await loadGroqModels();
   } else if(S.provider==='gemini'){
@@ -1407,6 +1445,18 @@ async function loadQwenModels(){
   }catch(e){document.getElementById('model-select').innerHTML='<option value="">Qwen models unavailable</option>';S.currentModel='';}
 }
 
+async function loadMistralModels(){
+  try{
+    const models=await fetch('/api/mistral/models').then(r=>r.json());
+    const sel=document.getElementById('model-select');
+    const preferred=(S.providerModels||{}).mistral||S.config.mistral?.model||'mistral-small-latest';
+    sel.innerHTML=models.map(m=>`<option value="${m.id}" ${m.id===preferred?'selected':''}>${m.name||m.id}</option>`).join('');
+    const ids=models.map(m=>m.id);
+    if(!ids.includes(preferred)&&models.length){sel.value=models[0].id;}
+    if(sel.value)selectModel(sel.value);
+  }catch(e){document.getElementById('model-select').innerHTML='<option value="">Mistral models unavailable</option>';S.currentModel='';}
+}
+
 async function loadGroqModels(){
   try{
     const models=await fetch('/api/groq/models').then(r=>r.json());
@@ -1442,7 +1492,7 @@ function setProvider(p){
   S.currentModel = (S.providerModels||{})[p] || ''; // restore last-used model for this provider
   applyProvider(p);
   loadModels();
-  const label={'ollama':'Ollama','claude':'Claude API','openai':'OpenAI','qwen':'Qwen','groq':'Groq','gemini':'Gemini'}[p]||p;
+  const label={'ollama':'Ollama','claude':'Claude API','openai':'OpenAI','qwen':'Qwen','mistral':'Mistral','groq':'Groq','gemini':'Gemini'}[p]||p;
   toast(`Provider: ${label}`,'info');
 }
 
@@ -1451,10 +1501,11 @@ function applyProvider(p){
   document.getElementById('prov-claude').className=p==='claude'?'active claude-active':'';
   document.getElementById('prov-openai').className=p==='openai'?'active openai-active':'';
   document.getElementById('prov-qwen').className=p==='qwen'?'active qwen-active':'';
+  document.getElementById('prov-mistral').className=p==='mistral'?'active mistral-active':'';
   document.getElementById('prov-groq').className=p==='groq'?'active groq-active':'';
   document.getElementById('prov-gemini').className=p==='gemini'?'active gemini-active':'';
   // Update accordion card active states
-  ['ollama','claude','openai','qwen','groq','gemini'].forEach(name=>{
+  ['ollama','claude','openai','qwen','mistral','groq','gemini'].forEach(name=>{
     const card=document.getElementById('pc-'+name);
     const btn=document.getElementById('pc-'+name+'-use');
     if(card)card.classList.toggle('pc-active',name===p);
@@ -1519,6 +1570,26 @@ async function testQwen(){
   try{
     const qs=formKey?`?key=${encodeURIComponent(formKey)}`:'';
     const r=await fetch(`/api/status/qwen${qs}`).then(r=>r.json());
+    if(r.ok){
+      el.innerHTML=`<span style="color:var(--green)">✓ Connected${fromEnv?' (key from env)':''}</span>`;
+    } else {
+      el.innerHTML=`<span style="color:var(--red)">✗ ${escHtml(r.error||'Failed')}</span>`;
+    }
+  }catch(e){el.innerHTML=`<span style="color:var(--red)">✗ Network error: ${escHtml(e.message)}</span>`;}
+}
+
+async function testMistral(){
+  const el=document.getElementById('mistral-test-result');
+  el.innerHTML='<span style="color:var(--yellow)">⏳ Testing…</span>';
+  const fromEnv=!!S.config.mistral_key_from_env;
+  const formKey=getVal('s-mistral-key');
+  if(!fromEnv&&!formKey){
+    el.innerHTML='<span style="color:var(--red)">✗ No API key — get a free key at console.mistral.ai or set MISTRAL_API_KEY env var</span>';
+    return;
+  }
+  try{
+    const qs=formKey?`?key=${encodeURIComponent(formKey)}`:'';
+    const r=await fetch(`/api/status/mistral${qs}`).then(r=>r.json());
     if(r.ok){
       el.innerHTML=`<span style="color:var(--green)">✓ Connected${fromEnv?' (key from env)':''}</span>`;
     } else {
@@ -1659,6 +1730,12 @@ async function checkCloudStatus(){
   else{
     try{const q=await fetch('/api/status/qwen').then(r=>r.json());_setDot('qwen-dot',q.ok);}
     catch{_setDot('qwen-dot',false);}
+  }
+  const hasMistralKey=S.config.mistral?.api_key||S.config.mistral_key_from_env;
+  if(!hasMistralKey){_setDot('mistral-dot',false,true);}
+  else{
+    try{const m=await fetch('/api/status/mistral').then(r=>r.json());_setDot('mistral-dot',m.ok);}
+    catch{_setDot('mistral-dot',false);}
   }
   const hasGroqKey=S.config.groq?.api_key||S.config.groq_key_from_env;
   if(!hasGroqKey){_setDot('groq-dot',false,true);}
@@ -2446,7 +2523,7 @@ function finalizeStreamingMsg(id){
   const bubble=el.querySelector('.msg-bubble');
   if(bubble){
     bubble.classList.remove('streaming-active'); // stop colour cycling
-    bubble.innerHTML=renderMarkdown(raw);renderMath(bubble);renderAbcBlocks(bubble);renderPlotBlocks(bubble);renderRichBlocks(bubble);highlightCode(bubble);addCopyButtons(bubble);
+    bubble.innerHTML=renderMarkdown(raw,{math:true});renderMath(bubble);renderAbcBlocks(bubble);renderPlotBlocks(bubble);renderRichBlocks(bubble);highlightCode(bubble);addCopyButtons(bubble);
   }
   const sess=S.sessions[S.sessionId];
   if(sess)sess.messages.push({role:'assistant',content:raw,meta:{id}});
@@ -2641,7 +2718,7 @@ function appendMessage(role,content,meta={}){
     <div class="msg-avatar ${avatarClass}">${avatarContent}</div>
     <div class="msg-body">
       ${meta.images?.length?meta.images.map(img=>`<img src="${img}" class="msg-img" alt="attached"/>`).join(''):''}
-      <div class="msg-bubble ${isUser?'user':'ai'}">${isUser?escHtml(content):renderMarkdown(content)}</div>
+      <div class="msg-bubble ${isUser?'user':'ai'}">${isUser?escHtml(content):renderMarkdown(content,{math:true})}</div>
       ${meta.files?.length?`<div class="msg-files">${meta.files.map(n=>`<span class="msg-file-tag">📄 ${escHtml(n)}</span>`).join('')}</div>`:''}
       ${!isUser?`<div class="msg-raw" id="${id}-raw"></div>`:''}
       <div class="msg-meta">
@@ -2925,7 +3002,7 @@ function toggleMic(){
 // ── Settings ──────────────────────────────────────────────────────────────────
 function openSettings(tab='general'){
   document.getElementById('settings-overlay').classList.add('open');
-  const providerNames=['ollama','claude','openai','qwen','groq','gemini'];
+  const providerNames=['ollama','claude','openai','qwen','mistral','groq','gemini'];
   if(providerNames.includes(tab)){
     switchTab('providers');
     setTimeout(()=>openProvCard(tab),30);
@@ -3057,6 +3134,24 @@ function populateSettingsForm(){
     setVal('s-qwen-key','');
     if(qwenKeyHint)qwenKeyHint.innerHTML='No key found. Get a free key at <a href="https://qwen.ai/home" target="_blank">qwen.ai</a> or set <code style="font-size:10px">DASHSCOPE_API_KEY</code> env var.';
   }
+  // ── Mistral settings ──
+  setVal('s-mistral-model',c.mistral?.model||'mistral-small-latest');
+  setVal('s-mistral-base',c.mistral?.base_url||'https://api.mistral.ai/v1');
+  setCheck('s-mistral-default',(c.provider||'ollama')==='mistral');
+  const mistralKeyInput=document.getElementById('s-mistral-key');
+  const mistralKeyHint=document.getElementById('mistral-key-hint');
+  const mistralFromEnv=!!c.mistral_key_from_env;
+  if(mistralFromEnv){
+    setVal('s-mistral-key','');
+    if(mistralKeyInput)mistralKeyInput.placeholder='(active — loaded from MISTRAL_API_KEY)';
+    if(mistralKeyHint)mistralKeyHint.innerHTML='<span style="color:var(--green)">✓ API key active from <code style="font-size:10px">MISTRAL_API_KEY</code> env var — not stored in config.json</span>';
+  } else if(c.mistral?.api_key){
+    setVal('s-mistral-key',c.mistral.api_key);
+    if(mistralKeyHint)mistralKeyHint.textContent='Key stored in config.json. Clear and set MISTRAL_API_KEY env var to avoid disk storage.';
+  } else {
+    setVal('s-mistral-key','');
+    if(mistralKeyHint)mistralKeyHint.innerHTML='No key found. Get a free key at <a href="https://console.mistral.ai" target="_blank">console.mistral.ai</a> or set <code style="font-size:10px">MISTRAL_API_KEY</code> env var.';
+  }
   // ── Groq settings ──
   setVal('s-groq-model',c.groq?.model||'llama-3.3-70b-versatile');
   setVal('s-groq-base',c.groq?.base_url||'https://api.groq.com/openai');
@@ -3098,6 +3193,7 @@ function populateSettingsForm(){
     claude:S.config.claude?.model||'claude-sonnet-4-6',
     openai:S.config.openai?.model||'gpt-4o',
     qwen:S.config.qwen?.model||'qwen-plus',
+    mistral:S.config.mistral?.model||'mistral-small-latest',
     groq:S.config.groq?.model||'llama-3.3-70b-versatile',
     gemini:S.config.gemini?.model||'gemini-3-flash-preview',
   };
@@ -3140,6 +3236,7 @@ async function saveSettings(){
     claude:{api_key:S.config.claude_key_from_env?'':getVal('s-claude-key')||'',model:getVal('s-claude-model'),base_url:getVal('s-claude-base')||'https://api.anthropic.com'},
     openai:{api_key:S.config.openai_key_from_env?'':getVal('s-openai-key')||'',model:getVal('s-openai-model')||'gpt-4o',base_url:getVal('s-openai-base')||'https://api.openai.com'},
     qwen:{api_key:S.config.qwen_key_from_env?'':getVal('s-qwen-key')||'',model:getVal('s-qwen-model')||'qwen-plus',base_url:getVal('s-qwen-base')||'https://dashscope.aliyuncs.com/compatible-mode/v1'},
+    mistral:{api_key:S.config.mistral_key_from_env?'':getVal('s-mistral-key')||'',model:getVal('s-mistral-model')||'mistral-small-latest',base_url:getVal('s-mistral-base')||'https://api.mistral.ai/v1'},
     groq:{api_key:S.config.groq_key_from_env?'':getVal('s-groq-key')||'',model:getVal('s-groq-model')||'llama-3.3-70b-versatile',base_url:getVal('s-groq-base')||'https://api.groq.com/openai'},
     gemini:{api_key:S.config.gemini_key_from_env?'':getVal('s-gemini-key')||'',model:getVal('s-gemini-model')||'gemini-3-flash-preview'},
     provider:S.provider,
@@ -4426,14 +4523,43 @@ function _wrapLooseSvg(text){
     return '\n\n```svg\n'+m.trim()+'\n```\n\n';
   });
 }
-function renderMarkdown(text){
+function renderMarkdown(text,opts){
+  opts=opts||{};
   if(!text)return'';
   // Fail closed: the sanitiser is the only thing standing between untrusted
   // model/RAG output and the DOM. If DOMPurify didn't load (CDN blocked, offline
   // install), render escaped plain text rather than raw, unsanitised HTML.
   if(!window.DOMPurify || typeof marked==='undefined'){ return escHtml(text); }
   text=_wrapLooseSvg(text);   // models often emit a raw <svg> with no code fence
+  // Protect LaTeX from the markdown parser: marked would consume the underscores
+  // in e.g. \text{H}_{12} as emphasis and corrupt the math BEFORE KaTeX renders it.
+  // Code spans are hidden FIRST so the math extractor never reaches a `$` that lives
+  // inside inline/fenced code (e.g. `$PATH`, `$HOME`) — those must stay literal text,
+  // not be swallowed as a math span. Code is restored before marked so it still renders.
+  const _code=[];
+  const _cstash=m=>{_code.push(m);return '\uE100'+(_code.length-1)+'\uE101';};
+  text=text
+    .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g,_cstash)   // fenced code / render-lane blocks
+    .replace(/(`+)[^\n]*?\1/g,_cstash);                    // inline `code`
+  const _math=[];  // {tex, display} — delimiters stripped, display mode recorded
+  const _mstash=display=>(m,tex)=>{_math.push({tex,display});return '\uE000'+(_math.length-1)+'\uE001';};
+  text=text
+    .replace(/\$\$([\s\S]+?)\$\$/g,_mstash(true))              // $$ display $$
+    .replace(/\\\[([\s\S]+?)\\\]/g,_mstash(true))            // \[ display \]
+    .replace(/\\\(([\s\S]+?)\\\)/g,_mstash(false))           // \( inline \)
+    .replace(/\$(?=\S)((?:\\.|[^$\n])+?)\$(?!\d)/g,_mstash(false)); // $ inline $ (skip $5 … $10 currency)
+  text=text.replace(/\uE100(\d+)\uE101/g,(m,i)=>_code[Number(i)]); // restore code so marked renders it
   let html=marked.parse(text,{breaks:true,gfm:true});
+  // Restore math. At finalize (opts.math) emit an rr-math marker span carrying the TeX;
+  // renderMath() fills ONLY those spans — so a `$` never extracted (currency like $5 and
+  // $10, or a `$` inside code) stays plain text and is never mis-rendered as math.
+  html=html.replace(/\uE000(\d+)\uE001/g,(m,i)=>{
+    const M=_math[Number(i)];
+    if(opts.math){
+      return '<span class="rr-math'+(M.display?' rr-display':'')+'" data-display="'+(M.display?1:0)+'" data-tex="'+escHtml(M.tex)+'"></span>';
+    }
+    return (M.display?'$$':'$')+M.tex+(M.display?'$$':'$'); // streaming/fallback: raw delimiters
+  });
   html=_wrapImagesInCards(html);
   // Final XSS gate: strips <script>, event-handler attributes, javascript: URLs
   // and <style>, while keeping our SVG/LaTeX/image chrome (data-act, not onclick).
@@ -4479,7 +4605,22 @@ function downloadImgFromSrc(src,label){
   img.src=src;
 }
 function renderMath(el){
-  if(window.renderMathInElement)renderMathInElement(el,{delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}],throwOnError:false});
+  // Render ONLY the math spans renderMarkdown extracted (marked as .rr-math). This
+  // replaces KaTeX auto-render (renderMathInElement), which matched every $…$ in the
+  // element and so rendered currency like "$5 and $10" as math. Those spans are never
+  // emitted here, so they stay as the plain text the user typed.
+  if(!el || !window.katex) return;
+  el.querySelectorAll('.rr-math').forEach(span=>{
+    if(span.dataset.rendered) return;
+    span.dataset.rendered='1';
+    const tex=span.getAttribute('data-tex')||'';   // browser already decoded the attribute
+    const display=span.getAttribute('data-display')==='1';
+    try{
+      span.innerHTML=katex.renderToString(tex,{displayMode:display,throwOnError:false,trust:false});
+    }catch(e){
+      span.textContent=(display?'$$':'$')+tex+(display?'$$':'$');
+    }
+  });
 }
 // Draw any ```abc music blocks with abcjs. Runs after the card is in the DOM
 // (abcjs renders INTO an element). Deferred to finalize like KaTeX, so a partial

@@ -66,6 +66,19 @@ rcli() {
   fi
 }
 
+# ── Per-machine overrides (optional, gitignored) ───────────────────────────────
+# .redirecall.env lets you set persistent overrides without editing tracked files or
+# re-typing env vars each run — e.g. REDIRECALL_HOST=0.0.0.0 to serve on the LAN.
+# Real environment variables still win (only unset ones are filled from the file).
+if [ -f "${REPO_DIR}/.redirecall.env" ]; then
+  while IFS='=' read -r _k _v; do
+    _k="${_k#"${_k%%[![:space:]]*}"}"; _k="${_k%"${_k##*[![:space:]]}"}"   # trim key
+    case "${_k}" in ''|\#*) continue ;; esac                              # skip blanks / comments
+    _v="${_v%\"}"; _v="${_v#\"}"                                          # strip optional quotes
+    [ -z "${!_k:-}" ] && export "${_k}=${_v}"                             # real env vars win
+  done < "${REPO_DIR}/.redirecall.env"
+fi
+
 # ── Ports ─────────────────────────────────────────────────────────────────────
 # App (web UI): default 8420, overridable via REDIRECALL_PORT.
 APP_PORT="${REDIRECALL_PORT:-8420}"

@@ -282,6 +282,7 @@ Draw a chart ONLY when the user asks for one (graph/plot/chart/diagram/visualise
 
 === VISUAL BLOCKS — pick the RIGHT fence; the app renders each one ===
 Always prefer one of these over hand-drawing an SVG: you supply a short description and the app does the drawing exactly.
+Every fenced block below is BLOCK-LEVEL: put it on its own lines with a blank line before and after, and with REAL newlines inside (never the literal characters backslash-n). NEVER place a fence inside a Markdown table cell, list item, or blockquote — a fence in a table cell renders as raw text, not a figure. To show structures/figures for several items, put the plain formula or SMILES string as text in the table, then render each item as its own labelled block AFTER the table (e.g. a short heading followed by a ```molecule block).
 - ```plot — a function graph. Body: `y = x^2 + 3x - 2` (one function per line; optional `x = -5 .. 5`). To let the reader explore, declare a parameter and the app renders a live slider that re-plots instantly with no further request: `y = a*sin(b*x)` then `param: a = 0.5 .. 3 (1)` and `param: b = 1 .. 5 (2)`. Prefer this over answering the same question again for a different value.
 - ```chart — data chart (bar/line/pie/doughnut/scatter/radar). Body: Chart.js JSON, e.g. {"type":"bar","data":{"labels":["Q1","Q2"],"datasets":[{"label":"Sales","data":[120,150]}]}}
 - ```mermaid — flowchart, sequence, class, state, ER or Gantt diagram. Body: mermaid syntax, e.g. `graph TD` then `A[Start] --> B{Choice}`.
@@ -367,6 +368,14 @@ DEFAULT_CONFIG: dict = {
         "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
     },
 
+    # ── Mistral (OpenAI-compatible, EU-hosted, free "Experiment" tier) ────────
+    # Get a free API key at console.mistral.ai · Set MISTRAL_API_KEY env var.
+    "mistral": {
+        "api_key": "",
+        "model": "mistral-small-latest",
+        "base_url": "https://api.mistral.ai/v1",
+    },
+
     # ── Groq (OpenAI-compatible, generous free tier) ──────────────────────────
     # Get a free API key at console.groq.com · Fast inference, no credit card.
     "groq": {
@@ -382,7 +391,7 @@ DEFAULT_CONFIG: dict = {
         "model": "gemini-3-flash-preview",
     },
 
-    # ── Active provider: "ollama" | "claude" | "openai" | "qwen" | "groq" | "gemini"
+    # ── Active provider: "ollama" | "claude" | "openai" | "qwen" | "mistral" | "groq" | "gemini"
     "provider": "ollama",
 
     # ── Embedding model (SentenceTransformer) ─────────────────────────────────
@@ -553,6 +562,7 @@ _chat_tasks: dict[str, asyncio.Task] = {}
 _env_key: str = ""          # ANTHROPIC_API_KEY
 _openai_env_key: str = ""   # OPENAI_API_KEY
 _qwen_env_key: str = ""     # DASHSCOPE_API_KEY
+_mistral_env_key: str = ""  # MISTRAL_API_KEY
 _groq_env_key: str = ""     # GROQ_API_KEY
 _gemini_env_key: str = ""   # GEMINI_API_KEY
 
@@ -590,6 +600,8 @@ def save_config(cfg: dict):
         to_save.setdefault("openai", {})["api_key"] = ""
     if _qwen_env_key and to_save.get("qwen", {}).get("api_key") == _qwen_env_key:
         to_save.setdefault("qwen", {})["api_key"] = ""
+    if _mistral_env_key and to_save.get("mistral", {}).get("api_key") == _mistral_env_key:
+        to_save.setdefault("mistral", {})["api_key"] = ""
     if _groq_env_key and to_save.get("groq", {}).get("api_key") == _groq_env_key:
         to_save.setdefault("groq", {})["api_key"] = ""
     if _gemini_env_key and to_save.get("gemini", {}).get("api_key") == _gemini_env_key:
@@ -643,7 +655,7 @@ def compose_system_prompt(client_system: str | None) -> str:
 # ever seeing a secret — and a blank field still clears a key (blank != sentinel).
 
 _SECRET_SENTINEL = "__REDIRECALL_SECRET_KEPT__"
-_PROVIDER_SECRET_KEYS = ("claude", "openai", "qwen", "groq", "gemini")
+_PROVIDER_SECRET_KEYS = ("claude", "openai", "qwen", "mistral", "groq", "gemini")
 
 
 def _redact_secrets(cfg: dict) -> dict:
@@ -2799,6 +2811,57 @@ async def qwen_stream(messages: list, model: str):
     except Exception as e:
         yield f"Qwen error: {e}", True
 
+# ── Mistral ─────────────────────────────────────────────────────────────────────
+# OpenAI-compatible endpoint (api.mistral.ai/v1). EU-hosted. The free "Experiment"
+# tier covers every model with generous limits and needs no credit card (phone
+# verification only) — https://console.mistral.ai.
+MISTRAL_MODELS_STATIC = [
+    {"id": "mistral-small-latest",   "name": "Mistral Small (free tier)",   "context": 32000},
+    {"id": "open-mistral-nemo",      "name": "Mistral Nemo (free tier)",    "context": 128000},
+    {"id": "mistral-large-latest",   "name": "Mistral Large",               "context": 128000},
+    {"id": "codestral-latest",       "name": "Codestral (code)",            "context": 256000},
+    {"id": "ministral-8b-latest",    "name": "Ministral 8B",                "context": 128000},
+    {"id": "ministral-3b-latest",    "name": "Ministral 3B",                "context": 128000},
+    {"id": "pixtral-12b-2409",       "name": "Pixtral 12B (vision)",        "context": 128000},
+]
+
+async def mistral_stream(messages: list, model: str):
+    """
+    Stream tokens from Mistral La Plateforme via the openai SDK (Mistral is
+    OpenAI-compatible). Yields (token: str, done: bool) — same interface as the others.
+
+    Free "Experiment" tier: all models, ~1B tokens/month, no credit card.
+    API key: https://console.mistral.ai (MISTRAL_API_KEY env var supported).
+    """
+    api_key  = _config.get("mistral", {}).get("api_key", "")
+    base_url = _config.get("mistral", {}).get("base_url",
+                           "https://api.mistral.ai/v1").rstrip("/")
+
+    if not api_key:
+        yield "Error: Mistral API key not configured. Get a free key at console.mistral.ai", True
+        return
+    if not _OPENAI_SDK_AVAILABLE:
+        yield "Error: openai package not installed. Run: pip install openai", True
+        return
+
+    try:
+        # Mistral's base_url already includes /v1 — pass it directly to the SDK.
+        client = _cached_client("openai", api_key, base_url)
+        stream = await client.chat.completions.create(
+            model=model, messages=messages, stream=True,
+        )
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                yield delta.content, False
+            if chunk.choices[0].finish_reason:
+                break
+        yield "", True
+    except Exception as e:
+        yield f"Mistral error: {e}", True
+
 # ── Groq ──────────────────────────────────────────────────────────────────────
 # OpenAI-compatible endpoint; very fast inference; generous free tier.
 # Get a free API key at console.groq.com (no credit card required).
@@ -3035,6 +3098,10 @@ async def hyde_generate(query: str, provider: str, model: str) -> str:
                 if done: break
         elif provider == "qwen":
             async for tok, done in qwen_stream(prompt, model):
+                hypothesis += tok
+                if done: break
+        elif provider == "mistral":
+            async for tok, done in mistral_stream(prompt, model):
                 hypothesis += tok
                 if done: break
         elif provider == "groq":
@@ -3330,6 +3397,20 @@ async def _recrawl_loop():
 # STARTUP
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _primary_lan_ip() -> str | None:
+    """Best-effort primary LAN IPv4 (the interface used for outbound traffic).
+    Uses a UDP socket's chosen source address — no packet is actually sent."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        return ip if not ip.startswith("127.") else None
+    except Exception:
+        return None
+    finally:
+        s.close()
+
+
 @app.on_event("startup")
 async def startup():
     """
@@ -3339,15 +3420,42 @@ async def startup():
     - Connects to Redis and warms up the embedding model
     - Prints diagnostic info to stdout
     """
-    global _config, _env_key, _openai_env_key, _qwen_env_key, _groq_env_key, _gemini_env_key
+    global _config, _env_key, _openai_env_key, _qwen_env_key, _mistral_env_key, _groq_env_key, _gemini_env_key
 
     _config = load_config()
     load_logs()
 
     log.info("=" * 60)
-    log.info("Redis RAG — startup diagnostics")
+    log.info(f"RediRecall v{__version__} — startup diagnostics")
     log.info(f"  Config:   {CONFIG_PATH} ({'found' if CONFIG_PATH.exists() else 'NOT FOUND — using defaults'})")
     log.info(f"  Provider: {_config.get('provider', 'ollama')}")
+
+    # ── Access URLs ────────────────────────────────────────────────────────
+    # Show every URL the UI can be reached at, so the user can copy one from the
+    # console. Host/port mirror what cli() binds (REDIRECALL_HOST / REDIRECALL_PORT);
+    # a raw `uvicorn --host/--port` bypasses these env vars, so the URLs below assume
+    # the standard `redirecall` entrypoint.
+    _bind_host = os.environ.get("REDIRECALL_HOST", "127.0.0.1")
+    _port      = os.environ.get("REDIRECALL_PORT", "8420")
+    _in_docker = os.path.exists("/.dockerenv")
+    _urls: list[str] = []
+    if _bind_host in ("0.0.0.0", "::", ""):
+        # Bound to all interfaces — reachable on loopback AND the LAN.
+        _urls.append(f"http://localhost:{_port}")
+        # Inside a container the detected IP is the container's, not the host's, and the
+        # published-port mapping is unknown here — so don't print a misleading LAN URL.
+        _lan_ip = None if _in_docker else _primary_lan_ip()
+        if _lan_ip:
+            _urls.append(f"http://{_lan_ip}:{_port}  (LAN — no built-in auth; trusted networks only)")
+        elif _in_docker:
+            _urls.append(f"(in Docker: reach it at http://<host>:<published-port>)")
+    else:
+        _urls.append(f"http://{_bind_host}:{_port}")
+        if _bind_host == "127.0.0.1":
+            _urls.append(f"http://localhost:{_port}")
+    log.info(f"  Access:   {_urls[0]}")
+    for _u in _urls[1:]:
+        log.info(f"            {_u}")
 
     # ── Anthropic Claude API key ───────────────────────────────────────────
     _env_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -3384,6 +3492,18 @@ async def startup():
         log.info("  DASHSCOPE_API_KEY: from config.json")
     else:
         log.info("  DASHSCOPE_API_KEY: not set — Qwen unavailable")
+
+    # ── Mistral API key ────────────────────────────────────────────────────
+    _mistral_env_key = os.environ.get("MISTRAL_API_KEY", "").strip()
+    stored_mistral = _config.get("mistral", {}).get("api_key", "")
+    if _mistral_env_key:
+        _config.setdefault("mistral", {})["api_key"] = _mistral_env_key
+        masked = _mistral_env_key[:8] + "…" + _mistral_env_key[-4:] if len(_mistral_env_key) > 12 else "***"
+        log.info(f"  MISTRAL_API_KEY:   env ({masked}) — takes precedence over config.json")
+    elif stored_mistral:
+        log.info("  MISTRAL_API_KEY:   from config.json")
+    else:
+        log.info("  MISTRAL_API_KEY:   not set — Mistral unavailable")
 
     # ── Groq API key ───────────────────────────────────────────────────────
     _groq_env_key = os.environ.get("GROQ_API_KEY", "").strip()
@@ -3507,6 +3627,7 @@ def api_get_config():
         "claude_key_from_env":  bool(_env_key),
         "openai_key_from_env":  bool(_openai_env_key),
         "qwen_key_from_env":    bool(_qwen_env_key),
+        "mistral_key_from_env": bool(_mistral_env_key),
         "groq_key_from_env":    bool(_groq_env_key),
         "gemini_key_from_env":  bool(_gemini_env_key),
     }
@@ -3532,6 +3653,8 @@ async def api_save_config(payload: dict):
         _config.setdefault("openai", {})["api_key"] = _openai_env_key
     if _qwen_env_key:
         _config.setdefault("qwen", {})["api_key"] = _qwen_env_key
+    if _mistral_env_key:
+        _config.setdefault("mistral", {})["api_key"] = _mistral_env_key
     if _groq_env_key:
         _config.setdefault("groq", {})["api_key"] = _groq_env_key
     if _gemini_env_key:
@@ -3772,6 +3895,31 @@ async def api_qwen_status(key: str | None = None):
         return {"ok": False, "error": str(e)}
 
 
+@app.get("/api/status/mistral")
+async def api_mistral_status(key: str | None = None):
+    """Verify the Mistral API key. Accepts optional ?key= for testing unsaved keys."""
+    api_key  = key or _config.get("mistral", {}).get("api_key", "")
+    base_url = _config.get("mistral", {}).get("base_url", "https://api.mistral.ai/v1").rstrip("/")
+    if not api_key:
+        return {"ok": False, "error": "No API key configured. Get a free key at console.mistral.ai"}
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            res = await client.get(
+                f"{base_url}/models",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+            if res.status_code == 200:
+                return {"ok": True}
+            try:
+                body = res.json()
+                msg = body.get("message") or body.get("error") or f"HTTP {res.status_code}"
+            except Exception:
+                msg = f"HTTP {res.status_code}"
+            return {"ok": False, "error": msg}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.get("/api/status/groq")
 async def api_groq_status(key: str | None = None):
     """Verify the Groq API key using the openai SDK. Accepts optional ?key= for testing unsaved keys."""
@@ -3824,6 +3972,27 @@ async def api_openai_models():
 @app.get("/api/qwen/models")
 def api_qwen_models():
     return QWEN_MODELS_STATIC
+
+@app.get("/api/mistral/models")
+async def api_mistral_models():
+    """Fetch live models from Mistral's /v1/models; fall back to the static list."""
+    api_key  = _config.get("mistral", {}).get("api_key", "")
+    base_url = _config.get("mistral", {}).get("base_url", "https://api.mistral.ai/v1").rstrip("/")
+    if not api_key:
+        return MISTRAL_MODELS_STATIC
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            res = await client.get(f"{base_url}/models",
+                                   headers={"Authorization": f"Bearer {api_key}"})
+            if res.status_code == 200:
+                data = res.json().get("data", [])
+                # Chat-capable models only; keep the ids, sort for stable display.
+                ids = sorted({m.get("id") for m in data if m.get("id")})
+                if ids:
+                    return [{"id": i, "name": i, "context": 0} for i in ids]
+    except Exception:
+        pass
+    return MISTRAL_MODELS_STATIC
 
 @app.get("/api/groq/models")
 async def api_groq_models():
@@ -5135,6 +5304,8 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
             model = _config.get("openai", {}).get("model", "gpt-4o")
         elif provider == "qwen":
             model = _config.get("qwen", {}).get("model", "qwen-plus")
+        elif provider == "mistral":
+            model = _config.get("mistral", {}).get("model", "mistral-small-latest")
         elif provider == "groq":
             model = _config.get("groq", {}).get("model", "llama-3.3-70b-versatile")
         elif provider == "gemini":
@@ -5264,6 +5435,8 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
             stream_gen = openai_stream(messages, model)
         elif provider == "qwen":
             stream_gen = qwen_stream(messages, model)
+        elif provider == "mistral":
+            stream_gen = mistral_stream(messages, model)
         elif provider == "groq":
             stream_gen = groq_stream(messages, model)
         elif provider == "gemini":
@@ -5342,6 +5515,11 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
                         break
             elif provider == "qwen":
                 async for tok, done in qwen_stream(t_payload, model):
+                    title_chunks += tok
+                    if done:
+                        break
+            elif provider == "mistral":
+                async for tok, done in mistral_stream(t_payload, model):
                     title_chunks += tok
                     if done:
                         break
@@ -5426,6 +5604,8 @@ async def api_chat(payload: dict):
             model = _config.get("openai", {}).get("model", "gpt-4o")
         elif provider == "qwen":
             model = _config.get("qwen", {}).get("model", "qwen-plus")
+        elif provider == "mistral":
+            model = _config.get("mistral", {}).get("model", "mistral-small-latest")
         elif provider == "groq":
             model = _config.get("groq", {}).get("model", "llama-3.3-70b-versatile")
         elif provider == "gemini":
@@ -5513,6 +5693,10 @@ async def api_chat(payload: dict):
                 if done: break
         elif provider == "qwen":
             async for tok, done in qwen_stream(messages, model):
+                full_response += tok
+                if done: break
+        elif provider == "mistral":
+            async for tok, done in mistral_stream(messages, model):
                 full_response += tok
                 if done: break
         elif provider == "groq":
