@@ -548,8 +548,10 @@ def _record_rag_stats(
         "raw_score_sum": 0.0,  # sum of best raw scores (pre-threshold) across all queries
     })
     s["queries"] += 1
-    # Best raw score — top-1 from the unfiltered KNN results
-    best_raw = raw_results[0]["score"] if raw_results else 0.0
+    # Best raw cosine among the pre-threshold candidates. Use max(), not [0]:
+    # results are ordered by fused RRF rank, so [0] can be a keyword-only hit
+    # with cosine 0 even when a strong vector match is present further down.
+    best_raw = max((c.get("score", 0.0) for c in raw_results), default=0.0) if raw_results else 0.0
     s["raw_score_sum"] += best_raw
     if results:
         s["hits"]         += 1
@@ -1009,16 +1011,25 @@ def _get_rag_index(instance: str, rc: redis.Redis) -> SearchIndex:
             "storage_type": "hash",
         },
         "fields": [
-            {"name": "text",      "type": "text"},
-            {"name": "source",    "type": "text"},
-            {"name": "chunk_id",  "type": "numeric"},
+            {"name": "text",   "type": "text"},
+            # source is a TAG (not TEXT): it holds a whole URL/filename that must
+            # not be tokenised. TAG stores the value verbatim, which lets us
+            #   • pre-filter a KNN query by source in one round trip
+            #       (@source:{*frag*})=>[KNN …]  — see search_rag,
+            #   • enumerate distinct sources with FT.AGGREGATE … GROUPBY @source.
+            # separator "|" (not the default ",") because commas can appear in a
+            # path far more often than a pipe, and each chunk has exactly one source.
+            {"name": "source", "type": "tag", "attrs": {"separator": "|"}},
+            # sortable so FT.SEARCH … SORTBY chunk_id pages the index directly
+            # instead of loading every value at query time (browse endpoint).
+            {"name": "chunk_id", "type": "numeric", "attrs": {"sortable": True}},
             {"name": "embedding", "type": "vector",  "attrs": {
-                "algorithm":       "hnsw",
-                "datatype":        "float32",
-                "dims":            dim,
-                "distance_metric": "cosine",
-                "m":               16,
-                "ef_construction": 200,
+                "algorithm":       "hnsw",   # HNSW, not SVS-VAMANA: the latter targets
+                "datatype":        "float32", # >10K-vector corpora (10 240-vector training
+                "dims":            dim,        # threshold before its compression engages).
+                "distance_metric": "cosine",   # At typical instance sizes it adds risk with
+                "m":               16,          # no benefit; revisit per-instance if one grows
+                "ef_construction": 200,         # past ~10K chunks.
             }},
         ],
     })
@@ -1027,18 +1038,46 @@ def _get_rag_index(instance: str, rc: redis.Redis) -> SearchIndex:
 
 _index_ensured: set[str] = set()
 
+# Bump when _get_rag_index's schema changes in a way that needs a reindex.
+#   v2: source TEXT→TAG, chunk_id made SORTABLE (2026-07).
+_RAG_SCHEMA_VERSION = 2
+
 def ensure_rag_index(instance: str, rc: redis.Redis | None = None):
     """
-    Create the RediSearch HNSW vector index for a RAG instance if it doesn't exist.
-    Tracks confirmed instances in-process to avoid redundant Redis round-trips and
-    suppress the repeated 'Non-Sortable non-Indexable' notices from Redis.
+    Ensure the RediSearch index for a RAG instance exists with the CURRENT schema.
+
+    A per-instance marker key (rag:<instance>:schema_ver) records the schema
+    version the index was built with. When it is behind _RAG_SCHEMA_VERSION (or
+    absent — e.g. an index built by an older RediRecall), the index is recreated
+    with `overwrite=True`, which drops the index definition WITHOUT the DD flag —
+    so the chunk HASHes are preserved and RediSearch reindexes them in the
+    background. The marker is then advanced so the reindex happens at most once
+    per version, not on every startup.
+
+    In-process `_index_ensured` short-circuits repeat calls within one process.
     """
     if instance in _index_ensured:
         return
     rc = rc or r()
+    ver_key = f"rag:{instance}:schema_ver"
     try:
-        _get_rag_index(instance, rc).create(overwrite=False)
-        log.info(f"RAG index ensured for '{instance}'")
+        raw = rc.get(ver_key)
+        have_ver = int(raw) if raw else 0
+    except Exception:
+        have_ver = 0
+    try:
+        if have_ver >= _RAG_SCHEMA_VERSION:
+            # Up to date — create only if the index is somehow missing (no-op otherwise).
+            _get_rag_index(instance, rc).create(overwrite=False)
+        else:
+            # New or outdated schema: recreate the index definition, keeping the
+            # chunk data (overwrite drops the index only, not the documents).
+            _get_rag_index(instance, rc).create(overwrite=True)
+            try:
+                rc.set(ver_key, _RAG_SCHEMA_VERSION)
+            except Exception:
+                pass
+            log.info(f"RAG index for '{instance}' built at schema v{_RAG_SCHEMA_VERSION}")
     except Exception as e:
         msg = str(e)
         # "Index already exists" is not an error — the index is present, which is what we want.
@@ -1099,6 +1138,30 @@ def _decode(v) -> str:
     return v.decode() if isinstance(v, bytes) else (v or "")
 
 
+# Every RediSearch TAG special character, INCLUDING the "|" tag-union operator
+# (which is also this schema's field separator), "*", and the ASCII control
+# range (a bare CR/FF/VT in the query also trips the parser). redisvl's own
+# escaper leaves "|" and control chars unescaped, so we escape the full set.
+_TAG_ESCAPE_RE = re.compile(r'([\\,.<>{}\[\]"\'`:;!@#$%^&*()\-+=~|/ \x00-\x1f\x7f])')
+
+def _source_infix_filter(fragment: str) -> "str | None":
+    """Build a RediSearch TAG filter matching chunks whose ``source`` CONTAINS
+    ``fragment`` as a LITERAL substring: ``@source:{*<escaped>*}``.
+
+    Every TAG special char in the fragment is backslash-escaped, so the fragment
+    is matched literally — it can neither error the parser as a multi-wildcard
+    term (a fragment with ``*``) nor be reinterpreted as a tag union (``|``).
+    Only the two surrounding ``*`` wildcards stay active. NUL is stripped rather
+    than escaped (the query parser rejects it even escaped). Returns None for an
+    empty fragment (→ unfiltered query).
+    """
+    fragment = (fragment or "").replace("\x00", "")
+    if not fragment:
+        return None
+    esc = _TAG_ESCAPE_RE.sub(r'\\\1', fragment)
+    return f"@source:{{*{esc}*}}"
+
+
 def search_rag(
     instance: str,
     query: str,
@@ -1117,22 +1180,37 @@ def search_rag(
 
       1. **Vector KNN** — semantic similarity via redisvl VectorQuery (HNSW cosine).
          Catches paraphrases and related concepts.
-      2. **BM25 full-text** — exact/near-exact keyword matching.
-         Catches precise terms that may score below the cosine threshold.
+      2. **BM25 full-text** (``SCORER BM25STD``) — exact/near-exact keyword
+         matching. Catches precise terms a paraphrase-tuned embedding misses.
 
     RRF formula: each result gets 1/(K+rank) for every list it appears in.
     K=60 is the standard constant that prevents high ranks from dominating.
-    Results are then re-ranked by combined RRF score.  The final cosine score
-    (from the KNN result, or 0 if the chunk only appeared in BM25) is used
-    for threshold filtering and analytics.
+    Results are then re-ranked by combined RRF score. A chunk that matched the
+    full-text leg is kept regardless of the cosine ``threshold`` (it was
+    selected lexically, so the cosine bar is the wrong gate); only vector-only
+    hits are threshold-filtered.
+
+    ``source_filter`` (substring of a chunk's source) is pushed INTO both legs
+    as a TAG pre-filter — ``(@source:{*frag*})`` — so the KNN and BM25 searches
+    run within the matching sources. This replaces an earlier post-filter that
+    ran after the top-K cut and silently returned nothing when the scoped source
+    lost the global ranking race.
 
     When ``hybrid=False`` only the vector search is performed.
     """
     rc     = rc or r()
     prefix = rag_prefix(instance)
     idx_name = f"{prefix}:idx"
+    # Make sure the index exists with the current schema (source as TAG) before
+    # we build a TAG pre-filter against it. Cached after the first call.
+    ensure_rag_index(instance, rc)
     # Use a pre-computed query vector (e.g. from HyDE) if provided, otherwise embed the query.
     q_emb = query_vec if query_vec is not None else embed(query).astype(np.float32)
+
+    # source_filter → TAG infix-wildcard pre-filter, fully escaped so the value
+    # is matched as a literal substring (see _source_infix_filter). A raw filter
+    # string; redisvl emits DIALECT 2 for the combined KNN query.
+    src_expr = _source_infix_filter(source_filter)
 
     try:
         # ── 1. Vector KNN search via redisvl VectorQuery ──────────────────────
@@ -1143,6 +1221,7 @@ def search_rag(
             vector_field_name="embedding",
             return_fields=["text", "source"],
             num_results=fetch_k,
+            filter_expression=src_expr,   # None → unfiltered KNN
         )
         idx = _get_rag_index(instance, rc)
         raw_vec = idx.query(vq)   # list[dict]: id, text, source, vector_distance
@@ -1163,10 +1242,16 @@ def search_rag(
             kws = _keywords_for_bm25(query)
             if kws:
                 text_q = " | ".join(kws)
+                # Scope the lexical leg to the same sources as the vector leg.
+                # src_expr is "@source:{*frag*}"; space = AND with the text match.
+                text_query = f"@text:({text_q})"
+                if src_expr is not None:
+                    text_query = f"{src_expr} {text_query}"
                 try:
                     txt_res = rc.execute_command(
                         "FT.SEARCH", idx_name,
-                        f"@text:({text_q})",
+                        text_query,
+                        "SCORER", "BM25STD",   # standard BM25 ranking (Redis 8.x)
                         "RETURN", "2", "text", "source",
                         "LIMIT", "0", str(fetch_k),
                         "DIALECT", "2",
@@ -1185,6 +1270,7 @@ def search_rag(
 
         # ── 3. RRF merge and re-rank ─────────────────────────────────────────
         K_RRF  = 60
+        bm25_keys = {row["_key"] for row in bm25_rows}   # chunks that matched lexically
         scores: dict[str, dict] = {}
         for rank, row in enumerate(vec_rows):
             key = row["_key"]
@@ -1202,18 +1288,27 @@ def search_rag(
 
         raw_results = [
             {
-                "text":   item["row"].get("text", ""),
-                "source": item["row"].get("source", ""),
-                "score":  float(item["row"].get("_vec_score", 0.0)),
+                "text":    item["row"].get("text", ""),
+                "source":  item["row"].get("source", ""),
+                "score":   float(item["row"].get("_vec_score", 0.0)),
+                # Combined RRF rank score — the authoritative ordering (see below).
+                # search_rag_parallel fuses across instances on this, not on the
+                # cosine `score`, so keyword-only hits (cosine 0) aren't buried.
+                "_fused":  float(item["rrf"]),
+                "lexical": item["row"]["_key"] in bm25_keys,
             }
             for item in ranked
         ]
 
-        # Threshold is applied to the cosine vector score
-        results = [c for c in raw_results if c["score"] >= threshold]
-        # Optional source filter (substring match on source field)
-        if source_filter:
-            results = [c for c in results if source_filter.lower() in c.get("source", "").lower()]
+        # Threshold gates the cosine score — but a chunk that matched the BM25
+        # leg was selected lexically, so keep it regardless. Without this, every
+        # keyword-only hit (cosine score 0) is dropped and hybrid collapses to
+        # vector-only. source_filter is already applied in-query (both legs).
+        results = [
+            {k: v for k, v in c.items() if k != "lexical"}
+            for c in raw_results
+            if c["score"] >= threshold or c["lexical"]
+        ]
         _record_rag_stats(instance, results, raw_results)
         return results
 
@@ -1233,6 +1328,7 @@ def search_rag(
                     vector_field_name="embedding",
                     return_fields=["text", "source"],
                     num_results=fetch_k,
+                    filter_expression=src_expr,   # keep source scoping on retry
                 )
                 raw2 = idx.query(vq2)
                 results2 = [
@@ -1240,12 +1336,15 @@ def search_rag(
                         "text":   _decode(row.get("text", "")),
                         "source": _decode(row.get("source", "")),
                         "score":  round(1.0 - float(row.get("vector_distance", 1.0)), 4),
+                        # Same RRF-from-rank scale as the main vector leg, so a
+                        # recovered instance fuses correctly in the parallel merge
+                        # instead of sorting to the bottom (missing _fused → 0.0).
+                        "_fused": 1.0 / (60 + rank + 1),
                     }
-                    for row in raw2
+                    for rank, row in enumerate(raw2)
                 ]
+                # Vector-only recovery path: threshold gates the cosine score.
                 results2 = [c for c in results2 if c["score"] >= threshold]
-                if source_filter:
-                    results2 = [c for c in results2 if source_filter.lower() in c.get("source", "").lower()]
                 _record_rag_stats(instance, results2, results2)
                 return results2
             except Exception as e2:
@@ -1263,6 +1362,7 @@ async def search_rag_parallel(
     threshold: float = 0.0,
     hybrid: bool = True,
     query_vec: "np.ndarray | None" = None,
+    source_filter: str = "",
 ) -> list[dict]:
     """
     Search multiple RAG instances concurrently and return a merged, score-sorted list.
@@ -1299,7 +1399,7 @@ async def search_rag_parallel(
         """Run a single synchronous search in a thread-pool so searches are parallel."""
         rc = rc_for_instance(inst)
         results = await loop.run_in_executor(
-            None, search_rag, inst, query, top_k, threshold, rc, hybrid, query_vec
+            None, search_rag, inst, query, top_k, threshold, rc, hybrid, query_vec, source_filter
         )
         # Tag each chunk with its origin instance
         for c in results:
@@ -1309,11 +1409,15 @@ async def search_rag_parallel(
     # Fan out to all enabled instances simultaneously
     per_instance = await asyncio.gather(*[_search_one(i) for i in enabled])
 
-    # Merge, sort by descending score, keep global top_k
+    # Merge and keep the global top_k. Rank on the combined RRF score (_fused),
+    # NOT the cosine `score`: sorting by cosine would push every keyword-only hit
+    # (cosine 0) to the bottom and cut it, silently undoing the hybrid
+    # keyword-exemption across instances. RRF scores share a scale across
+    # instances (each ≈ Σ 1/(60+rank)), so they fuse sensibly. Cosine breaks ties.
     merged: list[dict] = []
     for results in per_instance:
         merged.extend(results)
-    merged.sort(key=lambda c: c["score"], reverse=True)
+    merged.sort(key=lambda c: (c.get("_fused", 0.0), c.get("score", 0.0)), reverse=True)
     return merged[:top_k]
 
 
@@ -3149,17 +3253,31 @@ def list_rag_instances() -> list[dict]:
         if _endpoint_health.get(ep_name, None) is False:
             continue
         try:
-            # Count chunks per instance — scan_iter avoids blocking Redis
-            for k in rc.scan_iter("rag:*:chunk:*", count=500):
-                parts = k.decode().split(":")
-                if len(parts) >= 3:
-                    inst = parts[1]
-                    key  = f"{ep_name}:{inst}"
-                    all_instances.setdefault(key, {"count": 0, "ep": ep_name, "name": inst})
-                    all_instances[key]["count"] += 1
-            # Also pick up instances that exist only as metadata (0 chunks)
+            # Enumerate this endpoint's RAG indexes (FT._LIST) and read each
+            # instance's chunk count directly from the index (FT.SEARCH … LIMIT 0 0
+            # returns the match total). O(instances) index reads instead of a scan
+            # over every chunk key in the keyspace.
+            try:
+                idx_names = [_decode(x) for x in rc.execute_command("FT._LIST")]
+            except Exception:
+                idx_names = []
+            for idx_name in idx_names:
+                if not (idx_name.startswith("rag:") and idx_name.endswith(":idx")):
+                    continue
+                inst = idx_name[len("rag:"):-len(":idx")]
+                if not inst:
+                    continue
+                try:
+                    res = rc.execute_command("FT.SEARCH", idx_name, "*", "LIMIT", "0", "0")
+                    count = int(res[0]) if res else 0
+                except Exception:
+                    count = 0
+                key = f"{ep_name}:{inst}"
+                all_instances[key] = {"count": count, "ep": ep_name, "name": inst}
+            # Pick up instances that exist only as metadata — created but never
+            # ingested, so they have no index yet (rag_meta keys are few and cheap).
             for mk in rc.scan_iter("rag_meta:*", count=200):
-                inst = mk.decode().replace("rag_meta:", "")
+                inst = _decode(mk).replace("rag_meta:", "")
                 key  = f"{ep_name}:{inst}"
                 all_instances.setdefault(key, {"count": 0, "ep": ep_name, "name": inst})
         except Exception:
@@ -3231,8 +3349,10 @@ def reset_rag(instance: str, rc: redis.Redis | None = None):
             batch = []
     if batch:
         rc.delete(*batch)
-    # Remove counter, chunk hash dedup set, and URL skip list in one call
-    rc.delete(f"rag:{instance}:chunk_counter", f"rag:{instance}:chunk_hashes", f"rag:{instance}:indexed_urls")
+    # Remove counter, chunk hash dedup set, URL skip list, and the schema-version
+    # marker in one call — so a reset/delete leaves no orphan keys behind.
+    rc.delete(f"rag:{instance}:chunk_counter", f"rag:{instance}:chunk_hashes",
+              f"rag:{instance}:indexed_urls", f"rag:{instance}:schema_ver")
     append_log({
         "ts": datetime.now(timezone.utc).isoformat(),
         "instance": instance,
@@ -4463,25 +4583,59 @@ def api_reset_rag(instance: str, endpoint: str | None = None):
 
 
 @app.get("/api/rag/{instance}/chunks")
-def api_rag_chunks(instance: str, limit: int = 50, endpoint: str | None = None):
-    """Return a sample of stored chunks for inspection."""
+def api_rag_chunks(instance: str, limit: int = 50, offset: int = 0, endpoint: str | None = None):
+    """Return a page of stored chunks for inspection, ordered by chunk_id.
+
+    One FT.SEARCH over the index (SORTBY the sortable chunk_id) returns the
+    fields directly and in a deterministic order — instead of a scan whose
+    order is arbitrary followed by an HGETALL per key. `offset` enables real
+    pagination.
+    """
     rc     = _rc_for(instance, endpoint)
     prefix = rag_prefix(instance)
-    # SCAN and stop at `limit` — never pull the whole keyspace into memory the way KEYS did.
-    keys = []
-    for k in rc.scan_iter(f"{prefix}:chunk:*", count=500):
-        keys.append(k)
-        if len(keys) >= limit:
-            break
-    chunks = []
-    for k in keys:
-        d = rc.hgetall(k)
-        chunks.append({
-            "id":     d.get(b"chunk_id", b"0").decode(),
-            "text":   d.get(b"text", b"").decode()[:200],
-            "source": d.get(b"source", b"").decode(),
-        })
-    return chunks
+    idx_name = f"{prefix}:idx"
+    try:
+        res = rc.execute_command(
+            "FT.SEARCH", idx_name, "*",
+            "SORTBY", "chunk_id", "ASC",
+            "RETURN", "3", "chunk_id", "text", "source",
+            "LIMIT", str(max(0, offset)), str(max(0, limit)),
+            "DIALECT", "2",
+        )
+        chunks = []
+        items = res[1:]   # res[0] is the total match count
+        for i in range(0, len(items), 2):
+            fields = items[i + 1]
+            d = {}
+            for j in range(0, len(fields), 2):
+                d[_decode(fields[j])] = _decode(fields[j + 1])
+            chunks.append({
+                "id":     d.get("chunk_id", "0"),
+                "text":   d.get("text", "")[:200],
+                "source": d.get("source", ""),
+            })
+        return chunks
+    except Exception as e:
+        # Index missing → fall back to a bounded scan (arbitrary order). Honour
+        # offset by skipping that many keys before collecting up to `limit`.
+        log.warning(f"api_rag_chunks: search failed for '{instance}', scanning instead: {e}")
+        keys, skipped = [], 0
+        for k in rc.scan_iter(f"{prefix}:chunk:*", count=500):
+            if skipped < max(0, offset):
+                skipped += 1
+                continue
+            keys.append(k)
+            if len(keys) >= limit:
+                break
+        chunks = []
+        for k in keys:
+            d = rc.hgetall(k)
+            chunks.append({
+                "id":     d.get(b"chunk_id", b"0").decode(),
+                "text":   d.get(b"text", b"").decode()[:200],
+                "source": d.get(b"source", b"").decode(),
+            })
+        return chunks
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ROUTES — INGESTION
@@ -5082,7 +5236,11 @@ def _collect_redis_server_stats(ep_name: str, rc: redis.Redis, ep_cfg: dict) -> 
     keyspace = []
     total_keys = 0
     for k, v in info.items():
-        if k.startswith("db") and isinstance(v, dict):
+        # Only real per-db entries ("db0", "db1", …) carry {keys, expires, avg_ttl}.
+        # Redis 8.8's INFO keyspace section also emits histogram keys such as
+        # "db0_distrib_strings_sizes" that start with "db" and parse to a dict —
+        # k[2:].isdigit() excludes those so int(k[2:]) below can't blow up.
+        if k.startswith("db") and k[2:].isdigit() and isinstance(v, dict):
             keys = v.get("keys", 0)
             total_keys += keys
             keyspace.append({
@@ -5415,7 +5573,9 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     if parallel_mode:
         # Multi-instance parallel query — search all requested instances simultaneously.
         # search_rag_parallel filters disabled instances internally.
-        chunks = await search_rag_parallel(rag_instances, query, top_k, rag_threshold, hybrid_search, search_vec)
+        # source_filter is pushed into each instance's KNN + BM25 query (not post-filtered).
+        chunks = await search_rag_parallel(rag_instances, query, top_k, rag_threshold,
+                                           hybrid_search, search_vec, source_filter)
     elif rag_instances:
         # Single-instance query (normal mode)
         rag_inst = rag_instances[0]
@@ -5423,15 +5583,11 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
         rag_enabled = (meta or {}).get("enabled", True)
         chunks = (
             await asyncio.to_thread(search_rag, rag_inst, query, top_k, rag_threshold,
-                                    rc_for_instance(rag_inst), hybrid_search, search_vec)
+                                    rc_for_instance(rag_inst), hybrid_search, search_vec, source_filter)
             if rag_enabled else []
         )
     else:
         chunks = []
-
-    # ── Source filter: restrict chunks to a specific source prefix/substring
-    if source_filter and chunks:
-        chunks = [c for c in chunks if source_filter.lower() in c.get("source", "").lower()]
 
     # ── Cross-encoder reranking (runs after fast retrieval, before LLM)
     if chunks:
@@ -5693,23 +5849,21 @@ async def api_chat(payload: dict):
         if hypothesis:
             search_vec = (await asyncio.to_thread(embed, hypothesis)).astype(np.float32)
 
-    # RAG retrieval
+    # RAG retrieval — source_filter is applied in-query (KNN + BM25 pre-filter).
     if parallel_mode:
-        chunks = await search_rag_parallel(rag_instances, query, top_k, rag_threshold, hybrid_search, search_vec)
+        chunks = await search_rag_parallel(rag_instances, query, top_k, rag_threshold,
+                                           hybrid_search, search_vec, source_filter)
     elif rag_instances:
         inst = rag_instances[0]
         meta, _ep = await _rag_meta_cached_async(inst)       # primes the cache off-loop
         rag_enabled = (meta or {}).get("enabled", True)
         chunks = (
             await asyncio.to_thread(search_rag, inst, query, top_k, rag_threshold,
-                                    rc_for_instance(inst), hybrid_search, search_vec)
+                                    rc_for_instance(inst), hybrid_search, search_vec, source_filter)
             if rag_enabled else []
         )
     else:
         chunks = []
-
-    if source_filter and chunks:
-        chunks = [c for c in chunks if source_filter.lower() in c.get("source", "").lower()]
 
     top_n = _config.get("reranker", {}).get("top_n", top_k)
     chunks = await asyncio.to_thread(rerank_chunks, query, chunks, top_n)
@@ -5780,35 +5934,55 @@ async def api_chat(payload: dict):
 # ROUTES — RAG SOURCE LISTING
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-@app.get("/api/rag/{instance}/sources")
-def api_rag_sources(instance: str, endpoint: str | None = None):
-    """Return all unique source identifiers stored in a RAG instance."""
-    rc     = _rc_for(instance, endpoint)
-    prefix = rag_prefix(instance)
+def _scan_unique_sources(rc: redis.Redis, prefix: str) -> set[str]:
+    """Fallback: derive the distinct source set by scanning chunk hashes.
+    Used only when the index is unavailable for FT.AGGREGATE."""
     sources: set[str] = set()
     batch: list = []
-    for key in rc.scan_iter(f"{prefix}:chunk:*", count=500):
-        batch.append(key)
-        if len(batch) >= _EXPORT_BATCH:
-            pipe = rc.pipeline(transaction=False)
-            for k in batch:
-                pipe.hget(k, "source")
-            for raw in pipe.execute():
-                if raw:
-                    src = raw.decode() if isinstance(raw, bytes) else raw
-                    if src:
-                        sources.add(src)
-            batch = []
-    if batch:
+    def _drain(keys):
         pipe = rc.pipeline(transaction=False)
-        for k in batch:
+        for k in keys:
             pipe.hget(k, "source")
         for raw in pipe.execute():
             if raw:
                 src = raw.decode() if isinstance(raw, bytes) else raw
                 if src:
                     sources.add(src)
-    return sorted(sources)
+    for key in rc.scan_iter(f"{prefix}:chunk:*", count=500):
+        batch.append(key)
+        if len(batch) >= _EXPORT_BATCH:
+            _drain(batch); batch = []
+    if batch:
+        _drain(batch)
+    return sources
+
+
+@app.get("/api/rag/{instance}/sources")
+def api_rag_sources(instance: str, endpoint: str | None = None):
+    """Return all unique source identifiers stored in a RAG instance."""
+    rc     = _rc_for(instance, endpoint)
+    prefix = rag_prefix(instance)
+    idx_name = f"{prefix}:idx"
+    # One server-side aggregation over the index: GROUPBY the source field returns
+    # each distinct source once — instead of scanning + HGET-ing every chunk.
+    try:
+        res = rc.execute_command(
+            "FT.AGGREGATE", idx_name, "*",
+            "GROUPBY", "1", "@source",
+            "LIMIT", "0", "1000000",
+            "DIALECT", "2",
+        )
+        sources: set[str] = set()
+        for row in res[1:]:          # res[0] is the group count
+            for j in range(0, len(row) - 1, 2):
+                if _decode(row[j]) == "source":
+                    val = _decode(row[j + 1])
+                    if val:
+                        sources.add(val)
+        return sorted(sources)
+    except Exception as e:
+        log.warning(f"api_rag_sources: aggregate failed for '{instance}', scanning instead: {e}")
+        return sorted(_scan_unique_sources(rc, prefix))
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
