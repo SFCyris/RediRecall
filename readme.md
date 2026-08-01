@@ -93,6 +93,28 @@ The heavier renderers (Mermaid, Chart.js, Plotly, Leaflet, JSXGraph, Viz.js, Smi
 
 ---
 
+## Grounded answers you can check
+
+Answers cite the passages they came from, so any claim can be traced back to the chunk that supports it. Click **⌖ only this** on a chunk to scope your next question to that document alone.
+
+<p align="center">
+  <img src="screenshots/rendering/citations-scope.png" alt="An answer with [1] and [2] citation markers, the matched-chunk inspector, and a source-scope chip above the composer" width="88%">
+</p>
+
+When retrieval finds nothing above the threshold, the answer says so and is badged **📭 No KB match** — rather than quietly answering from general knowledge as though it were grounded.
+
+<p align="center">
+  <img src="screenshots/rendering/no-kb-match.png" alt="An answer badged No KB match" width="88%">
+</p>
+
+Each knowledge base is browsable: see what's indexed, scope a question to one document, or remove a single stale document and re-ingest it without rebuilding everything.
+
+<p align="center">
+  <img src="screenshots/rendering/documents.png" alt="The document manager listing each source with chunk counts, scope and delete buttons" width="88%">
+</p>
+
+---
+
 ## Quick start
 
 ### Docker (simplest)
@@ -178,9 +200,9 @@ export DASHSCOPE_API_KEY=...    # Qwen
 
 ## Features
 
-**💬 Chat** — token-by-token streaming over WebSocket; [rich inline rendering](#what-answers-can-render) (diagrams, charts, graphs, maps, molecules, music, math); image attachments for vision models (drag/drop, paste); voice input; regenerate; pin messages; rate answers (👍/👎); auto-generated session titles; export as text.
+**💬 Chat** — token-by-token streaming over WebSocket; [rich inline rendering](#what-answers-can-render) (diagrams, charts, graphs, maps, molecules, music, math); image attachments for vision models (drag/drop, paste); voice input; regenerate in place with a version switcher to compare attempts; conversations persisted in Redis and restored on reload; pin messages; rate answers (👍/👎); auto-generated session titles; export as text.
 
-**🧠 RAG** — multiple named knowledge bases (RAG instances); ingest PDF, DOCX, XLSX, TXT, CSV, and Markdown files; a parallel BFS web crawler with a smart httpx-first mode and optional JS rendering (crawl4ai + Playwright) for SPAs; `llms.txt` auto-detection; a RAG inspector showing retrieved chunks and scores; export/import a knowledge base as a zip; duplicate detection.
+**🧠 RAG** — multiple named knowledge bases (RAG instances); ingest PDF, DOCX, XLSX, TXT, CSV, and Markdown files; a parallel BFS web crawler with a smart httpx-first mode and optional JS rendering (crawl4ai + Playwright) for SPAs; `llms.txt` auto-detection; a RAG inspector showing retrieved chunks and scores; **inline citations** linking each claim to the passage that supports it; **per-document management** — browse what's indexed, scope a question to one document, or delete one without rebuilding the instance; an explicit *No KB match* badge when retrieval finds nothing; export/import a knowledge base as a zip; duplicate detection.
 
 **⚡ Semantic cache** — cosine-similarity response caching in Redis with a configurable threshold and TTL; per-message hit/miss badge; delete or re-run cached answers.
 

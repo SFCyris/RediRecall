@@ -47,10 +47,10 @@
     "max_image_dim": 1024
   },
   "rag": {
-    "chunk_size": 512,
-    "chunk_overlap": 64,
+    "chunk_size": 180,
+    "chunk_overlap": 32,
     "top_k": 5,
-    "similarity_threshold": 0.75,
+    "similarity_threshold": 0.35,
     "hybrid_search": true
   },
   "cache": {

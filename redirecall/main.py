@@ -42,6 +42,7 @@ import ipaddress
 import json
 import logging
 import os
+import tempfile
 import re
 import shutil
 import socket
@@ -79,6 +80,7 @@ except ImportError:
 import redis
 from redisvl.index import SearchIndex
 from redisvl.query import VectorQuery
+from redisvl.query.filter import Tag
 from redisvl.schema import IndexSchema
 from redisvl.extensions.cache.llm import SemanticCache
 # HFTextVectorizer is imported lazily inside _make_cache_vectorizer() to keep
@@ -396,15 +398,25 @@ DEFAULT_CONFIG: dict = {
     "provider": "ollama",
 
     # ── Embedding model (SentenceTransformer) ─────────────────────────────────
-    "embedding": {"model": "all-MiniLM-L6-v2", "max_image_dim": 1024},
+    "embedding": {"model": "intfloat/multilingual-e5-small", "max_image_dim": 1024},
 
     # ── RAG retrieval settings ────────────────────────────────────────────────
+    # chunk_size is counted in WORDS and must stay under the embedding model's
+    # token limit or the tail of every chunk is silently dropped before it is
+    # embedded: all-MiniLM-L6-v2 truncates at 256 tokens ≈ 190 English words, so
+    # the previous 512-word default embedded only ~half of each chunk.
+    # similarity_threshold gates the raw cosine score. Real query↔passage pairs
+    # from this model score ~0.35–0.75; the previous 0.75 default cleared almost
+    # nothing, leaving the lexical (BM25) leg to carry retrieval on its own.
     "rag": {
-        "chunk_size": 512,
-        "chunk_overlap": 64,
+        "chunk_size": 180,
+        "chunk_overlap": 32,
         "top_k": 5,
-        "similarity_threshold": 0.75,
+        "similarity_threshold": 0.35,
         "hybrid_search": True,
+        # Candidates fetched for the reranker to choose from. Must exceed top_k
+        # or the cross-encoder can only reorder the list it was already given.
+        "rerank_candidates": 40,
     },
 
     # ── Semantic cache settings ───────────────────────────────────────────────
@@ -518,6 +530,11 @@ _sessions: dict[str, list] = {}
 _feedback: list = []
 _ingestion_logs: list = []
 _crawl_tasks: dict[str, asyncio.Task] = {}
+# Seed URL -> gate. The event is SET while running and cleared while paused, so a
+# worker awaiting it blocks between pages. Pausing between pages (rather than
+# killing the task) keeps the queue, the visited set and the URL skip-list intact,
+# so resuming continues instead of restarting.
+_crawl_gates: dict[str, asyncio.Event] = {}
 # Active crawl state — survives browser refresh/reconnect.
 # Key: url.  Value: {instance, pages_done, chunks, errors, blocked, start_ts, done}
 _active_crawls: dict[str, dict] = {}
@@ -573,20 +590,63 @@ _gemini_env_key: str = ""   # GEMINI_API_KEY
 # CONFIG HELPERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# Set when config.json existed but could not be parsed. Surfaced by /api/health
+# so a corrupt config is visible instead of silently masquerading as a fresh install.
+_config_load_error: str = ""
+
+
 def load_config() -> dict:
-    """Load config.json and deep-merge with defaults so new keys always exist."""
+    """Load config.json and deep-merge with defaults so new keys always exist.
+
+    A corrupt file is NOT silently swallowed. Falling back to DEFAULT_CONFIG points
+    ``redis.port`` at 6379 while a local install serves 6389/6390 — the app then
+    starts "healthy" against an empty Redis and every RAG instance looks wiped.
+    The bad file is preserved as ``config.json.corrupt-<ts>`` (so the keys in it are
+    recoverable), the error is logged loudly, and ``_config_load_error`` is set so
+    the health endpoint reports degraded rather than ok.
+    """
+    global _config_load_error
+    _config_load_error = ""
     if CONFIG_PATH.exists():
         try:
-            with open(CONFIG_PATH) as f:
+            with open(CONFIG_PATH, encoding="utf-8") as f:
                 cfg = json.load(f)
+            if not isinstance(cfg, dict):
+                raise ValueError(f"expected a JSON object, got {type(cfg).__name__}")
             merged = {**DEFAULT_CONFIG, **cfg}
             # Shallow-merge each nested dict so we pick up new sub-keys
             for k, v in DEFAULT_CONFIG.items():
                 if isinstance(v, dict):
                     merged[k] = {**v, **cfg.get(k, {})}
             return merged
-        except Exception:
-            pass
+        except OSError as e:
+            # Unreadable is NOT corrupt. A permission error (e.g. the container UID
+            # changed across an image update) must never rename the user's valid
+            # config out of the way — renaming needs only directory write access,
+            # so the quarantine below would succeed and destroy a good file.
+            _config_load_error = f"{type(e).__name__}: {e}"
+            log.error("=" * 70)
+            log.error(f"config.json could not be READ ({_config_load_error}).")
+            log.error("It was left untouched. Running on built-in DEFAULTS this session —")
+            log.error("fix the file permissions and restart rather than re-entering settings,")
+            log.error("otherwise the first save will overwrite your real configuration.")
+            log.error("=" * 70)
+        except Exception as e:
+            _config_load_error = f"{type(e).__name__}: {e}"
+            quarantine = CONFIG_PATH.with_name(
+                f"{CONFIG_PATH.name}.corrupt-{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}")
+            try:
+                CONFIG_PATH.replace(quarantine)
+                kept = f" — kept as {quarantine.name}"
+            except Exception:
+                kept = " — could NOT be preserved"
+            log.error("=" * 70)
+            log.error(f"config.json could not be parsed ({_config_load_error}){kept}.")
+            log.error("Starting from built-in DEFAULTS — API keys and your Redis endpoint")
+            log.error(f"are NOT the ones you configured (defaults point at "
+                      f"{DEFAULT_CONFIG['redis']['host']}:{DEFAULT_CONFIG['redis']['port']}).")
+            log.error("Restore the quarantined file or re-enter settings before ingesting.")
+            log.error("=" * 70)
     return dict(DEFAULT_CONFIG)
 
 
@@ -596,6 +656,7 @@ def save_config(cfg: dict):
     API keys that were loaded from environment variables are always stripped
     before writing so they never end up on disk.
     """
+    global _config_load_error
     to_save = copy.deepcopy(cfg)
     if _env_key and to_save.get("claude", {}).get("api_key") == _env_key:
         to_save.setdefault("claude", {})["api_key"] = ""
@@ -609,8 +670,30 @@ def save_config(cfg: dict):
         to_save.setdefault("groq", {})["api_key"] = ""
     if _gemini_env_key and to_save.get("gemini", {}).get("api_key") == _gemini_env_key:
         to_save.setdefault("gemini", {})["api_key"] = ""
-    with open(CONFIG_PATH, "w") as f:
-        json.dump(to_save, f, indent=2)
+    # Atomic write: serialise fully, fsync, then rename over the target. A plain
+    # open(path,"w") truncates first, so a crash / full disk / OOM mid-write leaves
+    # a half-written file that parses as garbage on the next boot (see load_config).
+    # A FIXED temp name lets two processes sharing DATA_DIR interleave writes into
+    # the same file, and os.replace then publishes the mixture — the exact
+    # corruption the atomic write exists to prevent.
+    _fd, _tmp_name = tempfile.mkstemp(dir=str(CONFIG_PATH.parent),
+                                      prefix=f".{CONFIG_PATH.name}.", suffix=".tmp")
+    os.close(_fd)
+    tmp = Path(_tmp_name)
+    try:
+        with open(tmp, "w") as f:
+            json.dump(to_save, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, CONFIG_PATH)      # atomic on POSIX and Windows
+        # A good file is on disk now, so /api/health must stop reporting "degraded".
+        _config_load_error = ""
+    except Exception:
+        try:
+            tmp.unlink(missing_ok=True)   # never leave a stray temp behind
+        except Exception:
+            pass
+        raise
 
 
 # ── Provider SDK client reuse ────────────────────────────────────────────────
@@ -692,19 +775,49 @@ def _unredact_secrets(new_cfg: dict, old_cfg: dict) -> None:
             ep["password"] = (old_eps.get(ep.get("name")) or {}).get("password", "")
 
 
+# Retention caps for the two append-only JSON stores. Both are held in memory
+# and rewritten whole, so the in-memory list must be trimmed too — otherwise it
+# grows without bound while only the tail is ever persisted.
+_MAX_LOGS     = 500
+_MAX_FEEDBACK = 2000
+# Per-field cap on a feedback POST. The store is rewritten in full on every
+# rating, so one oversized body permanently inflates the cost of every later one.
+_MAX_FEEDBACK_FIELD = 8000
+
+
 def load_logs():
     """Load persisted ingestion log from disk into memory."""
     global _ingestion_logs
     if LOGS_PATH.exists():
-        with open(LOGS_PATH) as f:
-            _ingestion_logs = json.load(f)
+        try:
+            with open(LOGS_PATH) as f:
+                _ingestion_logs = json.load(f)[-_MAX_LOGS:]
+        except Exception as e:
+            log.warning(f"Could not read {LOGS_PATH.name} ({e}) — starting with an empty log")
+
+
+def load_feedback():
+    """Load persisted feedback from disk into memory.
+
+    Without this the module-level ``_feedback`` list starts empty on every boot
+    and ``api_feedback`` — which rewrites the whole file — truncates the store to
+    a single entry on the first rating after a restart.
+    """
+    global _feedback
+    if FEEDBACK_PATH.exists():
+        try:
+            with open(FEEDBACK_PATH) as f:
+                _feedback = json.load(f)[-_MAX_FEEDBACK:]
+        except Exception as e:
+            log.warning(f"Could not read {FEEDBACK_PATH.name} ({e}) — starting with empty feedback")
 
 
 def append_log(entry: dict):
-    """Append an ingestion event and keep the last 500 entries on disk."""
+    """Append an ingestion event and keep the last _MAX_LOGS entries."""
     _ingestion_logs.append(entry)
+    del _ingestion_logs[:-_MAX_LOGS]          # trim in memory, not just on disk
     with open(LOGS_PATH, "w") as f:
-        json.dump(_ingestion_logs[-500:], f)
+        json.dump(_ingestion_logs, f)
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # REDIS HELPERS — multi-endpoint aware
@@ -767,6 +880,26 @@ def r() -> redis.Redis:
     return _redis_clients["default"]
 
 
+async def _reset_index_markers_for_embedding_change():
+    """Drop every index schema marker so all indexes rebuild at the new dimension.
+
+    Shared by the Settings save guard and by config import — a model change through
+    either route leaves every stored vector at the old dimension, which makes
+    retrieval return nothing at all rather than failing loudly.
+    """
+    for inst in await asyncio.to_thread(list_rag_instances):
+        name = inst.get("name", "")
+        if not name:
+            continue
+        try:
+            rc_i = rc_for_instance(name)
+            await asyncio.to_thread(rc_i.delete, f"rag:{name}:schema_ver")
+            _index_ensured.discard(name)
+        except Exception as e:
+            log.warning(f"  could not reset index marker for '{name}': {e}")
+    _dim_mismatch_warned.clear()   # allow the diagnostic to fire again if needed
+
+
 def invalidate_redis_clients():
     """
     Clear the client cache so they're rebuilt on next use.
@@ -812,6 +945,78 @@ def refresh_endpoint_health() -> dict[str, bool]:
 # EMBEDDING HELPERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# EMBEDDING MODEL REGISTRY
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Every chunk records which model produced its vector, as the small integer id
+# below. Ids are a permanent contract: never renumber or reuse one, because
+# stored chunks reference them. Append new models with the next free id.
+#
+# The id is what makes a mixed-model instance possible later: a corpus can hold
+# vectors from several models, and a query is then embedded once per model
+# present and the result sets fused. Vectors of different widths cannot share
+# one RediSearch vector field, so such an index needs one field per dimension —
+# hence `field` below, which is already dimension-derived rather than fixed.
+#
+# E5 models require an asymmetric prefix: "query: " on the search text and
+# "passage: " on the stored text. Omitting it does not error, it just quietly
+# degrades retrieval, so the prefixes live here rather than at the call sites.
+EMBEDDING_MODELS: dict[int, dict] = {
+    0: {
+        "repo": "all-MiniLM-L6-v2", "dims": 384, "seq": 256,
+        "label": "all-MiniLM-L6-v2 (legacy, English only)",
+        "query_prefix": "", "passage_prefix": "", "multilingual": False,
+    },
+    1: {
+        "repo": "intfloat/multilingual-e5-small", "dims": 384, "seq": 512,
+        "label": "multilingual-e5-small (default)",
+        "query_prefix": "query: ", "passage_prefix": "passage: ", "multilingual": True,
+    },
+    2: {
+        "repo": "intfloat/multilingual-e5-base", "dims": 768, "seq": 512,
+        "label": "multilingual-e5-base (higher quality, 2x vectors)",
+        "query_prefix": "query: ", "passage_prefix": "passage: ", "multilingual": True,
+    },
+    3: {
+        "repo": "BAAI/bge-m3", "dims": 1024, "seq": 8192,
+        "label": "bge-m3 (long context, heaviest)",
+        "query_prefix": "", "passage_prefix": "", "multilingual": True,
+    },
+}
+DEFAULT_EMBEDDING_ID = 1
+_REPO_TO_ID = {spec["repo"]: i for i, spec in EMBEDDING_MODELS.items()}
+
+
+def embedding_id_for(repo: str | None = None) -> int:
+    """Registry id for a model repo, or -1 when it is not a known model.
+
+    -1 means "unknown provenance": the chunk is still stored and searchable, it
+    just cannot take part in a mixed-model query.
+    """
+    repo = repo or (_config.get("embedding", {}) or {}).get("model", "")
+    return _REPO_TO_ID.get(repo, -1)
+
+
+def embedding_spec(repo: str | None = None) -> dict:
+    """Registry entry for a model repo, falling back to a neutral description."""
+    mid = embedding_id_for(repo)
+    if mid in EMBEDDING_MODELS:
+        return EMBEDDING_MODELS[mid]
+    return {"repo": repo or "", "dims": 0, "seq": 256, "label": repo or "custom",
+            "query_prefix": "", "passage_prefix": "", "multilingual": False}
+
+
+def vector_field_for(repo: str | None = None) -> str:
+    """Vector field name for a model.
+
+    Named by width, not by model: two models of the same dimension can share a
+    field, and a mixed-model index gets one field per distinct width instead of
+    one per model.
+    """
+    dims = embedding_spec(repo).get("dims") or 0
+    return f"embedding_{dims}" if dims else "embedding"
+
+
 def get_embed_model(name: str | None = None) -> Any:
     """
     Lazy-load the SentenceTransformer model.
@@ -826,12 +1031,102 @@ def get_embed_model(name: str | None = None) -> Any:
         from sentence_transformers import SentenceTransformer  # noqa: PLC0415
         _embed_model = SentenceTransformer(name)
         _embed_model_name = name
+        _warn_if_chunk_size_exceeds_model(_embed_model, name)
     return _embed_model
 
 
-def embed(text: str) -> np.ndarray:
-    """Embed a single string. Returns a normalised float32 vector."""
-    return get_embed_model().encode(text, normalize_embeddings=True)
+def _migrate_chunk_size_to_model_limit() -> None:
+    """Clamp a saved ``rag.chunk_size`` that the embedding model cannot encode.
+
+    Changing DEFAULT_CONFIG only helps new installs — an existing config.json keeps
+    whatever was saved, so a value like 1024 words silently keeps discarding ~80% of
+    every chunk before embedding. That is a defect rather than a preference, so it is
+    corrected once, persisted, and logged with the reasoning. Values already within
+    the model's limit are never touched.
+    """
+    try:
+        model = get_embed_model()
+        max_tokens = int(getattr(model, "max_seq_length", 0) or 0)
+        if max_tokens <= 0:
+            return
+        safe = max(32, int((max_tokens - 2) / 1.3))
+        rag = _config.setdefault("rag", {})
+        current = int(rag.get("chunk_size", 180))
+        if current <= safe:
+            return
+        rag["chunk_size"] = safe
+        # Keep the overlap proportionate rather than leaving it larger than the chunk.
+        if int(rag.get("chunk_overlap", 32)) >= safe:
+            rag["chunk_overlap"] = max(8, safe // 6)
+        save_config(_config)
+        log.warning(
+            f"  chunk_size {current} -> {safe}: {_embed_model_name} encodes at most "
+            f"{max_tokens} tokens, so {current} words was discarding roughly "
+            f"{100 - int(max_tokens / (current * 1.3 + 2) * 100)}% of every chunk before "
+            f"embedding. Existing chunks keep their old size until re-ingested."
+        )
+    except Exception as e:
+        log.debug(f"chunk_size migration skipped: {e}")
+
+
+def _rerank_candidate_k(top_k: int) -> int:
+    """How many chunks to retrieve before reranking.
+
+    The cross-encoder can only improve on the vector/BM25 ordering if it is given
+    more candidates than the caller intends to keep — with candidates == top_k it
+    permutes the same set and the feature is inert. Returns top_k unchanged when
+    reranking is off, so a plain search does no extra work.
+    """
+    rr = _config.get("reranker", {})
+    if not rr.get("enabled", False):
+        return top_k
+    return max(top_k, int(_config.get("rag", {}).get("rerank_candidates", 40)))
+
+
+_chunk_size_warned: set[str] = set()
+
+
+def _warn_if_chunk_size_exceeds_model(model: Any, name: str) -> None:
+    """Warn once per model when chunk_size (words) exceeds what it can encode.
+
+    SentenceTransformer truncates silently at ``max_seq_length`` tokens, so an
+    oversized chunk is stored and shown in full while only its first part is
+    represented by the vector — recall drops with no visible symptom.
+    """
+    if name in _chunk_size_warned:
+        return
+    _chunk_size_warned.add(name)
+    try:
+        max_tokens = int(getattr(model, "max_seq_length", 0) or 0)
+        if max_tokens <= 0:
+            return
+        words = int(_config.get("rag", {}).get("chunk_size", 180))
+        # Measured on representative English prose rather than assumed: the real
+        # ratio varies hugely by content type (see count_tokens), so this warning
+        # is about the configured size for ordinary text. chunk_text applies a
+        # hard per-chunk token guard for everything else.
+        est_tokens = count_tokens(" ".join(["word"] * words))
+        if est_tokens > max_tokens:
+            safe = max(32, int((max_tokens - 2) / 1.3))
+            log.warning(
+                f"chunk_size={words} words ≈ {est_tokens} tokens exceeds {name}'s "
+                f"{max_tokens}-token limit — roughly "
+                f"{100 - int(max_tokens / est_tokens * 100)}% of each chunk is dropped "
+                f"before embedding. Lower Settings → RAG → chunk size to ≤ {safe}."
+            )
+    except Exception:
+        pass
+
+
+def embed(text: str, is_query: bool = False) -> np.ndarray:
+    """Embed a single string. Returns a normalised float32 vector.
+
+    ``is_query`` selects the asymmetric prefix E5 models require. Defaulting to
+    False means stored text is treated as a passage, which is the common case.
+    """
+    spec = embedding_spec()
+    prefix = spec["query_prefix"] if is_query else spec["passage_prefix"]
+    return get_embed_model().encode(prefix + text, normalize_embeddings=True)
 
 
 def embed_batch(texts: list[str]) -> np.ndarray:
@@ -840,8 +1135,9 @@ def embed_batch(texts: list[str]) -> np.ndarray:
     Much faster than calling embed() in a loop because the model can use
     batched GPU/CPU operations.  Returns shape (N, dim) float32 array.
     """
+    prefix = embedding_spec()["passage_prefix"]
     return get_embed_model().encode(
-        texts,
+        [prefix + t for t in texts] if prefix else texts,
         normalize_embeddings=True,
         batch_size=32,          # tune based on available RAM/VRAM
         show_progress_bar=False,
@@ -925,6 +1221,43 @@ def load_session(sid: str) -> list:
     except Exception:
         pass
     return []
+
+
+# Chunk text stored alongside a session turn is capped so a long conversation
+# cannot balloon the session record; the inspector shows the excerpt.
+_SESSION_CHUNK_TEXT_MAX = 1200
+
+
+def _turn_meta(chunks: list | None = None, latency: dict | None = None,
+               provider: str = "", model: str = "") -> dict:
+    """Metadata persisted with a stored turn.
+
+    Sessions used to hold only {role, content}, so everything that makes an answer
+    inspectable — its retrieved chunks, timings and the model that produced it —
+    was lost the moment the page reloaded: no citations, no RAG inspector, and
+    ratings/regenerate could no longer identify the turn they belonged to.
+
+    Only fields the UI can render are kept, and chunk text is truncated.
+    NOTE: prompt construction reads `role`/`content` explicitly, so this extra key
+    is never sent to a provider.
+    """
+    meta: dict = {"ts": int(time.time())}
+    if provider:
+        meta["provider"] = provider
+    if model:
+        meta["model"] = model
+    if latency:
+        meta["latency"] = latency
+    if chunks:
+        meta["chunks"] = [{
+            "source":    c.get("source", ""),
+            "score":     c.get("score", 0),
+            "relevance": c.get("relevance", c.get("score", 0)),
+            "lexical":   bool(c.get("lexical", False)),
+            "instance":  c.get("instance", ""),
+            "text":     (c.get("text", "") or "")[:_SESSION_CHUNK_TEXT_MAX],
+        } for c in chunks]
+    return meta
 
 
 def save_session(sid: str, messages: list):
@@ -1019,10 +1352,29 @@ def _get_rag_index(instance: str, rc: redis.Redis) -> SearchIndex:
             #   • enumerate distinct sources with FT.AGGREGATE … GROUPBY @source.
             # separator "|" (not the default ",") because commas can appear in a
             # path far more often than a pipe, and each chunk has exactly one source.
-            {"name": "source", "type": "tag", "attrs": {"separator": "|"}},
+            # CASESENSITIVE: TAG fields casefold by default, so a per-document
+            # delete of "report.pdf" also matched (and removed) "Report.pdf".
+            {"name": "source", "type": "tag",
+             "attrs": {"separator": "|", "case_sensitive": True}},
             # sortable so FT.SEARCH … SORTBY chunk_id pages the index directly
             # instead of loading every value at query time (browse endpoint).
             {"name": "chunk_id", "type": "numeric", "attrs": {"sortable": True}},
+            # Provenance/lifecycle metadata. doc_id is a stable id for the source
+            # document (delete/replace one document without touching the rest);
+            # ingested_at enables recency filtering and staleness detection; pos is
+            # the chunk's ordinal WITHIN its document, which makes neighbour
+            # expansion possible (chunk_id alone is a global counter, not a position).
+            # doc_id/pos are written to the hash for provenance but are NOT
+            # indexed: nothing queries them (deletes filter on @source, the
+            # document list aggregates on @source), and indexing them forced a
+            # full DROPINDEX + backfill on every existing install.
+            {"name": "ingested_at", "type": "numeric", "attrs": {"sortable": True}},
+            # Which registry model produced each vector. Indexed so a corpus that
+            # later holds more than one can be partitioned per model, and so
+            # "which models are in here?" is a single FT.AGGREGATE rather than a
+            # keyspace scan.
+            {"name": "emb_model",   "type": "numeric", "attrs": {"sortable": True}},
+
             {"name": "embedding", "type": "vector",  "attrs": {
                 "algorithm":       "hnsw",   # HNSW, not SVS-VAMANA: the latter targets
                 "datatype":        "float32", # >10K-vector corpora (10 240-vector training
@@ -1040,7 +1392,25 @@ _index_ensured: set[str] = set()
 
 # Bump when _get_rag_index's schema changes in a way that needs a reindex.
 #   v2: source TEXT→TAG, chunk_id made SORTABLE (2026-07).
-_RAG_SCHEMA_VERSION = 2
+#   v3: added doc_id (tag), ingested_at + pos (sortable numerics) for
+#       per-document operations, recency filtering and neighbour expansion (2026-08).
+# Deliberately NOT bumped for the doc_id/pos removal. Bumping forces a full
+# DROPINDEX + backfill on every existing install, which is the very cost that
+# change was made to avoid. Existing v3 indexes keep two unused fields (harmless);
+# fresh installs get the lean schema. Both remain fully queryable — nothing in the
+# codebase filters or sorts on @doc_id or @pos, and both are still written to the
+# hash for provenance.
+_RAG_SCHEMA_VERSION = 4
+
+# A keyword-only hit may sit below the cosine threshold and still be the right
+# answer, so it is admitted at a fraction of it. Below that it is tail noise:
+# one common term matching an otherwise unrelated document.
+_LEXICAL_FLOOR_RATIO = 0.7
+
+# Backstop for the per-document delete loop. It re-queries at offset 0 by design
+# (each batch is deleted before the next search), so any state where DEL does not
+# retract the index entry would otherwise spin a worker thread forever.
+_MAX_DELETE_BATCHES = 10_000
 
 def ensure_rag_index(instance: str, rc: redis.Redis | None = None):
     """
@@ -1124,11 +1494,18 @@ def add_chunks(instance: str, chunks: list[dict], rc: redis.Redis | None = None)
     pipe = rc.pipeline(transaction=False)
     for ch, emb in zip(chunks, embeddings):
         key = f"{prefix}:chunk:{ch['id']}"
+        src = ch.get("source", "")
         pipe.hset(key, mapping={
-            "text":      ch["text"].encode(),
-            "source":    ch.get("source", "").encode(),
-            "chunk_id":  str(ch["id"]),
-            "embedding": emb.astype(np.float32).tobytes(),
+            "text":        ch["text"].encode(),
+            "source":      src.encode(),
+            "chunk_id":    str(ch["id"]),
+            "doc_id":      doc_id_for(src),
+            "ingested_at": str(int(ch.get("ingested_at", time.time()))),
+            "pos":         str(int(ch.get("pos", 0))),
+            # Which registry model produced this vector. Per chunk, not per index,
+            # so an instance can later hold vectors from several models at once.
+            "emb_model":   str(embedding_id_for()),
+            "embedding":   emb.astype(np.float32).tobytes(),
         })
     pipe.execute()
 
@@ -1138,11 +1515,55 @@ def _decode(v) -> str:
     return v.decode() if isinstance(v, bytes) else (v or "")
 
 
+def build_context_prompt(chunks: list[dict]) -> str:
+    """Render retrieved chunks into a system-prompt section.
+
+    Two behaviours the previous flat blob lacked:
+
+    * **Citations.** Chunks are numbered ``[1]…[k]`` and the model is told to mark
+      each claim with the number it came from, so a reader can trace a specific
+      sentence back to a specific chunk instead of being handed the whole set.
+    * **Abstention.** With no chunks the model was previously given no instruction
+      at all and answered from parametric knowledge — indistinguishable from a
+      grounded answer. It is now told explicitly to say so first.
+    """
+    if not chunks:
+        return (
+            "\n\nNo relevant context was found in the knowledge base for this question. "
+            "Say so in one short sentence before answering, then answer from general "
+            "knowledge and make clear that the answer is not grounded in the user's documents."
+        )
+    numbered = "\n\n".join(
+        f"[{i}] (source: {c.get('source', 'unknown')})\n{c.get('text', '')}"
+        for i, c in enumerate(chunks, 1)
+    )
+    return (
+        "\n\nAnswer using the numbered context below. Cite the context you use by "
+        "appending its number in square brackets to the sentence it supports — for "
+        "example: \"Streams are append-only [2].\" Cite only what you actually used, "
+        "and use several markers when a sentence draws on more than one. If the "
+        "context does not cover part of the question, say so rather than filling the "
+        "gap from general knowledge.\n\n"
+        f"{numbered}"
+    )
+
+
+def doc_id_for(source: str) -> str:
+    """Stable id for a source document.
+
+    A hash rather than the raw source because the value is stored in a TAG field:
+    URLs and paths contain the TAG separator and other reserved characters, and a
+    fixed-width hex id keeps per-document queries (delete / replace / list) simple
+    and injection-free.
+    """
+    return hashlib.sha256((source or "").encode()).hexdigest()[:16]
+
+
 # Every RediSearch TAG special character, INCLUDING the "|" tag-union operator
 # (which is also this schema's field separator), "*", and the ASCII control
 # range (a bare CR/FF/VT in the query also trips the parser). redisvl's own
 # escaper leaves "|" and control chars unescaped, so we escape the full set.
-_TAG_ESCAPE_RE = re.compile(r'([\\,.<>{}\[\]"\'`:;!@#$%^&*()\-+=~|/ \x00-\x1f\x7f])')
+_TAG_ESCAPE_RE = re.compile(r'([\\,.<>{}\[\]"\'`:;!@#$%^&*()\-+=~|/?\x00-\x1f\x7f ])')
 
 def _source_infix_filter(fragment: str) -> "str | None":
     """Build a RediSearch TAG filter matching chunks whose ``source`` CONTAINS
@@ -1160,6 +1581,116 @@ def _source_infix_filter(fragment: str) -> "str | None":
         return None
     esc = _TAG_ESCAPE_RE.sub(r'\\\1', fragment)
     return f"@source:{{*{esc}*}}"
+
+
+# Instances already warned about a dead BM25 leg (one log line, not one per query).
+_bm25_leg_warned: set[str] = set()
+
+# Instances already warned about an embedding-dimension mismatch (same rationale).
+_dim_mismatch_warned: set[str] = set()
+
+
+def _is_vector_dim_error(exc: Exception) -> bool:
+    """True when a query failed because the query vector's width doesn't match
+    the index — i.e. the embedding model changed but the index was not rebuilt."""
+    # Redis 8.x actually says: "query vector blob size (3072) does not match
+    # index's expected size (1536)" — no occurrence of the word "dimension", which
+    # an earlier version of this predicate required, so it never matched.
+    s = str(exc).lower()
+    if "blob size" in s or "expected size" in s:
+        return True
+    if "vector" in s and "size" in s and ("match" in s or "invalid" in s):
+        return True
+    return ("dimension" in s or "dim" in s.split()) and (
+        "match" in s or "expected" in s or "invalid" in s or "blob" in s)
+
+
+def _warn_if_index_empty_but_data_exists(instance: str, rc: redis.Redis) -> None:
+    """Explain an empty index that still has stored chunks.
+
+    After the embedding model changes, RediSearch rebuilds the index at the new
+    dimension and simply *skips* every existing vector — no exception is raised,
+    the query just returns nothing. That is indistinguishable from "no match" to
+    the caller, so state it explicitly, once per instance.
+    """
+    warn_if_vectors_are_from_another_model(instance, rc)
+    if instance in _dim_mismatch_warned:
+        return
+    try:
+        info = rc.execute_command("FT.INFO", f"{rag_prefix(instance)}:idx")
+        d = {_decode(info[i]): info[i + 1] for i in range(0, len(info) - 1, 2)}
+        indexed = int(d.get("num_docs", 0) or 0)
+        if indexed > 0:
+            return                       # genuinely just a no-match query
+        # A rebuild in progress also reports num_docs 0 while chunk keys exist.
+        # Warning there is wrong AND harmful: it memoises the instance, which
+        # suppressed the real diagnostic for the rest of the process's life.
+        try:
+            if float(d.get("percent_indexed", 1) or 1) < 1:
+                return
+        except (TypeError, ValueError):
+            pass
+        # Only existence matters, so stop at the first key instead of counting the
+        # whole keyspace, and memoise the clean result too — without that, a
+        # genuinely empty instance re-scanned on every single query.
+        if next(rc.scan_iter(f"{rag_prefix(instance)}:chunk:*", count=200), None) is None:
+            _dim_mismatch_warned.add(instance)
+            return                       # empty instance — nothing to explain
+        stored = sum(1 for _ in rc.scan_iter(f"{rag_prefix(instance)}:chunk:*", count=200))
+        _dim_mismatch_warned.add(instance)
+        log.error(
+            f"RAG DISABLED for '{instance}': {stored} chunks are stored but 0 are indexed. "
+            f"This is the signature of an embedding-model change — the index was rebuilt "
+            f"for {_config.get('embedding', {}).get('model', '?')} and the existing vectors "
+            f"have a different dimension, so none of them indexed. Re-ingest this instance, "
+            f"or switch the embedding model back to the one it was built with."
+        )
+    except Exception:
+        pass
+
+
+_emb_mismatch_warned: set[str] = set()
+
+
+def warn_if_vectors_are_from_another_model(instance: str, rc: redis.Redis) -> None:
+    """Warn when an index holds vectors the ACTIVE model did not produce.
+
+    The dangerous case is a same-width swap — MiniLM and e5-small are both 384d,
+    so stale vectors stay structurally valid and Redis raises nothing. Queries
+    then return confident nonsense. A width change fails loudly on its own; this
+    covers the one that does not.
+    """
+    if instance in _emb_mismatch_warned:
+        return
+    active = embedding_id_for()
+    try:
+        res = rc.execute_command(
+            "FT.AGGREGATE", f"{rag_prefix(instance)}:idx", "*",
+            "GROUPBY", "1", "@emb_model",
+            "REDUCE", "COUNT", "0", "AS", "n", "LIMIT", "0", "20")
+        found = set()
+        for row in res[1:]:
+            d = {_decode(row[i]): _decode(row[i + 1]) for i in range(0, len(row) - 1, 2)}
+            try:
+                found.add(int(d.get("emb_model", -1)))
+            except (TypeError, ValueError):
+                found.add(-1)
+    except Exception:
+        return          # pre-v4 index, or no index yet — nothing to compare
+    # -1 is "provenance not recorded" (chunks written before emb_model existed),
+    # NOT "a different model". Treating it as a mismatch fires this warning on
+    # every pre-existing install, whose vectors are usually perfectly correct.
+    conflicting = {i for i in found if i >= 0} - {active}
+    if conflicting:
+        _emb_mismatch_warned.add(instance)
+        others = ", ".join(EMBEDDING_MODELS.get(i, {}).get("repo", f"id {i}")
+                           for i in sorted(conflicting))
+        log.warning("=" * 70)
+        log.warning(f"'{instance}' holds vectors from {others}, but the active model is "
+                    f"{EMBEDDING_MODELS.get(active, {}).get('repo', '?')}.")
+        log.warning("Those chunks are searched with a query vector from a DIFFERENT model.")
+        log.warning("Results will be wrong without any error. Re-ingest this instance.")
+        log.warning("=" * 70)
 
 
 def search_rag(
@@ -1205,7 +1736,7 @@ def search_rag(
     # we build a TAG pre-filter against it. Cached after the first call.
     ensure_rag_index(instance, rc)
     # Use a pre-computed query vector (e.g. from HyDE) if provided, otherwise embed the query.
-    q_emb = query_vec if query_vec is not None else embed(query).astype(np.float32)
+    q_emb = query_vec if query_vec is not None else embed(query, is_query=True).astype(np.float32)
 
     # source_filter → TAG infix-wildcard pre-filter, fully escaped so the value
     # is matched as a literal substring (see _source_infix_filter). A raw filter
@@ -1225,6 +1756,8 @@ def search_rag(
         )
         idx = _get_rag_index(instance, rc)
         raw_vec = idx.query(vq)   # list[dict]: id, text, source, vector_distance
+        if not raw_vec:
+            _warn_if_index_empty_but_data_exists(instance, rc)
 
         # vector_distance is cosine DISTANCE (0=identical); convert to similarity
         vec_rows: list[dict] = []
@@ -1252,21 +1785,38 @@ def search_rag(
                         "FT.SEARCH", idx_name,
                         text_query,
                         "SCORER", "BM25STD",   # standard BM25 ranking (Redis 8.x)
+                        "WITHSCORES",          # needed: a keyword-only hit has no
+                                               # cosine, so BM25 is its only signal
                         "RETURN", "2", "text", "source",
                         "LIMIT", "0", str(fetch_k),
                         "DIALECT", "2",
                     )
                     # Parse raw FT.SEARCH response (key, [field, val, ...], ...)
+                    # WITHSCORES widens the reply stride to (key, score, fields).
                     items = txt_res[1:]
-                    for i in range(0, len(items), 2):
+                    for i in range(0, len(items) - 2, 3):
                         key = _decode(items[i])
-                        fields = items[i + 1]
-                        d: dict = {"_key": key, "_vec_score": 0.0}
+                        try:
+                            bm25 = float(_decode(items[i + 1]))
+                        except (TypeError, ValueError):
+                            bm25 = 0.0
+                        fields = items[i + 2]
+                        d: dict = {"_key": key, "_vec_score": 0.0, "_bm25": bm25}
                         for j in range(0, len(fields), 2):
                             d[_decode(fields[j])] = _decode(fields[j + 1])
                         bm25_rows.append(d)
-                except Exception:
-                    pass   # text index unavailable; degrade to vector-only
+                except Exception as te:
+                    # Degrade to vector-only, but say so once per instance. A
+                    # silent pass here hides a total loss of the lexical leg —
+                    # notably on a RediSearch older than 8.0, which rejects
+                    # "SCORER BM25STD" outright, so every keyword-only answer
+                    # becomes unreachable with no signal that hybrid is off.
+                    if instance not in _bm25_leg_warned:
+                        _bm25_leg_warned.add(instance)
+                        log.warning(
+                            f"Hybrid text leg unavailable for '{instance}' — "
+                            f"degrading to vector-only search: {te}"
+                        )
 
         # ── 3. RRF merge and re-rank ─────────────────────────────────────────
         K_RRF  = 60
@@ -1286,11 +1836,37 @@ def search_rag(
 
         ranked = sorted(scores.values(), key=lambda x: x["rrf"], reverse=True)[:top_k]
 
+        # A keyword-only hit has no vector_distance, so RediSearch reports nothing
+        # for it and it used to display as "0.0%". Fetch its stored embedding and
+        # compute the real cosine against the query, so every chunk is scored on
+        # ONE scale. Normalising BM25 instead is not comparable: its top hit is
+        # always 1.0, which buries every vector hit beneath it.
+        missing = [r for r in bm25_rows if not r.get("_vec_score")]
+        if missing:
+            try:
+                pipe = rc.pipeline(transaction=False)
+                for r in missing:
+                    pipe.hget(r["_key"], "embedding")
+                blobs = pipe.execute()
+                qv = np.asarray(q_emb, dtype=np.float32)
+                qn = float(np.linalg.norm(qv)) or 1.0
+                for r, blob in zip(missing, blobs):
+                    if not blob:
+                        continue
+                    cv = np.frombuffer(blob, dtype=np.float32)
+                    if cv.size != qv.size:
+                        continue
+                    cn = float(np.linalg.norm(cv)) or 1.0
+                    r["_vec_score"] = round(float(np.dot(qv, cv)) / (qn * cn), 4)
+            except Exception as ve:
+                log.debug(f"cosine backfill for lexical hits failed: {ve}")
+
         raw_results = [
             {
                 "text":    item["row"].get("text", ""),
                 "source":  item["row"].get("source", ""),
                 "score":   float(item["row"].get("_vec_score", 0.0)),
+                "bm25":    float(item["row"].get("_bm25", 0.0)),
                 # Combined RRF rank score — the authoritative ordering (see below).
                 # search_rag_parallel fuses across instances on this, not on the
                 # cosine `score`, so keyword-only hits (cosine 0) aren't buried.
@@ -1304,11 +1880,25 @@ def search_rag(
         # leg was selected lexically, so keep it regardless. Without this, every
         # keyword-only hit (cosine score 0) is dropped and hybrid collapses to
         # vector-only. source_filter is already applied in-query (both legs).
-        results = [
-            {k: v for k, v in c.items() if k != "lexical"}
-            for c in raw_results
-            if c["score"] >= threshold or c["lexical"]
+        # A lexical hit is exempt from the cosine threshold because it was selected
+        # by term match, not by distance — but the exemption used to be unbounded,
+        # so the BM25 tail (a single common term in an unrelated document) arrived
+        # with cosine 0.0 and went straight into the prompt. Require a real share of
+        # the best keyword score instead.
+        # Lexical hits are still exempt from the full cosine threshold — they were
+        # selected by term match, and a keyword answer can sit just under it. But
+        # the exemption is now bounded by a real cosine floor, so the BM25 tail (a
+        # single common term in an unrelated document) no longer reaches the prompt.
+        lex_floor = threshold * _LEXICAL_FLOOR_RATIO
+        kept = [
+            c for c in raw_results
+            if c["score"] >= threshold or (c["lexical"] and c["score"] >= lex_floor)
         ]
+        for c in kept:
+            c["relevance"] = round(c["score"], 4)
+        kept.sort(key=lambda c: (c["relevance"], c.get("_fused", 0.0)), reverse=True)
+        results = [{k: v for k, v in c.items() if k != "lexical"} | {"lexical": c["lexical"]}
+                   for c in kept]
         _record_rag_stats(instance, results, raw_results)
         return results
 
@@ -1322,7 +1912,8 @@ def search_rag(
             try:
                 idx = _get_rag_index(instance, rc)
                 fetch_k = top_k * 2 if hybrid else top_k
-                q_emb2 = query_vec if query_vec is not None else embed(query).astype(np.float32)
+                q_emb2 = (query_vec if query_vec is not None
+                          else embed(query, is_query=True).astype(np.float32))
                 vq2 = VectorQuery(
                     vector=q_emb2.tolist(),
                     vector_field_name="embedding",
@@ -1349,6 +1940,19 @@ def search_rag(
                 return results2
             except Exception as e2:
                 log.warning(f"RAG search still failing for '{instance}' after index recreate: {e2}")
+        elif _is_vector_dim_error(e):
+            # The query vector no longer matches the index — almost always because
+            # the embedding model was changed without re-indexing. Say so loudly
+            # and once per instance: the generic path would return [] and the user
+            # would see RAG "working" but never retrieving anything.
+            if instance not in _dim_mismatch_warned:
+                _dim_mismatch_warned.add(instance)
+                log.error(
+                    f"RAG DISABLED for '{instance}': the index was built for a different "
+                    f"embedding dimension than the current model "
+                    f"({_config.get('embedding', {}).get('model', '?')}) produces. "
+                    f"Re-ingest this instance, or switch the embedding model back. ({e})"
+                )
         else:
             log.warning(f"RAG search skipped for '{instance}': {e}")
         _record_rag_stats(instance, [], [])
@@ -1417,7 +2021,8 @@ async def search_rag_parallel(
     merged: list[dict] = []
     for results in per_instance:
         merged.extend(results)
-    merged.sort(key=lambda c: (c.get("_fused", 0.0), c.get("score", 0.0)), reverse=True)
+    merged.sort(key=lambda c: (c.get("relevance", c.get("score", 0.0)),
+                               c.get("_fused", 0.0)), reverse=True)
     return merged[:top_k]
 
 
@@ -1462,14 +2067,32 @@ def _get_semantic_cache() -> "SemanticCache | None":
         similarity_threshold = _config.get("cache", {}).get("similarity_threshold", 0.92)
         ttl  = _config.get("cache", {}).get("ttl", 3600)
         # SemanticCache uses cosine DISTANCE not SIMILARITY — convert
-        _semantic_cache = SemanticCache(
-            name=CACHE_PREFIX.rstrip(":"),   # "semcache"
-            vectorizer=_make_cache_vectorizer(),
-            distance_threshold=round(1.0 - similarity_threshold, 4),
-            ttl=ttl,
-            redis_client=r(),
-        )
-        log.info("SemanticCache initialised (redisvl)")
+        def _build(overwrite: bool):
+            return SemanticCache(
+                name=CACHE_PREFIX.rstrip(":"),   # "semcache"
+                vectorizer=_make_cache_vectorizer(),
+                distance_threshold=round(1.0 - similarity_threshold, 4),
+                ttl=ttl,
+                redis_client=r(),
+                # Scope tag — see _cache_scope(). A cached answer is only valid for the
+                # exact corpus/provider/model/prompt it was produced under, so the scope
+                # is an indexed TAG we filter on rather than part of the embedded text.
+                filterable_fields=[{"name": "scope", "type": "tag"}],
+                overwrite=overwrite,
+            )
+        try:
+            _semantic_cache = _build(overwrite=False)
+        except Exception as e:
+            # An index built by an older version has no `scope` field, and redisvl
+            # refuses to reuse a mismatched schema — which would leave the cache
+            # permanently disabled. A cache is disposable, so rebuild it once;
+            # entries are re-earned on the next few queries.
+            if "does not match" not in str(e):
+                raise
+            log.info("Semantic cache schema changed (scope filter added) — rebuilding index; "
+                     "previously cached answers are discarded.")
+            _semantic_cache = _build(overwrite=True)
+        log.info("SemanticCache initialised (redisvl, scope-filtered)")
     except Exception as e:
         if "unknown command" in str(e).lower():
             log.warning(
@@ -1504,10 +2127,61 @@ def wants_visual(query: str) -> bool:
     return bool(_VISUAL_INTENT_RE.search(query or ""))
 
 
-def cache_lookup(query: str, threshold: float = 0.92) -> dict | None:
+async def _effective_rag_instances(rag_instances: list[str] | None) -> list[str]:
+    """The instances a query will actually search — disabled ones are dropped.
+
+    The cache scope must be built from this, not from the requested list. An
+    instance toggled off produces an ungrounded answer; scoping it as "answered
+    against X" meant re-enabling X replayed that ungrounded answer as a hit.
+    """
+    out: list[str] = []
+    for name in rag_instances or []:
+        try:
+            meta, _ep = await _rag_meta_cached_async(name)
+            if (meta or {}).get("enabled", True):
+                out.append(name)
+        except Exception:
+            out.append(name)   # unknown state: assume it counts, never cross scopes
+    return out
+
+
+def _cache_scope(rag_instances: list[str] | None = None, provider: str = "",
+                 model: str = "", source_filter: str = "",
+                 system_prompt: str = "") -> str:
+    """Identity of the *conditions* an answer was produced under.
+
+    A semantic cache keyed on the question alone is wrong in two ways:
+
+      * **Correctness** — the same question against a different knowledge base,
+        provider, model or system prompt has a different correct answer, but the
+        cache would replay the first one (together with the *other* corpus's
+        chunks as its provenance).
+      * **Privacy** — on a shared instance, an answer derived from one user's
+        uploaded document would be served to anyone whose question landed within
+        the similarity threshold.
+
+    Everything that can change the answer therefore goes into a scope tag, and
+    lookups are filtered to a matching scope. Instances are sorted so that
+    ``[a,b]`` and ``[b,a]`` share a cache.
+    """
+    payload = "|".join([
+        ",".join(sorted(rag_instances or [])),
+        provider or "",
+        model or "",
+        source_filter or "",
+        hashlib.sha256((system_prompt or "").encode()).hexdigest()[:16],
+    ])
+    return hashlib.sha256(payload.encode()).hexdigest()[:32]
+
+
+def cache_lookup(query: str, threshold: float = 0.92, scope: str = "") -> dict | None:
     """
     Look up the nearest cached response via redisvl SemanticCache.
     Returns {"response": str, "score": float} or None.
+
+    ``scope`` (see _cache_scope) restricts the search to entries produced under
+    the same corpus/provider/model/prompt; an empty scope matches only entries
+    stored without one.
     """
     # During the first few seconds after a restart the background warm may not have built
     # the vectorizer yet; treat that as a cache miss rather than paying the ~3 s build here.
@@ -1517,7 +2191,8 @@ def cache_lookup(query: str, threshold: float = 0.92) -> dict | None:
     if cache is None:
         return None
     try:
-        hits = cache.check(prompt=query, num_results=1)
+        hits = cache.check(prompt=query, num_results=1,
+                           filter_expression=Tag("scope") == (scope or "_none"))
         if hits:
             h = hits[0]
             dist  = float(h.get("vector_distance", h.get("score", 1.0)))
@@ -1534,9 +2209,11 @@ def cache_lookup(query: str, threshold: float = 0.92) -> dict | None:
     return None
 
 
-def cache_store(query: str, response: str, chunks: list | None = None):
+def cache_store(query: str, response: str, chunks: list | None = None, scope: str = ""):
     """Store a query→response pair in the SemanticCache with TTL.
     Chunks are stored as JSON metadata so they can be re-displayed on cache hits.
+    ``scope`` tags the entry with the conditions it was produced under so a later
+    lookup under different conditions cannot match it (see _cache_scope).
     """
     # Skip storing during the warm window rather than triggering the ~3 s inline build.
     if _semantic_cache is None and not _semantic_cache_ready:
@@ -1546,7 +2223,8 @@ def cache_store(query: str, response: str, chunks: list | None = None):
         return
     try:
         metadata = {"chunks_json": json.dumps(chunks)} if chunks else None
-        cache.store(prompt=query, response=response, metadata=metadata)
+        cache.store(prompt=query, response=response, metadata=metadata,
+                    filters={"scope": scope or "_none"})
     except Exception as e:
         log.error(f"Cache store error: {e}")
 
@@ -1572,12 +2250,170 @@ _STOPWORDS = frozenset({
 
 
 def _keywords_for_bm25(query: str) -> list[str]:
-    """Extract significant words for BM25/text search — remove stop-words and short tokens."""
+    """Extract significant words for BM25/text search — drop stop-words and single characters.
+
+    Two-character tokens are KEPT. They are exactly the identifiers the lexical
+    leg exists to catch — error codes (``E7``), part numbers (``R2``), model
+    designators (``V8``, ``3M``) — and an embedding has no way to rank them, so
+    dropping them left the answer unreachable at any cosine threshold. English
+    two-letter noise (``is``, ``of``, ``on``, …) is already covered by
+    _STOPWORDS, and BM25's IDF term demotes whatever slips through.
+
+    Single characters are still dropped: ``\\w+`` splits a hyphenated identifier
+    ("F-16" → "f", "16"), and the orphaned letter matches everything while
+    identifying nothing.
+    """
     return [w for w in re.findall(r'\w+', query.lower())
-            if len(w) > 2 and w not in _STOPWORDS]
+            if len(w) > 1 and w not in _STOPWORDS]
 
 
-def chunk_text(text: str, size: int = 512, overlap: int = 64) -> list[str]:
+# A chunk may never exceed this multiple of the configured size. Content with no
+# sentence punctuation — CSV/XLSX rows, markdown tables, code — otherwise lands in
+# the "single oversized sentence" branch below and becomes one unbounded chunk
+# whose embedding represents only its first ~256 tokens.
+_CHUNK_HARD_CAP_FACTOR = 2
+
+
+def count_tokens(text: str) -> int:
+    """Tokens the active embedding model will actually consume for ``text``.
+
+    A word-count heuristic (words × 1.3) is close enough for English prose but
+    wrong by more than an order of magnitude for the content that most needs
+    splitting: CSV rows, code, URLs and JSON tokenise into many sub-word pieces,
+    so a 195-word CSV chunk can be ~8 000 tokens. Falls back to the heuristic only
+    if the tokenizer is unavailable.
+    """
+    try:
+        tok = getattr(get_embed_model(), "tokenizer", None)
+        if tok is not None:
+            # WordPiece maps any run longer than _MAX_CHARS_PER_WORD to a single
+            # [UNK], so a 200 KB base64 blob counted as 3 tokens. Break the runs
+            # first or the count is meaningless for exactly the input that needs
+            # splitting most.
+            return len(tok.encode(_break_long_runs(text), add_special_tokens=True))
+    except Exception:
+        pass
+    return int(len(text.split()) * 1.3) + 2
+
+
+def _model_token_limit(default: int = 256) -> int:
+    """Max tokens the active embedding model encodes before truncating."""
+    try:
+        return int(getattr(get_embed_model(), "max_seq_length", 0) or 0) or default
+    except Exception:
+        return default
+
+
+# WordPiece maps any whitespace-free run longer than this to a single [UNK],
+# which makes token counts meaningless (a 200 KB base64 blob counts as 3 tokens)
+# and makes every such document embed to the SAME vector. Long runs are therefore
+# broken up before tokenising.
+_MAX_CHARS_PER_WORD = 100
+
+
+def _break_long_runs(text: str, max_chars: int = _MAX_CHARS_PER_WORD) -> str:
+    """Insert breaks into whitespace-free runs longer than ``max_chars``.
+
+    Applies to base64 blobs, minified JS/JSON and long URLs. Without it those runs
+    collapse to [UNK] and are neither counted nor split correctly.
+    """
+    if not text:
+        return text
+    out, run = [], 0
+    for ch in text:
+        if ch.isspace():
+            run = 0
+        else:
+            run += 1
+            if run > max_chars:
+                out.append(" ")
+                run = 1
+        out.append(ch)
+    return "".join(out)
+
+
+def _split_by_tokens(unit: str, max_tokens: int) -> list[str]:
+    """Split text so that no piece exceeds ``max_tokens`` real tokens.
+
+    Uses ONE tokenizer call per piece with offset mapping and cuts on real token
+    boundaries, rather than probing token counts per word. That is both correct
+    for scripts without spaces (CJK, Thai — where a word-based split cannot cut at
+    all) and far cheaper: the previous per-word approach re-tokenised a growing
+    prefix and dominated ingest time.
+    """
+    if not unit or not unit.strip():
+        return []
+    prepared = _break_long_runs(unit)
+    try:
+        tok = getattr(get_embed_model(), "tokenizer", None)
+        if tok is None or not getattr(tok, "is_fast", False):
+            raise RuntimeError("no fast tokenizer")
+        enc = tok(prepared, return_offsets_mapping=True, add_special_tokens=False,
+                  truncation=False, verbose=False)
+        offsets = [o for o in enc["offset_mapping"] if o[1] > o[0]]
+        if not offsets:
+            return [unit]
+        # Reserve room for the [CLS]/[SEP] the encoder adds at embed time.
+        budget = max(1, max_tokens - 2)
+        if len(offsets) <= budget:
+            return [prepared]
+        pieces: list[str] = []
+        for i in range(0, len(offsets), budget):
+            window = offsets[i:i + budget]
+            piece = prepared[window[0][0]:window[-1][1]]
+            if piece.strip():
+                pieces.append(piece)
+        # Slicing at a token boundary can re-segment the neighbouring subwords, so a
+        # piece occasionally counts a few tokens more than the offsets predicted.
+        # Verify each piece for real and shave the stragglers.
+        repaired: list[str] = []
+        for piece in pieces:
+            shrink = budget
+            while count_tokens(piece) > max_tokens and shrink > 8:
+                shrink = int(shrink * 0.9)
+                enc2 = tok(piece, return_offsets_mapping=True, add_special_tokens=False,
+                           truncation=False, verbose=False)
+                off2 = [o for o in enc2["offset_mapping"] if o[1] > o[0]]
+                if not off2:
+                    break
+                piece = piece[off2[0][0]:off2[min(shrink, len(off2)) - 1][1]]
+            repaired.append(piece)
+        return repaired
+    except Exception:
+        # Tokenizer unavailable — fall back to a conservative character split so
+        # oversized text is still broken up rather than passed through whole.
+        approx = max(1, max_tokens) * 4
+        return [prepared[i:i + approx] for i in range(0, len(prepared), approx)
+                if prepared[i:i + approx].strip()]
+
+
+def _split_oversized(unit: str, size: int) -> list[str]:
+    """Break a single oversized 'sentence' into <= size-word pieces.
+
+    Prefers line boundaries (a CSV/table row, a line of code) so rows stay whole,
+    and falls back to a plain word split for a genuinely unbroken run of text.
+    """
+    out: list[str] = []
+    buf: list[str] = []
+    bufw = 0
+    for line in unit.splitlines() or [unit]:
+        lw = len(line.split())
+        if lw > size:                      # single line longer than a whole chunk
+            if buf:
+                out.append("\n".join(buf)); buf, bufw = [], 0
+            words = line.split()
+            for k in range(0, len(words), size):
+                out.append(" ".join(words[k:k + size]))
+            continue
+        if bufw + lw > size and buf:
+            out.append("\n".join(buf)); buf, bufw = [], 0
+        buf.append(line); bufw += lw
+    if buf:
+        out.append("\n".join(buf))
+    return [c for c in out if c.strip()]
+
+
+def chunk_text(text: str, size: int = 180, overlap: int = 32) -> list[str]:
     """
     Split text into overlapping chunks that respect sentence boundaries.
 
@@ -1586,10 +2422,25 @@ def chunk_text(text: str, size: int = 512, overlap: int = 64) -> list[str]:
     grouped into windows of approximately `size` words.  Overlap is achieved
     by carrying the last N words worth of sentences forward into the next chunk.
 
+    A sentence longer than ``size * _CHUNK_HARD_CAP_FACTOR`` is split rather than
+    emitted whole — see _split_oversized.
+
     size    — target words per chunk (approximate)
     overlap — words of sentence-level context shared between adjacent chunks
     """
-    sentences = [s.strip() for s in _SENT_END.split(text) if s.strip()]
+    hard_cap = max(1, size) * _CHUNK_HARD_CAP_FACTOR
+    raw_sentences = [s.strip() for s in _SENT_END.split(text) if s.strip()]
+    # Normalise FIRST: any "sentence" over the hard cap (a whole CSV/table/code
+    # block with no ./!/? in it) is broken down before windowing. Doing this here
+    # rather than inside the loop matters — the accumulator admits any sentence
+    # when the window is still empty, so an oversized one would otherwise pass
+    # straight through as a single unbounded chunk.
+    sentences: list[str] = []
+    for s in raw_sentences:
+        if len(s.split()) > hard_cap:
+            sentences.extend(_split_oversized(s, size))
+        else:
+            sentences.append(s)
     if not sentences:
         # Fallback: no sentence punctuation found — split on whitespace
         words = text.split()
@@ -1615,7 +2466,8 @@ def chunk_text(text: str, size: int = 512, overlap: int = 64) -> list[str]:
             window.append(sentences[j])
             wc += s_words
             j += 1
-        # Safety: if a single sentence exceeds `size`, include it anyway
+        # Safety: a sentence that alone exceeds `size` (but is under the hard cap,
+        # so it was not pre-split) is still emitted whole rather than dropped.
         if not window:
             window.append(sentences[i])
             j = i + 1
@@ -1635,7 +2487,15 @@ def chunk_text(text: str, size: int = 512, overlap: int = 64) -> list[str]:
                     break
             i = max(new_i, i + 1)   # always advance at least one sentence
 
-    return chunks
+    # Final guard, in REAL tokens. Word-based windowing above is a good proxy for
+    # prose but badly underestimates CSV/code/URL content, which tokenises into
+    # many sub-word pieces — without this, the tail of such a chunk is silently
+    # dropped by the encoder and becomes unsearchable.
+    limit = _model_token_limit()
+    guarded: list[str] = []
+    for c in chunks:
+        guarded.extend(_split_by_tokens(c, limit))
+    return guarded
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # DOCUMENT INGESTION
@@ -1657,8 +2517,8 @@ def ingest_text(
     cfg = _config.get("rag", {})
     chunks = chunk_text(
         text,
-        cfg.get("chunk_size", 512),
-        cfg.get("chunk_overlap", 64),
+        cfg.get("chunk_size", 180),
+        cfg.get("chunk_overlap", 32),
     )
     if not chunks:
         return 0
@@ -1668,8 +2528,13 @@ def ingest_text(
 
     # Deduplicate: compute all hashes, then check + add in a single pipeline.
     # This turns N round-trips into one network operation.
+    # Scoped per source. A global content hash stores an identical chunk once,
+    # so deleting the document that happened to be ingested first also removed
+    # content the other document still needed — and released the shared hash, so
+    # re-ingesting the survivor was then skipped as a duplicate. Scoping trades a
+    # little storage for documents that can be deleted independently.
     chunk_hashes = [
-        hashlib.sha256(" ".join(c.lower().split()).encode()).hexdigest()
+        hashlib.sha256(f"{source}\x00{' '.join(c.lower().split())}".encode()).hexdigest()
         for c in chunks
     ]
     pipe = rc.pipeline(transaction=False)
@@ -1683,8 +2548,11 @@ def ingest_text(
 
     # Reserve N IDs at once — single O(1) Redis call
     start_id = next_chunk_id(instance, len(new_chunks), rc)
+    now = int(time.time())
+    # `pos` is the ordinal within THIS document (not the global chunk_id), so
+    # neighbouring chunks of the same source can be located later.
     records = [
-        {"id": start_id + i, "text": c, "source": source}
+        {"id": start_id + i, "text": c, "source": source, "ingested_at": now, "pos": i}
         for i, c in enumerate(new_chunks)
     ]
     add_chunks(instance, records, rc)
@@ -1708,15 +2576,20 @@ def _prepare_chunks(
     cfg = _config.get("rag", {})
     chunks = chunk_text(
         text,
-        cfg.get("chunk_size", 512),
-        cfg.get("chunk_overlap", 64),
+        cfg.get("chunk_size", 180),
+        cfg.get("chunk_overlap", 32),
     )
     if not chunks:
         return []
 
     hash_set_key = f"rag:{instance}:chunk_hashes"
+    # Scoped per source. A global content hash stores an identical chunk once,
+    # so deleting the document that happened to be ingested first also removed
+    # content the other document still needed — and released the shared hash, so
+    # re-ingesting the survivor was then skipped as a duplicate. Scoping trades a
+    # little storage for documents that can be deleted independently.
     chunk_hashes = [
-        hashlib.sha256(" ".join(c.lower().split()).encode()).hexdigest()
+        hashlib.sha256(f"{source}\x00{' '.join(c.lower().split())}".encode()).hexdigest()
         for c in chunks
     ]
     pipe = rc.pipeline(transaction=False)
@@ -1734,10 +2607,15 @@ def _prepare_chunks(
         return []
 
     start_id = next_chunk_id(instance, len(new_chunks), rc)
-    return [{"id": start_id + i, "text": c, "source": source} for i, c in enumerate(new_chunks)]
+    now = int(time.time())
+    return [{"id": start_id + i, "text": c, "source": source, "ingested_at": now, "pos": i}
+            for i, c in enumerate(new_chunks)]
 
 
-_CHAT_FILE_ACCEPT = {".txt", ".md", ".csv", ".pdf", ".doc", ".docx", ".xls", ".xlsx"}
+# Legacy binary .doc/.xls are deliberately NOT here: python-docx and openpyxl read
+# only OOXML, so those files fail with an opaque "File is not a zip file".
+# extract_file_text raises a clear message for them instead.
+_CHAT_FILE_ACCEPT = {".txt", ".md", ".csv", ".pdf", ".docx", ".xlsx"}
 _CHAT_FILE_MAX_BYTES = 10 * 1024 * 1024   # 10 MB
 _CHAT_FILE_MAX_CHARS = 150_000             # ~100 k tokens — keeps context manageable
 
@@ -1766,7 +2644,12 @@ def extract_file_text(filename: str, data: bytes) -> str:
         doc = fitz.open(stream=data, filetype="pdf")
         return "\n".join(page.get_text() for page in doc)
 
-    if suffix in (".doc", ".docx"):
+    if suffix in (".doc", ".xls"):
+        raise ValueError(
+            f"Legacy binary {suffix} is not supported — re-save it as "
+            f"{'.docx' if suffix == '.doc' else '.xlsx'} and upload again")
+
+    if suffix == ".docx":
         if not HAS_PYTHON_DOCX:
             raise ValueError("DOCX support requires python-docx (pip install python-docx)")
         doc = _DocxDocument(_io.BytesIO(data))
@@ -1780,7 +2663,7 @@ def extract_file_text(filename: str, data: bytes) -> str:
                 parts.append(" | ".join(cell.text for cell in row.cells if cell.text.strip()))
         return "\n".join(parts)
 
-    if suffix in (".xls", ".xlsx"):
+    if suffix == ".xlsx":
         if not HAS_OPENPYXL:
             raise ValueError("Excel support requires openpyxl (pip install openpyxl)")
         wb = _load_workbook(_io.BytesIO(data), read_only=True, data_only=True)
@@ -1803,44 +2686,43 @@ async def ingest_file(
     rc: redis.Redis | None = None,
 ) -> dict:
     """
-    Ingest a single file (TXT, CSV, or PDF) into a RAG instance.
+    Ingest a single file into a RAG instance.
+
+    Formats are whatever ``extract_file_text`` understands — .txt, .md, .csv,
+    .pdf, .doc/.docx, .xls/.xlsx — so the knowledge base accepts the same set as
+    a chat attachment. (These were previously divergent: the docs advertised
+    md/docx/xlsx while this path rejected them as "Unsupported type".)
+
     Returns a log entry dict with status information.
     """
-    text = ""
     suffix = path.suffix.lower()
 
-    # File parsing (a big PDF is seconds of CPU) and the embed+Redis write in ingest_text
+    # Parsing (a big PDF is seconds of CPU) and the embed+Redis write in ingest_text
     # are both synchronous — run them off the event loop so a large upload never freezes
     # concurrent chat sessions or the WS receive loop.
-    def _extract_txt():
-        return path.read_text(errors="ignore")
-
-    def _extract_csv():
-        rows = []
-        with open(path, newline="", errors="ignore") as f:
-            for row in csv.reader(f):
-                rows.append(" | ".join(row))
-        return "\n".join(rows)
-
-    def _extract_pdf():
-        doc = fitz.open(str(path))
-        return "\n".join(p.get_text() for p in doc)
+    def _extract():
+        return extract_file_text(path.name, path.read_bytes())
 
     try:
-        if suffix == ".txt":
-            text = await asyncio.to_thread(_extract_txt)
+        if suffix not in _CHAT_FILE_ACCEPT:
+            hint = (f"Legacy binary {suffix} is not supported — re-save it as "
+                    f"{'.docx' if suffix == '.doc' else '.xlsx'} and upload again"
+                    if suffix in (".doc", ".xls") else f"Unsupported type: {suffix}")
+            return {"source": source, "status": "skipped", "error": hint}
 
-        elif suffix == ".csv":
-            text = await asyncio.to_thread(_extract_csv)
+        text = await asyncio.to_thread(_extract)
 
-        elif suffix == ".pdf":
-            if HAS_PYMUPDF:
-                text = await asyncio.to_thread(_extract_pdf)
-            else:
-                return {"source": source, "status": "error", "error": "PyMuPDF not installed (pip install pymupdf)"}
-
-        else:
-            return {"source": source, "status": "skipped", "error": f"Unsupported type: {suffix}"}
+        if not text.strip():
+            # A scanned PDF extracts to nothing. Reporting "ok, 0 chunks" made this
+            # look like a successful ingest; say plainly that nothing was indexed.
+            entry = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "instance": instance, "source": source, "chunks": 0,
+                "status": "error",
+                "error": "No extractable text (an image-only/scanned document needs OCR)",
+            }
+            append_log(entry)
+            return entry
 
         n = await asyncio.to_thread(ingest_text, instance, text, source, rc)
         entry = {
@@ -2398,10 +3280,16 @@ async def crawl_url(
                 if len(batch_records) >= EMBED_BATCH:
                     await flush()
 
+        gate = _crawl_gates.get(seed_url)
+
         async def worker():
             while True:
                 page_url, page_depth = await queue.get()
                 try:
+                    if gate is not None and not gate.is_set():
+                        # Paused: hold here without consuming the item's slot in
+                        # the queue's unfinished count, so join() still waits.
+                        await gate.wait()
                     await process_page(page_url, page_depth, fetch_fn)
                 except Exception as e:
                     log.warning("worker: unhandled exception for %s: %s", page_url, e)
@@ -3334,6 +4222,9 @@ def reset_rag(instance: str, rc: redis.Redis | None = None):
     rc = rc or r()
     prefix = rag_prefix(instance)
     _index_ensured.discard(instance)   # force re-creation on next ingest
+    _bm25_leg_warned.discard(instance)  # re-warn if the rebuilt index still has no text leg
+    _emb_mismatch_warned.discard(instance)
+    _dim_mismatch_warned.discard(instance)  # same: re-arm the dimension diagnostic
     try:
         rc.execute_command("FT.DROPINDEX", f"{prefix}:idx", "DD")
     except Exception:
@@ -3545,6 +4436,7 @@ async def startup():
 
     _config = load_config()
     load_logs()
+    load_feedback()   # without this the first rating after a restart truncates the store
 
     log.info("=" * 60)
     log.info(f"RediRecall v{__version__} — startup diagnostics")
@@ -3683,6 +4575,7 @@ async def startup():
         try:
             await asyncio.to_thread(get_embed_model)
             log.info(f"  Embedding model ready: {_embed_model_name}")
+            _migrate_chunk_size_to_model_limit()
         except Exception as e:
             log.warning(f"  Embedding model warmup failed: {e}")
 
@@ -3765,6 +4658,47 @@ async def api_save_config(payload: dict):
     # Restore any secrets the UI posted back as sentinels before applying,
     # so a settings save never wipes a stored key/password it never received.
     _unredact_secrets(payload, _config)
+
+    # ── Embedding-model change guard ────────────────────────────────────────
+    # An index is created with the dimension of whatever model was loaded at the
+    # time. Switching models changes the query vector's dimension but NOT the
+    # existing index, so every subsequent search raises a dim mismatch that the
+    # generic handler swallows — RAG silently returns nothing, forever, with a
+    # green health check. Refuse the change while indexed data exists unless the
+    # caller explicitly forces it, and on force drop the schema markers so every
+    # index is rebuilt at the new dimension.
+    old_model = (_config.get("embedding") or {}).get("model", "")
+    new_model = (payload.get("embedding") or {}).get("model", old_model)
+    if new_model and new_model != old_model:
+        populated = []
+        try:
+            for inst in await asyncio.to_thread(list_rag_instances):
+                if inst.get("chunks", 0) > 0:
+                    populated.append(f"{inst.get('name')} ({inst['chunks']} chunks)")
+        except Exception:
+            pass
+        if populated and not payload.get("force_embedding_change"):
+            raise HTTPException(409, detail={
+                "error": "embedding_model_change_requires_reindex",
+                "message": (
+                    f"Switching the embedding model from '{old_model}' to '{new_model}' "
+                    f"invalidates every existing index — the stored vectors have the old "
+                    f"dimension and would stop matching, making RAG return nothing. "
+                    f"Re-ingest is required afterwards."
+                ),
+                "instances": populated,
+                "hint": "Re-send with force_embedding_change=true to proceed and rebuild the indexes.",
+            })
+        # Reset the schema markers on EVERY model change, not just when instances
+        # currently hold indexed documents. After a previous mismatched switch the
+        # indexed count is 0 — precisely the state a user switching back is trying
+        # to repair — and gating on `populated` there would skip the rebuild and
+        # leave the index stuck at the wrong dimension.
+        log.warning(f"Embedding model {old_model!r} -> {new_model!r}: resetting index "
+                    f"schema markers so every index is rebuilt at the new dimension"
+                    + (f" (affects: {', '.join(populated)})" if populated else ""))
+        await _reset_index_markers_for_embedding_change()
+
     _config.update(payload)
 
     # Restore env-sourced keys — they must never be overwritten by a config save
@@ -3824,8 +4758,29 @@ async def api_import_config(file: UploadFile = File(...)):
     cfg = json.loads(content)
     # Sentinel secrets in an exported file mean "keep what's already stored".
     _unredact_secrets(cfg, _config)
-    _config = {**DEFAULT_CONFIG, **cfg}
+    merged = {**DEFAULT_CONFIG, **cfg}
+    # Deep-merge like load_config does. A shallow merge of an uploaded file
+    # containing e.g. {"redis": {"host": "nas"}} drops the port, silently sending
+    # every query to 6379 and making all RAG instances look wiped.
+    for k, v in DEFAULT_CONFIG.items():
+        if isinstance(v, dict):
+            merged[k] = {**v, **(cfg.get(k) or {})}
+
+    # Importing a config that changes the embedding model has the same consequence
+    # as changing it in Settings: every existing vector is the wrong dimension and
+    # retrieval dies silently. Run the same guard rather than bypassing it.
+    old_model = (_config.get("embedding") or {}).get("model")
+    new_model = (merged.get("embedding") or {}).get("model")
+    if new_model and new_model != old_model:
+        log.warning(f"Config import changes the embedding model {old_model!r} -> "
+                    f"{new_model!r}: resetting index schema markers.")
+        await _reset_index_markers_for_embedding_change()
+
+    _config = merged
     save_config(_config)
+    # Endpoints, provider keys and the embedding model may all have changed.
+    invalidate_redis_clients()
+    invalidate_provider_clients()
     return {"ok": True}
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3842,7 +4797,11 @@ def api_health():
     (kept out of here so this probe never blocks on a slow connection).
     """
     return {
-        "status":   "ok",
+        # "degraded" when config.json failed to parse: the process is alive, but it
+        # is running on built-in defaults (a different Redis), which otherwise looks
+        # identical to a healthy empty install.
+        "status":   "degraded" if _config_load_error else "ok",
+        **({"config_error": _config_load_error} if _config_load_error else {}),
         "app":      "RediRecall",
         "version":  __version__,
         # AGPL-3.0 §13: users interacting with this instance over a network must be
@@ -4529,6 +5488,58 @@ def api_rag_stats_reset():
 # ROUTES — RAG INSTANCES
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+@app.get("/api/embedding/models")
+def api_embedding_models():
+    """The model registry, plus which models each instance's chunks were built with.
+
+    ``in_use`` is what makes a mixed-model corpus visible: it is the set of
+    registry ids actually present in an index, so the UI can show when an
+    instance holds vectors from more than one model.
+    """
+    out = []
+    for mid, spec in EMBEDDING_MODELS.items():
+        out.append({"id": mid, **{k: v for k, v in spec.items()},
+                    "field": vector_field_for(spec["repo"]),
+                    "active": mid == embedding_id_for()})
+    return {"models": out, "active_id": embedding_id_for(),
+            "default_id": DEFAULT_EMBEDDING_ID}
+
+
+@app.get("/api/rag/{instance}/embedding-models")
+def api_instance_embedding_models(instance: str, endpoint: str | None = None):
+    """Registry ids present in one instance's chunks, with counts."""
+    rc = _rc_for(instance, endpoint)
+    try:
+        res = rc.execute_command(
+            "FT.AGGREGATE", f"{rag_prefix(instance)}:idx", "*",
+            "GROUPBY", "1", "@emb_model",
+            "REDUCE", "COUNT", "0", "AS", "n", "LIMIT", "0", "20")
+    except Exception as e:
+        # Indexes built before the emb_model field exists have no such property.
+        # Those chunks predate per-chunk provenance; report the configured model
+        # as unverified rather than erroring.
+        if "emb_model" in str(e):
+            return {"instance": instance, "mixed": False, "legacy": True,
+                    "models": [{"id": -1, "chunks": -1,
+                                "label": "pre-v4 index — model not recorded per chunk"}]}
+        return {"instance": instance, "models": [], "error": str(e)}
+    models = []
+    for row in res[1:]:
+        d = {_decode(row[i]): _decode(row[i + 1]) for i in range(0, len(row) - 1, 2)}
+        try:
+            mid = int(d.get("emb_model", -1))
+        except (TypeError, ValueError):
+            mid = -1
+        models.append({
+            "id": mid, "chunks": int(d.get("n", 0) or 0),
+            "label": EMBEDDING_MODELS.get(mid, {}).get(
+                "label", "provenance not recorded (ingested before per-chunk tracking)"
+                if mid == -1 else "unknown model"),
+        })
+    return {"instance": instance, "models": sorted(models, key=lambda m: -m["chunks"]),
+            "mixed": len(models) > 1}
+
+
 @app.get("/api/rag/instances")
 def api_rag_instances():
     return list_rag_instances()
@@ -4765,10 +5776,35 @@ async def api_crawl_active():
     return list(_active_crawls.values())
 
 
+@app.post("/api/crawl/pause")
+async def api_crawl_pause(payload: dict):
+    """Pause or resume a running crawl without discarding its progress.
+
+    Cancelling ends the task; pausing only stops workers picking up the next page,
+    so already-indexed chunks, the visited set and the queue survive.
+    """
+    url    = payload.get("url", "")
+    paused = bool(payload.get("paused", True))
+    gate   = _crawl_gates.get(url)
+    if gate is None:
+        raise HTTPException(404, "No active crawl for that URL")
+    if paused:
+        gate.clear()
+    else:
+        gate.set()
+    state = _active_crawls.get(url)
+    if state is not None:
+        state["paused"] = paused
+    return {"ok": True, "url": url, "paused": paused}
+
+
 @app.post("/api/crawl/cancel")
 async def api_crawl_cancel(payload: dict):
     """Cancel a running crawl by seed URL."""
     url  = payload.get("url", "")
+    g = _crawl_gates.get(url)
+    if g is not None:
+        g.set()          # release paused workers so the cancel actually lands
     task = _crawl_tasks.get(url)
     if task and not task.done():
         task.cancel()
@@ -4805,7 +5841,11 @@ async def api_ingest_url(instance: str, payload: dict, endpoint: str | None = No
         "url": url, "instance": instance,
         "pages_done": 0, "chunks": 0, "errors": 0, "blocked": 0, "skipped": 0,
         "start_ts": datetime.now(timezone.utc).isoformat(), "done": False,
+        "paused": False,
     }
+    gate = asyncio.Event()
+    gate.set()                      # starts running; cleared only by /api/crawl/pause
+    _crawl_gates[url] = gate
 
     async def cb(u, status, n=0, err="", count=0):
         results.append({"url": u, "status": status, "chunks": n, "error": err, "pages_done": count})
@@ -4831,6 +5871,8 @@ async def api_ingest_url(instance: str, payload: dict, endpoint: str | None = No
     finally:
         if url in _active_crawls:
             _active_crawls[url]["done"] = True
+        # Release the gate; a paused-then-cancelled crawl must not leak one.
+        _crawl_gates.pop(url, None)
     return results
 
 
@@ -4878,7 +5920,13 @@ async def api_ingest_url_stream(
             "js_render": js_render, "js_concurrency": js_concurrency,
             "smart_mode": smart_mode, "min_words": min_words,
         },
+        "paused": False,
     }
+    # The streaming endpoint is the one the UI drives, so the pause gate has to be
+    # registered here too — not only on the non-streaming twin.
+    gate = asyncio.Event()
+    gate.set()
+    _crawl_gates[url] = gate
 
     async def cb(u, status, n=0, err="", count=0):
         state = _active_crawls.get(url)
@@ -4923,6 +5971,9 @@ async def api_ingest_url_stream(
             # Client disconnected — cancel the crawl task so it doesn't keep
             # running and consuming resources with no one listening.
             if not task.done():
+                g = _crawl_gates.get(url)
+                if g is not None:
+                    g.set()      # a paused worker would never observe the cancel
                 task.cancel()
                 try:
                     await task
@@ -4930,6 +5981,7 @@ async def api_ingest_url_stream(
                     pass
             if url in _active_crawls:
                 _active_crawls[url]["done"] = True
+            _crawl_gates.pop(url, None)
 
     return StreamingResponse(
         generate(),
@@ -5329,11 +6381,37 @@ def api_redis_all_stats():
 
 @app.post("/api/feedback")
 async def api_feedback(payload: dict):
-    entry = {**payload, "ts": datetime.now(timezone.utc).isoformat()}
+    # The whole store is rewritten per rating, so an unbounded body permanently
+    # raises the cost of every later write. Truncate rather than reject: a long
+    # answer should still be reviewable.
+    entry = {
+        k: (v[:_MAX_FEEDBACK_FIELD] if isinstance(v, str) else v)
+        for k, v in payload.items()
+    }
+    entry["ts"] = datetime.now(timezone.utc).isoformat()
     _feedback.append(entry)
+    del _feedback[:-_MAX_FEEDBACK]        # bound memory as well as the file
     with open(FEEDBACK_PATH, "w") as f:
         json.dump(_feedback, f)
     return {"ok": True}
+
+
+@app.get("/api/feedback")
+def api_feedback_list(limit: int = 200, value: str | None = None):
+    """Return stored ratings, newest first.
+
+    The store was previously write-only — nothing read it back, so thumbs-down
+    ratings could not be reviewed or turned into a regression set. ``value``
+    filters to one rating (e.g. ``down``).
+    """
+    # Accept the words the docstring advertises as well as the raw 1/-1 the client
+    # actually posts; "?value=down" previously matched nothing at all.
+    _ALIASES = {"down": {"-1"}, "up": {"1"}, "negative": {"-1"}, "positive": {"1"}}
+    wanted = _ALIASES.get((value or "").strip().lower(), {str(value)})
+    items = _feedback if not value else [f for f in _feedback if str(f.get("value")) in wanted]
+    # max(0, limit) was a bypass: items[-0:] is items[0:], i.e. everything.
+    n = max(1, min(int(limit or 0) or 1, _MAX_FEEDBACK))
+    return {"total": len(items), "items": list(reversed(items[-n:]))}
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ROUTES — SESSIONS
@@ -5488,6 +6566,10 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     system_prompt = compose_system_prompt(msg.get("system_prompt"))
     source_filter = msg.get("source_filter", "")   # optional substring filter on chunk source
     bypass_cache  = msg.get("bypass_cache", False)  # skip cache lookup (re-run fresh)
+    # Regenerate: drop the answer being replaced and everything after it, so the
+    # stored transcript matches the client's view. Without this the rejected answer
+    # stays in Redis, is re-sent as context on the next turn, and reappears on reload.
+    replace_from  = msg.get("replace_from")
     file_context  = msg.get("file_context", [])    # list of {name, text} uploaded documents
 
     # ── RAG instance selection ───────────────────────────────────────────────
@@ -5497,7 +6579,10 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     rag_instances_raw = msg.get("rag_instances")   # multi-instance list
     rag_inst          = msg.get("rag_instance", _config.get("active_rag", "default"))
     # Normalise to a list for uniform handling below
-    if rag_instances_raw and isinstance(rag_instances_raw, list):
+    # An EXPLICIT empty list means "no RAG" (every instance disabled in the UI).
+    # Treating it as falsy fell back to active_rag, so RAG could never be turned
+    # off from the client and every answer carried the grounding instructions.
+    if isinstance(rag_instances_raw, list):
         rag_instances = [i for i in rag_instances_raw if i]
     else:
         rag_instances = [rag_inst] if rag_inst else []
@@ -5527,13 +6612,18 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
 
     # ── 1. Semantic cache check ─────────────────────────────────────────────
     # Skip cache entirely for vision requests: same text + different image ≠ same answer.
+    # Also skipped when an uploaded file is in context — that content is private to
+    # this turn and must never seed an entry another question could match.
     await ws.send_json({"type": "status", "phase": "cache"})
     cache_threshold = _config.get("cache", {}).get("similarity_threshold", 0.92)
+    cache_scope     = _cache_scope(await _effective_rag_instances(rag_instances),
+                                   provider, model, source_filter, system_prompt)
+    cacheable       = not images and not file_context and not wants_visual(query)
     t_cache_start   = time.time()
     # Off the event loop: while these run, no other session's tokens can flush and
     # the WS receive loop cannot read an {'type':'abort'} frame (Stop goes dead).
-    hit             = (await asyncio.to_thread(cache_lookup, query, cache_threshold)
-                       if not images and not bypass_cache and not wants_visual(query) else None)
+    hit             = (await asyncio.to_thread(cache_lookup, query, cache_threshold, cache_scope)
+                       if cacheable and not bypass_cache else None)
     t_cache         = round(time.time() - t_cache_start, 3)
 
     if hit:
@@ -5544,8 +6634,24 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
             "entry_id": hit.get("entry_id", ""),
             "latency":  {"cache": t_cache, "total": round(time.time() - t0, 3)},
         })
-        if hit.get("chunks"):
-            await ws.send_json({"type": "rag_context", "chunks": hit["chunks"], "latency": {"cache": t_cache, "rag": 0}})
+        cached_chunks = hit.get("chunks") or []
+        # rag_used: a cached answer was grounded iff it carries chunks. Without
+        # this the client cannot tell "searched and found nothing" from "RAG was
+        # never run", and shows a "no KB match" warning on both.
+        await ws.send_json({"type": "rag_context", "chunks": cached_chunks,
+                            "rag_used": bool(cached_chunks),
+                            "latency": {"cache": t_cache, "rag": 0}})
+        # Persist the turn. Returning early used to skip this, so a cached answer
+        # was missing from the stored transcript — breaking session restore,
+        # regenerate-in-place, the version switcher and thumbs feedback at once.
+        _sessions[sid].append({"role": "user", "content": query, "meta": _turn_meta()})
+        _sessions[sid].append({
+            "role": "assistant", "content": hit["response"],
+            "meta": _turn_meta(cached_chunks,
+                               {"cache": t_cache, "total": round(time.time() - t0, 3)},
+                               provider, model),
+        })
+        await asyncio.to_thread(save_session, sid, _sessions[sid])
         return
 
     # ── 2. RAG retrieval ────────────────────────────────────────────────────
@@ -5570,29 +6676,44 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
 
     t_rag_start   = time.time()   # retrieval + rerank only; HyDE is timed above
 
+    # With the reranker on, retrieve a WIDER candidate set than we intend to keep —
+    # otherwise the cross-encoder is handed exactly the top_k it would have returned
+    # anyway and can only permute them, never promote a better chunk from deeper down.
+    fetch_k = _rerank_candidate_k(top_k)
+
     if parallel_mode:
         # Multi-instance parallel query — search all requested instances simultaneously.
         # search_rag_parallel filters disabled instances internally.
         # source_filter is pushed into each instance's KNN + BM25 query (not post-filtered).
-        chunks = await search_rag_parallel(rag_instances, query, top_k, rag_threshold,
+        chunks = await search_rag_parallel(rag_instances, query, fetch_k, rag_threshold,
                                            hybrid_search, search_vec, source_filter)
+        rag_used = True
     elif rag_instances:
         # Single-instance query (normal mode)
         rag_inst = rag_instances[0]
         meta, _ep = await _rag_meta_cached_async(rag_inst)   # primes the cache off-loop
         rag_enabled = (meta or {}).get("enabled", True)
         chunks = (
-            await asyncio.to_thread(search_rag, rag_inst, query, top_k, rag_threshold,
+            await asyncio.to_thread(search_rag, rag_inst, query, fetch_k, rag_threshold,
                                     rc_for_instance(rag_inst), hybrid_search, search_vec, source_filter)
             if rag_enabled else []
         )
+        # A disabled instance means RAG did not actually run.
+        rag_used = rag_enabled
     else:
         chunks = []
+        rag_used = False
 
     # ── Cross-encoder reranking (runs after fast retrieval, before LLM)
     if chunks:
         top_n = _config.get("reranker", {}).get("top_n", top_k)
         chunks = await asyncio.to_thread(rerank_chunks, query, chunks, top_n)
+    # The candidate pool was widened for the reranker; trim it back whatever the
+    # outcome. rerank_chunks returns its input UNCHANGED when the cross-encoder is
+    # unavailable or raises, so gating this on reranker.enabled left the full
+    # widened pool (40 chunks) in the prompt on exactly that failure path.
+    if len(chunks) > top_k:
+        chunks = chunks[:top_k]
 
     t_rag = round(time.time() - t_rag_start, 3)
 
@@ -5603,10 +6724,14 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
             system_prompt += "\n\nThe user has attached the following document(s) — use them to answer:\n\n" \
                              + "\n\n---\n\n".join(file_parts)
 
-    # Inject retrieved RAG context into the system prompt
-    if chunks:
-        context = "\n\n".join(f"[Source: {c['source']}]\n{c['text']}" for c in chunks)
-        system_prompt += f"\n\nUse the following context to answer:\n{context}"
+    # Numbered context + citation instruction, or an explicit abstention notice
+    # when a real search came back empty. Gated on rag_used rather than
+    # rag_instances: the latter is never empty (an empty list falls back to
+    # active_rag), so it would attach the abstention notice to every ungrounded
+    # answer — including plain general-knowledge questions and sessions where the
+    # user has disabled all instances.
+    if rag_used:
+        system_prompt += build_context_prompt(chunks)
 
     # ── 3. Build message list ───────────────────────────────────────────────
     history  = _sessions[sid][-10:]   # last 10 turns for context window management
@@ -5627,7 +6752,8 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     # stream_start MUST fire first so the frontend creates the message element
     # and sets currentAiMsgId before rag_context arrives.
     await ws.send_json({"type": "stream_start"})
-    await ws.send_json({"type": "rag_context", "chunks": chunks, "latency": {"cache": t_cache, "hyde": t_hyde, "rag": t_rag}})
+    await ws.send_json({"type": "rag_context", "chunks": chunks, "rag_used": rag_used,
+                        "latency": {"cache": t_cache, "hyde": t_hyde, "rag": t_rag}})
 
     full_response = ""
     stream_error  = False
@@ -5676,8 +6802,20 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     total  = round(time.time() - t0, 3)
 
     # ── Store turn in session (memory + Redis) ──────────────────────────────
-    _sessions[sid].append({"role": "user",      "content": query})
-    _sessions[sid].append({"role": "assistant", "content": full_response})
+    # On a regenerate, truncate to the replaced answer's position first. The
+    # user turn that produced it is dropped too, because it is re-appended just
+    # below — truncating at the assistant index alone would duplicate the question.
+    if isinstance(replace_from, int) and 0 <= replace_from <= len(_sessions[sid]):
+        cut = replace_from
+        if cut > 0 and _sessions[sid][cut - 1].get("role") == "user":
+            cut -= 1
+        del _sessions[sid][cut:]
+    _sessions[sid].append({"role": "user", "content": query, "meta": _turn_meta()})
+    _sessions[sid].append({"role": "assistant", "content": full_response,
+                           "meta": _turn_meta(chunks,
+                                              {"cache": t_cache, "hyde": t_hyde, "rag": t_rag,
+                                               "llm": t_llm, "total": total},
+                                              provider, model)})
     await asyncio.to_thread(save_session, sid, _sessions[sid])
 
     # ── 5. Release the client FIRST ─────────────────────────────────────────
@@ -5694,8 +6832,11 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     _chat_tasks.pop(sid, None)
 
     # ── 6. Cache store — off the critical path ──────────────────────────────
-    if not stream_error and not images and not wants_visual(query):
-        await asyncio.to_thread(cache_store, query, full_response, chunks)
+    # Tagged with the scope it was produced under, so it can only be replayed for
+    # the same corpus/provider/model/prompt. `cacheable` also excludes turns that
+    # had an uploaded file in context.
+    if not stream_error and cacheable:
+        await asyncio.to_thread(cache_store, query, full_response, chunks, cache_scope)
 
     # ── 7. Auto-title (first turn only), delivered as a follow-up event ─────
     title_msg = None
@@ -5821,21 +6962,41 @@ async def api_chat(payload: dict):
     if not model:
         raise HTTPException(400, "No model selected — configure a model in settings")
 
-    # Semantic cache — skip for vision requests and chart requests (see wants_visual)
-    if use_cache and not images and not wants_visual(query):
-        cache_threshold = _config.get("cache", {}).get("similarity_threshold", 0.92)
-        hit = await asyncio.to_thread(cache_lookup, query, cache_threshold)
-        if hit:
-            return {"session_id": sid, "response": hit["response"], "chunks": hit.get("chunks", []), "cache_hit": True, "cache_score": hit["score"]}
-
-    # RAG instance resolution
+    # RAG instance resolution — must happen BEFORE the cache check, because the
+    # instance set is part of the cache scope (an answer from one corpus must not
+    # be replayed for a question asked against another).
     rag_instances_raw = payload.get("rag_instances")
     rag_inst          = payload.get("rag_instance", _config.get("active_rag", "default"))
-    if rag_instances_raw and isinstance(rag_instances_raw, list):
+    # An explicit empty list means "no RAG" (see the WS path).
+    if isinstance(rag_instances_raw, list):
         rag_instances = [i for i in rag_instances_raw if i]
     else:
         rag_instances = [rag_inst] if rag_inst else []
     parallel_mode = len(rag_instances) > 1
+
+    # Semantic cache — skip for vision requests, chart requests (see wants_visual),
+    # and any turn carrying an uploaded file (that content is private to the turn).
+    cache_scope = _cache_scope(await _effective_rag_instances(rag_instances),
+                               provider, model, source_filter, system_prompt)
+    cacheable   = not images and not file_context and not wants_visual(query)
+    if use_cache and cacheable:
+        cache_threshold = _config.get("cache", {}).get("similarity_threshold", 0.92)
+        _t_cache_start  = time.time()
+        hit = await asyncio.to_thread(cache_lookup, query, cache_threshold, cache_scope)
+        if hit:
+            t_cache = round(time.time() - _t_cache_start, 3)
+            # Persist the cached turn here too — the WS path does, and a
+            # transcript that silently omits cached answers breaks restore,
+            # regenerate and feedback exactly the same way.
+            cached_chunks = hit.get("chunks", [])
+            _sessions[sid].append({"role": "user", "content": query, "meta": _turn_meta()})
+            _sessions[sid].append({
+                "role": "assistant", "content": hit["response"],
+                "meta": _turn_meta(cached_chunks, {"cache": t_cache}, provider, model),
+            })
+            await asyncio.to_thread(save_session, sid, _sessions[sid])
+            return {"session_id": sid, "response": hit["response"], "chunks": cached_chunks,
+                    "cache_hit": True, "cache_score": hit["score"], "rag_used": bool(cached_chunks)}
 
     rag_cfg       = _config.get("rag", {})
     rag_threshold = rag_cfg.get("similarity_threshold", 0.75)
@@ -5850,23 +7011,31 @@ async def api_chat(payload: dict):
             search_vec = (await asyncio.to_thread(embed, hypothesis)).astype(np.float32)
 
     # RAG retrieval — source_filter is applied in-query (KNN + BM25 pre-filter).
+    # fetch_k widens the candidate set when reranking is on (see _rerank_candidate_k).
+    fetch_k = _rerank_candidate_k(top_k)
     if parallel_mode:
-        chunks = await search_rag_parallel(rag_instances, query, top_k, rag_threshold,
+        chunks = await search_rag_parallel(rag_instances, query, fetch_k, rag_threshold,
                                            hybrid_search, search_vec, source_filter)
+        rag_used = True
     elif rag_instances:
         inst = rag_instances[0]
         meta, _ep = await _rag_meta_cached_async(inst)       # primes the cache off-loop
         rag_enabled = (meta or {}).get("enabled", True)
         chunks = (
-            await asyncio.to_thread(search_rag, inst, query, top_k, rag_threshold,
+            await asyncio.to_thread(search_rag, inst, query, fetch_k, rag_threshold,
                                     rc_for_instance(inst), hybrid_search, search_vec, source_filter)
             if rag_enabled else []
         )
+        rag_used = rag_enabled
     else:
         chunks = []
+        rag_used = False
 
     top_n = _config.get("reranker", {}).get("top_n", top_k)
     chunks = await asyncio.to_thread(rerank_chunks, query, chunks, top_n)
+    # See handle_chat: trim unconditionally, the reranker may be a no-op.
+    if len(chunks) > top_k:
+        chunks = chunks[:top_k]
 
     if file_context:
         file_parts = [f"[File: {f['name']}]\n{f['text']}" for f in file_context if f.get("text")]
@@ -5874,9 +7043,15 @@ async def api_chat(payload: dict):
             system_prompt += "\n\nThe user has attached the following document(s) — use them to answer:\n\n" \
                              + "\n\n---\n\n".join(file_parts)
 
-    if chunks:
-        context = "\n\n".join(f"[Source: {c['source']}]\n{c['text']}" for c in chunks)
-        system_prompt += f"\n\nUse the following context to answer:\n{context}"
+    # Numbered context + citation instruction, or an explicit abstention
+    # instruction when retrieval found nothing. Only applied when RAG was
+    # actually requested — a plain no-RAG chat gets neither.
+    # Only when RAG actually ran. `rag_instances` is never empty (an empty list
+    # falls back to active_rag), so gating on it alone attached the abstention
+    # notice to every ungrounded answer — including plain general-knowledge
+    # questions and sessions where the user had disabled all instances.
+    if rag_used:
+        system_prompt += build_context_prompt(chunks)
 
     history  = _sessions[sid][-10:]
     messages = [{"role": "system", "content": system_prompt}]
@@ -5920,12 +7095,13 @@ async def api_chat(payload: dict):
     except Exception as e:
         raise HTTPException(500, str(e))
 
-    _sessions[sid].append({"role": "user",      "content": query})
-    _sessions[sid].append({"role": "assistant", "content": full_response})
+    _sessions[sid].append({"role": "user", "content": query, "meta": _turn_meta()})
+    _sessions[sid].append({"role": "assistant", "content": full_response,
+                           "meta": _turn_meta(chunks, None, provider, model)})
     await asyncio.to_thread(save_session, sid, _sessions[sid])
 
-    if not stream_error and not images and not wants_visual(query):
-        await asyncio.to_thread(cache_store, query, full_response, chunks)
+    if not stream_error and cacheable:
+        await asyncio.to_thread(cache_store, query, full_response, chunks, cache_scope)
 
     return {"session_id": sid, "response": full_response, "chunks": chunks, "cache_hit": False}
 
@@ -5983,6 +7159,119 @@ def api_rag_sources(instance: str, endpoint: str | None = None):
     except Exception as e:
         log.warning(f"api_rag_sources: aggregate failed for '{instance}', scanning instead: {e}")
         return sorted(_scan_unique_sources(rc, prefix))
+
+
+@app.get("/api/rag/{instance}/documents")
+def api_rag_documents(instance: str, endpoint: str | None = None):
+    """List the documents in an instance with per-document chunk counts.
+
+    Richer counterpart to /sources (which stays a plain list for compatibility).
+    One FT.AGGREGATE groups by source and counts — no keyspace scan.
+    """
+    rc = _rc_for(instance, endpoint)
+    idx_name = f"{rag_prefix(instance)}:idx"
+    try:
+        res = rc.execute_command(
+            "FT.AGGREGATE", idx_name, "*",
+            "GROUPBY", "1", "@source",
+            "REDUCE", "COUNT", "0", "AS", "chunks",
+            "REDUCE", "MAX", "1", "@ingested_at", "AS", "ingested_at",
+            "LIMIT", "0", "1000000",
+            "DIALECT", "2",
+        )
+        docs = []
+        for row in res[1:]:
+            d = {_decode(row[j]): _decode(row[j + 1]) for j in range(0, len(row) - 1, 2)}
+            src = d.get("source", "")
+            if not src:
+                continue
+            try:
+                ingested = int(float(d.get("ingested_at") or 0))
+            except Exception:
+                ingested = 0
+            docs.append({
+                "source": src,
+                "doc_id": doc_id_for(src),
+                "chunks": int(d.get("chunks") or 0),
+                # 0 for documents ingested before the v3 schema added the field.
+                "ingested_at": ingested,
+            })
+        docs.sort(key=lambda x: x["source"])
+        return {"total": len(docs), "documents": docs}
+    except Exception as e:
+        log.warning(f"api_rag_documents failed for '{instance}': {e}")
+        raise HTTPException(500, f"Could not list documents: {e}")
+
+
+@app.delete("/api/rag/{instance}/documents")
+def api_delete_document(instance: str, source: str, endpoint: str | None = None):
+    """Delete every chunk belonging to ONE source document.
+
+    Previously the only removal options were "wipe all chunks" or "delete the
+    instance", so a single stale document could not be replaced without
+    re-ingesting everything. Chunks are located through the index (exact match on
+    the source TAG) rather than by scanning the keyspace, and their dedup hashes
+    are released so the same document can be re-ingested afterwards.
+    """
+    if not source:
+        raise HTTPException(400, "source is required")
+    rc       = _rc_for(instance, endpoint)
+    prefix   = rag_prefix(instance)
+    idx_name = f"{prefix}:idx"
+    esc      = _TAG_ESCAPE_RE.sub(r"\\\1", source)
+    deleted, hashes = 0, []
+    try:
+        offset = 0
+        for _batch in range(_MAX_DELETE_BATCHES):
+            res = rc.execute_command(
+                "FT.SEARCH", idx_name, f"@source:{{{esc}}}",
+                "RETURN", "1", "text",
+                "LIMIT", str(offset), "200",
+                "DIALECT", "2",
+            )
+            items = res[1:]
+            if not items:
+                break
+            pipe = rc.pipeline(transaction=False)
+            for i in range(0, len(items), 2):
+                key = _decode(items[i])
+                fields = items[i + 1]
+                fmap = {_decode(fields[j]): _decode(fields[j + 1]) for j in range(0, len(fields) - 1, 2)}
+                txt = fmap.get("text", "")
+                if txt:
+                    hashes.append(hashlib.sha256(" ".join(txt.lower().split()).encode()).hexdigest())
+                pipe.delete(key)
+                deleted += 1
+            pipe.execute()
+            if len(items) < 400:      # (key, fields) pairs → fewer than 200 docs
+                break
+        # Release the dedup hashes, otherwise re-ingesting this document would be
+        # silently skipped as "duplicate content".
+        if hashes:
+            hs = f"rag:{instance}:chunk_hashes"
+            for i in range(0, len(hashes), 500):
+                rc.srem(hs, *hashes[i:i + 500])
+        # Crawled pages are gated by a SECOND dedup set. Without releasing it the
+        # page is skipped as "already indexed" forever and only a full
+        # force-reindex brings it back — the workflow this feature replaces.
+        try:
+            rc.srem(f"rag:{instance}:indexed_urls", source)
+        except Exception:
+            pass
+        # The chunks are already gone; a disk error while journalling must not
+        # turn a successful delete into a 500 that tells the user it failed.
+        try:
+            append_log({
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "instance": instance, "source": source,
+                "chunks": -deleted, "status": "deleted",
+            })
+        except Exception as le:
+            log.warning(f"delete succeeded but could not be logged: {le}")
+        return {"ok": True, "source": source, "deleted": deleted}
+    except Exception as e:
+        log.warning(f"api_delete_document failed for '{instance}' / {source!r}: {e}")
+        raise HTTPException(500, f"Could not delete document: {e}")
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -203,9 +203,39 @@ After each AI response that used RAG, a **📚 N chunks matched** badge appears 
 - To open it automatically after every answer, enable **Show RAG Matches in Answers** in **Settings → General**
 - Cache hits also show their associated RAG chunks (stored at cache-write time)
 
+### Citations
+
+When an answer is grounded in your knowledge base, the retrieved passages are numbered and the model marks each claim with the passage it came from — `[1]`, `[2]`, and so on. The numbers correspond to the entries in the RAG context inspector, so any individual sentence can be traced back to the chunk that supports it.
+
+<p align="center">
+  <img src="screenshots/rendering/citations-scope.png" alt="An answer with [1] and [2] citation markers, the matched-chunk inspector, and a source-scope chip above the composer" width="88%">
+</p>
+
+### Scoping a question to one document
+
+Click **⌖ only this** on any chunk in the inspector — or the ⌖ button in the document list — to restrict the *next* question to that source. A chip appears above the composer showing the active scope; click ✕ to clear it. The filter is applied inside the search itself (both the vector and keyword halves), not by discarding results afterwards, so scoped questions still return the best matches *within* that document.
+
+### When nothing matches
+
+If retrieval runs and finds nothing above the similarity threshold, the answer is marked **📭 No KB match** and the model states plainly that it is answering from general knowledge rather than your documents. Click the badge to open the RAG threshold setting.
+
+<p align="center">
+  <img src="screenshots/rendering/no-kb-match.png" alt="An answer marked with a No KB match badge" width="88%">
+</p>
+
+An answer with no badge at all was produced without RAG (all instances disabled, or none selected).
+
 ### Session management
 
-Sessions are listed in the left sidebar. Click any session to switch to it. Each session maintains its own message history, active RAG instance, and model selection. Sessions are automatically titled from the first message.
+Sessions are listed in the left sidebar. Click any session to switch to it, or the ✕ to delete it (with confirmation).
+
+Conversations are **persisted in Redis and restored on reload** — closing the tab or restarting the browser no longer loses them, and the conversation you were last in is reopened automatically. The sidebar lists conversations started in *this* browser; because RediRecall has no user accounts, it deliberately does not list sessions created elsewhere.
+
+Each message records the provider and model that produced it. Sessions are automatically titled from the first message.
+
+### Regenerating an answer
+
+**↻ Regenerate** re-asks the question that *that* answer belongs to and replaces it **in place**, rather than appending a second copy of the question. Earlier attempts are kept: a **‹ 1/2 ›** control appears in the message metadata row so versions can be compared. Regenerating an answer that has later turns after it will discard those turns, and asks for confirmation first.
 
 ---
 
@@ -225,11 +255,27 @@ Each card in the instance list exposes:
 | Button | Action |
 |---|---|
 | **● On / ○ Off** | Enable or disable the instance |
+| **📄 Documents** | Browse the documents in the instance; scope a question to one, or delete one |
 | **⬇** | Export the instance to a `.zip` file (includes all chunks and embeddings) |
 | **⬆** | Import from a previously exported `.zip` |
 | **✦ Dedupe** | Deduplicate — remove exact-duplicate chunks to reduce storage footprint |
 | **🧹** | Clear all chunks (wipes data, keeps the instance) |
 | **🗑** | Permanently delete the instance |
+
+### Managing individual documents
+
+**📄 Documents** lists every source in the instance with its chunk count and ingest date.
+
+<p align="center">
+  <img src="screenshots/rendering/documents.png" alt="The document manager listing each source URL with its chunk count, a scope button and a delete button" width="88%">
+</p>
+
+- **⌖** scopes the next question to that document (see *Scoping a question to one document*)
+- **🗑** removes just that document's chunks, leaving the rest of the instance untouched
+
+Deleting a document also releases its de-duplication fingerprints, so the same file or URL can be re-ingested afterwards — which is the supported way to refresh a single stale document without wiping and rebuilding the whole instance.
+
+The date column shows `—` for documents ingested before this metadata was recorded; they are otherwise fully functional and gain a date when re-ingested.
 
 ### Exporting and importing
 
@@ -336,14 +382,18 @@ URLs ending in `llms.txt` (e.g. `https://redis.io/llms.txt`) are treated as cura
 
 ### Chunking — sentence-aware
 
-Text is split into overlapping chunks that **respect sentence boundaries**. The chunker splits on `.`, `!`, and `?` first, then groups sentences into windows of approximately `chunk_size` words. No sentence is ever cut in the middle.
+Text is split into overlapping chunks that **respect sentence boundaries**. The chunker splits on `.`, `!`, and `?` first, then groups sentences into windows of approximately `chunk_size` words.
+
+Content with no sentence punctuation — CSV and spreadsheet rows, Markdown tables, code — is split on line boundaries instead, so a large table cannot become one enormous chunk. A chunk is never allowed to exceed twice `chunk_size`.
 
 Configure in **Settings → RAG**:
 
 | Setting | Default | Description |
 |---|---|---|
-| **Chunk Size** | 512 words | Target words per chunk |
-| **Chunk Overlap** | 64 words | Words of context carried into the next chunk |
+| **Chunk Size** | 180 words | Target words per chunk |
+| **Chunk Overlap** | 32 words | Words of context carried into the next chunk |
+
+> **Chunk size is bounded by the embedding model.** Each model can only encode a fixed number of tokens (`intfloat/multilingual-e5-small` handles 256, roughly 190 English words) and silently truncates anything longer — the excess text is still stored and shown, but is **not represented in the vector**, so it cannot be found by semantic search. RediRecall warns in the log when the configured chunk size exceeds what the active model can encode, and lowers a saved value that is already over the limit (logging the change).
 
 ---
 
@@ -514,6 +564,12 @@ Open **Settings → Analytics** for live performance statistics.
 #### Diagnosing low hit rate
 
 If **Avg Best Raw** is high (e.g. 0.65+) but **Hit Rate** is low, your `similarity_threshold` is too strict. Lower the threshold in **Settings → RAG**.
+
+What counts as "strict" depends on the embedding model, and the useful range is lower than it looks. With `intfloat/multilingual-e5-small`, genuinely relevant question↔passage pairs typically score **0.35–0.75**; a threshold of 0.75 clears almost nothing. If the vector half of hybrid search appears to contribute little — or turning `hybrid_search` off returns nothing at all — the threshold is the first thing to lower.
+
+#### Reranking
+
+With **Settings → RAG → Reranker** enabled, a cross-encoder re-scores the retrieved candidates before they reach the model. Because a reranker can only improve on the original ordering if it is given more candidates than you intend to keep, RediRecall widens retrieval to `rerank_candidates` (default 40) whenever reranking is on, then cuts back to `top_k` afterwards. With the reranker off, retrieval fetches only `top_k` and no extra work is done.
 
 A **⚠ threshold?** warning pill appears automatically on any instance where raw score ≥ 0.60 but hit rate < 50%.
 
@@ -768,12 +824,12 @@ The WebSocket handler uses `asyncio.create_task` so the server can concurrently 
 
 ### Embedding model
 
-Default: `all-MiniLM-L6-v2` (384 dimensions, fast). Change in **Settings → General**.
+Default: `intfloat/multilingual-e5-small` (384 dimensions, fast). Change in **Settings → General**.
 
 > **Important:** Changing the embedding model requires re-indexing all existing RAG data — the vector dimensions will not match.
 
 Available models:
-- `all-MiniLM-L6-v2` — fast, 384d
+- `intfloat/multilingual-e5-small` — fast, 384d
 - `all-mpnet-base-v2` — more accurate, 768d
 - `paraphrase-multilingual-MiniLM-L12-v2` — multilingual
 - `BAAI/bge-base-en-v1.5` — high quality, English
@@ -834,13 +890,14 @@ The container also needs GPU access (`--gpus all`, or a `deploy.resources` reser
     "api_key": "",
     "model": "gemini-3-flash-preview"
   },
-  "embedding": { "model": "all-MiniLM-L6-v2", "max_image_dim": 1024 },
+  "embedding": { "model": "intfloat/multilingual-e5-small", "max_image_dim": 1024 },
   "rag": {
-    "chunk_size": 512,
-    "chunk_overlap": 64,
+    "chunk_size": 180,
+    "chunk_overlap": 32,
     "top_k": 5,
-    "similarity_threshold": 0.75,
-    "hybrid_search": true
+    "similarity_threshold": 0.35,
+    "hybrid_search": true,
+    "rerank_candidates": 40
   },
   "cache": { "enabled": true, "similarity_threshold": 0.92, "ttl": 3600 },
   "ui": {

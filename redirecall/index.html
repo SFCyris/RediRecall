@@ -252,6 +252,15 @@ input[type=text],input[type=number],input[type=password],select,textarea{width:1
 input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,111,247,.12)}
 select option{background:var(--bg1);color:var(--text0)}
 .form-hint{font-size:11px;color:var(--text2);margin-top:4px}
+/* Inline caution block — for stating plainly that a control does NOT do what its
+   label might imply (e.g. the Security fields, which are stored but never enforced). */
+.notice-warn{font-size:12px;line-height:1.5;color:var(--text1);background:rgba(251,191,36,.10);
+  border:1px solid rgba(251,191,36,.30);border-left:3px solid var(--yellow);
+  border-radius:var(--r3);padding:10px 12px;margin-bottom:14px}
+.notice-warn code{font-size:11px;background:var(--glass2);padding:1px 4px;border-radius:3px}
+.pill-inert{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+  color:var(--yellow);background:rgba(251,191,36,.14);border:1px solid rgba(251,191,36,.3);
+  border-radius:10px;padding:1px 6px;margin-left:6px;vertical-align:middle}
 .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--glass);border:1px solid var(--border);border-radius:var(--r3);margin-bottom:8px}
 .toggle-label{font-size:13px;color:var(--text1)}
 .toggle{position:relative;width:38px;height:22px;flex-shrink:0}
@@ -318,6 +327,9 @@ table.data-table tr:last-child td{border-bottom:none}
 .toast.success{border-color:rgba(74,222,128,.4);background:rgba(74,222,128,.06)}
 .toast.error{border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.06)}
 .toast.info{border-color:rgba(96,165,250,.4);background:rgba(96,165,250,.06)}
+/* toast(…,'warning') was called in several places but had no rule, so warnings
+   rendered indistinguishably from neutral info. */
+.toast.warning{border-color:rgba(251,191,36,.45);background:rgba(251,191,36,.08)}
 /* Pinned */
 #pinned-panel{position:fixed;right:-320px;top:0;bottom:0;width:300px;background:var(--bg1);border-left:1px solid var(--border);z-index:50;transition:right .3s ease;overflow-y:auto;padding:16px}
 #pinned-panel.open{right:0}
@@ -410,6 +422,48 @@ table.data-table tr:last-child td{border-bottom:none}
 .viz-restore-slot:hover{background:var(--glass2)}
 /* ── RAG used indicator ── */
 .rag-used-badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;padding:2px 9px;border-radius:10px;font-weight:600;background:rgba(124,111,247,.13);border:1px solid rgba(124,111,247,.28);color:var(--accent3);white-space:nowrap;cursor:pointer}
+/* Session row: a div acting as a button so the delete control can nest legally. */
+.session-row{cursor:pointer}
+.session-del{background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;
+  padding:0 4px;line-height:1;border-radius:4px;flex-shrink:0;opacity:0;transition:opacity .15s}
+.session-row:hover .session-del,.session-row:focus-within .session-del{opacity:1}
+.session-del:hover{color:var(--red)}
+@media (hover:none){.session-del{opacity:1}}   /* touch has no hover */
+/* Regenerate version switcher ‹ n/N › */
+.ver-switch{display:inline-flex;align-items:center;gap:2px;font-size:10px;padding:1px 4px;border-radius:9px;
+  background:var(--glass2);border:1px solid var(--border);color:var(--text2)}
+.ver-btn{background:none;border:none;color:var(--text2);cursor:pointer;font-size:12px;line-height:1;padding:0 3px}
+.ver-btn:disabled{opacity:.3;cursor:default}
+.ver-btn:not(:disabled):hover{color:var(--accent3)}
+.ver-num{font-variant-numeric:tabular-nums;min-width:26px;text-align:center}
+/* Document manager (per-instance document list with per-source delete). */
+.rag-docs-btn{background:var(--glass2);border:1px solid var(--border);color:var(--text2);font-size:10px;
+  padding:1px 7px;border-radius:5px;cursor:pointer}
+.rag-docs-btn:hover{color:var(--accent3);border-color:var(--accent3)}
+/* The confirm modal is 400px — far too narrow for file paths / URLs, which all
+   truncated to "https://re…". Widen it only when a document list is inside. */
+#modal-box:has(.doc-table){max-width:min(900px,94vw);text-align:left}
+#modal-box:has(.doc-table) #modal-title{text-align:center}
+.doc-table{max-height:46vh;overflow:auto;border:1px solid var(--border);border-radius:var(--r3)}
+.doc-row{display:grid;grid-template-columns:minmax(0,1fr) 56px 96px auto auto;gap:8px;align-items:center;
+  padding:6px 10px;border-bottom:1px solid var(--border);font-size:12px}
+.doc-row:last-child{border-bottom:none}
+.doc-row:hover{background:var(--glass2)}
+.doc-src{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text1)}
+.doc-count,.doc-date{font-size:11px;color:var(--text2);text-align:right}
+/* Active source scope shown above the composer (see setSourceScope). */
+#scope-row{display:flex;align-items:center;gap:8px;padding:0 4px 6px}
+.scope-chip{display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 8px;border-radius:12px;
+  background:rgba(124,111,247,.12);border:1px solid rgba(124,111,247,.3);color:var(--accent3);max-width:100%}
+.scope-chip strong{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.scope-chip-x{background:none;border:none;color:var(--accent3);cursor:pointer;font-size:12px;line-height:1;padding:0 2px}
+.scope-chip-x:hover{color:var(--red)}
+.rag-chunk-scope{background:var(--glass2);border:1px solid var(--border);color:var(--text2);font-size:10px;
+  padding:2px 7px;border-radius:5px;cursor:pointer;white-space:nowrap;flex-shrink:0}
+.rag-chunk-scope:hover{color:var(--accent3);border-color:var(--accent3)}
+/* Retrieval ran but matched nothing — the answer is NOT grounded in the KB. */
+.rag-nomatch-badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;padding:2px 9px;border-radius:10px;font-weight:600;background:rgba(251,191,36,.13);border:1px solid rgba(251,191,36,.30);color:var(--yellow);white-space:nowrap;cursor:pointer}
+.rag-nomatch-badge:hover{background:rgba(251,191,36,.2)}
 .rag-used-badge:hover{background:rgba(124,111,247,.22)}
 /* ── See also web links ── */
 .see-also{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px;margin:8px 0 2px;padding:7px 11px;border-radius:var(--r2);background:rgba(124,111,247,.06);border:1px solid rgba(124,111,247,.15);font-size:12px;line-height:1.5}
@@ -678,6 +732,7 @@ table.data-table tr:last-child td{border-bottom:none}
   </div>
   <div id="chat-area"></div>
   <div id="input-area">
+    <div id="scope-row" style="display:none"></div>
     <div id="file-preview-row" style="display:none"></div>
     <div id="img-preview-row" style="display:none"></div>
     <div id="input-row">
@@ -686,7 +741,7 @@ table.data-table tr:last-child td{border-bottom:none}
         <textarea id="msg-input" placeholder="Message… (Enter to send)" rows="1"
           oninput="autoResize(this);updateCharCount()" onkeydown="handleKey(event)"></textarea>
         <input type="file" id="img-file-input" accept="image/*" style="display:none" onchange="handleImageFile(this)"/>
-        <input type="file" id="doc-file-input" accept=".txt,.md,.csv,.pdf,.doc,.docx,.xls,.xlsx" multiple style="display:none" onchange="handleDocFile(this)"/>
+        <input type="file" id="doc-file-input" accept=".txt,.md,.csv,.pdf,.docx,.xlsx" multiple style="display:none" onchange="handleDocFile(this)"/>
         <button class="attach-btn" title="Attach document (TXT, MD, CSV, PDF, DOCX, XLSX)" onclick="document.getElementById('doc-file-input').click()">📄</button>
         <button class="attach-btn" id="attach-btn" onclick="document.getElementById('img-file-input').click()" disabled>📎</button>
         <button id="mic-btn" onclick="toggleMic()">🎤</button>
@@ -736,12 +791,14 @@ table.data-table tr:last-child td{border-bottom:none}
         <div class="form-group"><label>Theme</label><select id="s-theme"><option value="auto">Auto (System)</option><option value="dark">Dark</option><option value="light">Light</option></select></div>
         <div class="form-group"><label>Embedding Model</label>
           <select id="s-embed-model">
-            <option value="all-MiniLM-L6-v2">all-MiniLM-L6-v2 (fast, 384d)</option>
-            <option value="all-mpnet-base-v2">all-mpnet-base-v2 (accurate, 768d)</option>
-            <option value="paraphrase-multilingual-MiniLM-L12-v2">multilingual-MiniLM</option>
-            <option value="BAAI/bge-base-en-v1.5">BGE-base-en (high quality)</option>
+            <option value="intfloat/multilingual-e5-small">multilingual-e5-small — 384d, 512 tok (default)</option>
+            <option value="intfloat/multilingual-e5-base">multilingual-e5-base — 768d, 512 tok (higher quality, 2× vector memory)</option>
+            <option value="BAAI/bge-m3">bge-m3 — 1024d, 8192 tok (long context, heaviest)</option>
+            <option value="all-MiniLM-L6-v2">all-MiniLM-L6-v2 — 384d, 256 tok (legacy, English only)</option>
           </select>
-          <div class="form-hint">Changing requires re-indexing all RAG data</div>
+          <div class="form-hint">Changing requires re-indexing all RAG data. The three
+            multilingual models cover 100+ languages; the legacy model tokenises Thai and
+            Chinese almost entirely as [UNK], so unrelated documents embed alike.</div>
         </div>
         <div class="form-group"><label>Max Image Dimension (px)</label><input type="number" id="s-max-img-dim" value="1024" min="256" max="4096" step="128"/></div>
         <div class="toggle-row"><span class="toggle-label">📚 Show RAG Matches in Answers</span><label class="toggle"><input type="checkbox" id="s-show-rag"/><span class="toggle-slider"></span></label></div>
@@ -1059,12 +1116,12 @@ table.data-table tr:last-child td{border-bottom:none}
       <div class="section-title">RAG Configuration</div>
       <div class="glass-card">
         <div class="form-row">
-          <div class="form-group"><label>Chunk Size (words)</label><div class="range-row"><input type="range" id="s-chunk-size" min="64" max="1024" step="64" oninput="this.nextElementSibling.textContent=this.value"/><span class="range-val">512</span></div></div>
-          <div class="form-group"><label>Chunk Overlap</label><div class="range-row"><input type="range" id="s-chunk-overlap" min="0" max="256" step="16" oninput="this.nextElementSibling.textContent=this.value"/><span class="range-val">64</span></div></div>
+          <div class="form-group"><label>Chunk Size (words)</label><div class="range-row"><input type="range" id="s-chunk-size" min="64" max="1024" step="1" oninput="this.nextElementSibling.textContent=this.value"/><span class="range-val">180</span></div></div>
+          <div class="form-group"><label>Chunk Overlap</label><div class="range-row"><input type="range" id="s-chunk-overlap" min="0" max="256" step="1" oninput="this.nextElementSibling.textContent=this.value"/><span class="range-val">32</span></div></div>
         </div>
         <div class="form-row">
           <div class="form-group"><label>Top-K Chunks</label><div class="range-row"><input type="range" id="s-top-k" min="1" max="20" oninput="this.nextElementSibling.textContent=this.value"/><span class="range-val">5</span></div></div>
-          <div class="form-group"><label>Similarity Threshold</label><div class="range-row"><input type="range" id="s-rag-threshold" min="0" max="1" step="0.01" oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(2)"/><span class="range-val">0.75</span></div></div>
+          <div class="form-group"><label>Similarity Threshold</label><div class="range-row"><input type="range" id="s-rag-threshold" min="0" max="1" step="0.01" oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(2)"/><span class="range-val">0.35</span></div></div>
         </div>
         <div class="toggle-row"><span class="toggle-label">⚡ Hybrid Search (Vector + BM25)</span><label class="toggle"><input type="checkbox" id="s-hybrid" checked/><span class="toggle-slider"></span></label></div>
       </div>
@@ -1106,7 +1163,7 @@ table.data-table tr:last-child td{border-bottom:none}
         <div style="border:2px dashed var(--border2);border-radius:var(--r2);padding:24px;text-align:center;cursor:pointer" onclick="document.getElementById('file-input').click()" ondrop="handleFileDrop(event)" ondragover="event.preventDefault()">
           <div style="font-size:28px;margin-bottom:6px">📄</div>
           <div style="font-size:13px;color:var(--text2)">Drop PDF, TXT, CSV or click to browse</div>
-          <input type="file" id="file-input" multiple accept=".pdf,.txt,.csv" style="display:none" onchange="ingestFiles(this.files)"/>
+          <input type="file" id="file-input" multiple accept=".pdf,.txt,.md,.csv,.docx,.xlsx" style="display:none" onchange="ingestFiles(this.files)"/>
         </div>
         <div id="ingest-progress" style="display:none;margin-top:8px">
           <div class="progress-bar-wrap"><div class="progress-bar" id="ingest-bar"></div></div>
@@ -1174,6 +1231,7 @@ table.data-table tr:last-child td{border-bottom:none}
         </div>
         <div style="display:flex;gap:8px;align-items:center">
           <button class="btn btn-primary btn-sm" id="crawl-start-btn" onclick="startCrawl()">🕷 Start Crawl</button>
+          <button class="btn btn-secondary btn-sm" id="crawl-pause-btn" onclick="togglePauseCrawl()" style="display:none">⏸ Pause</button>
           <button class="btn btn-secondary btn-sm" id="crawl-cancel-btn" onclick="cancelCrawl()" style="display:none">✕ Cancel</button>
         </div>
       </div>
@@ -1228,9 +1286,17 @@ table.data-table tr:last-child td{border-bottom:none}
     <div class="tab-pane" id="tab-security">
       <div class="section-title">Security</div>
       <div class="glass-card">
-        <div class="toggle-row"><span class="toggle-label">Enable Password Protection</span><label class="toggle"><input type="checkbox" id="s-auth-enabled"/><span class="toggle-slider"></span></label></div>
-        <div class="form-group"><label>Password</label><input type="password" id="s-auth-pass" placeholder="UI access password"/></div>
-        <div class="form-hint">Password gates the UI — useful when running on a LAN</div>
+        <div class="notice-warn">
+          <strong>RediRecall has no built-in authentication.</strong>
+          The fields below are stored in your config but are <strong>not enforced</strong> —
+          nothing on <code>/api/*</code> or <code>/ws/*</code> checks them, so setting a
+          password here does <em>not</em> protect this instance.
+          To restrict access, put a reverse proxy with authentication in front of it —
+          see <code>deploy/docker-compose.https.yml</code> for a Caddy + HTTPS starting point.
+        </div>
+        <div class="toggle-row"><span class="toggle-label">Enable Password Protection <span class="pill-inert">not enforced</span></span><label class="toggle"><input type="checkbox" id="s-auth-enabled"/><span class="toggle-slider"></span></label></div>
+        <div class="form-group"><label for="s-auth-pass">Password</label><input type="password" id="s-auth-pass" placeholder="Stored only — does not gate access"/></div>
+        <div class="form-hint">Stored in plain text in <code>config.json</code>. Kept for forward compatibility; it gates nothing today.</div>
       </div>
     </div>
     <!-- Analytics -->
@@ -1287,7 +1353,7 @@ table.data-table tr:last-child td{border-bottom:none}
 const S={
   sessionId:null,sessions:{},ws:null,
   models:[],currentModel:'',ragInstances:[],activeRag:{name:'default',ep:'default'},
-  config:{},templates:[],pendingImages:[],pendingFiles:[],pinnedMsgs:[],
+  config:{},templates:[],pendingImages:[],pendingFiles:[],pinnedMsgs:[],sourceFilter:'',
   streaming:false,recognition:null,
   chatMetrics:{hits:0,misses:0,latencies:[]},msgIdCounter:0,
   provider:'ollama',ragAllMode:true,
@@ -1299,6 +1365,12 @@ const streamingContent={};
 // re-parsing the whole message on every token. KaTeX is deferred to finalize.
 const _streamTimer={};   // id -> setTimeout handle (0/undefined = idle)
 const _streamLast={};    // id -> last render timestamp (performance.now)
+// id -> side-channel metadata for an in-flight answer (RAG chunks, latency, cache
+// status). These arrive on their own WS frames BEFORE the answer is finalised, so
+// they are parked here and merged into the session record at finalize time —
+// otherwise the session stores only {id} and every chunk, score, timing and
+// cache badge is lost the moment you switch sessions or rate the answer.
+const _msgMeta={};
 const STREAM_CURSOR='<span class="stream-cursor"></span>';
 let currentAiMsgId=null;
 const themes=['light','dark','auto'];
@@ -1331,7 +1403,14 @@ window.addEventListener('load',async()=>{
   S.provider=S.config.provider||'ollama';
   applyProvider(S.provider);
   clearChat(true);
-  newSession();
+  // Restore the sidebar from Redis, then reopen the conversation this browser was
+  // last in. Previously every reload started a brand-new session and orphaned the
+  // stored history under an id the UI could never name again.
+  await loadSessionsFromServer();
+  let resumed=null;
+  try{ resumed=localStorage.getItem('sessionId'); }catch(e){}
+  if(resumed&&S.sessions[resumed]) await switchSession(resumed);
+  else newSession();
   await Promise.all([loadModels(),checkStatus(),loadRagInstances(),loadTemplates()]);
   setInterval(checkLocalStatus, 30000);   // Redis health + RAG-instance refresh — every 30 s
   setupKeyboardShortcuts();
@@ -1357,12 +1436,82 @@ async function loadConfig(){
 
 // ── Sessions ──────────────────────────────────────────────────────────────────
 function newSession(){
+  _pendingRegen=null;
+  setSourceScope('');
   const id='sess_'+Date.now();
   S.sessionId=id;
+  try{localStorage.setItem('sessionId',id);}catch(e){}
+  // NOT remembered here: this runs on every page load that doesn't resume, so
+  // recording it would fill the capped id list with empty sessions and push real
+  // conversations out of the sidebar. sendMessage() records it on the first turn.
   S.sessions[id]={title:'New Conversation',messages:[]};
   clearChat(true);
   connectWS(id);
   renderSessionList();
+}
+
+// ── Server-side session persistence ──────────────────────────────────────────
+// Conversations are already stored in Redis by the backend, but the UI never read
+// them back, so every reload silently orphaned the history under an id it could
+// no longer name. These three calls make the sidebar reflect what is actually
+// persisted, and make deletion remove the stored copy too.
+
+// Ids of conversations started in this browser. Persisted locally because the
+// server has no notion of who owns a session.
+function _mySessionIds(){
+  try{ return JSON.parse(localStorage.getItem('mySessionIds')||'[]'); }catch(e){ return []; }
+}
+function _rememberSessionId(id){
+  try{
+    const ids=_mySessionIds();
+    if(!ids.includes(id)){ ids.push(id); localStorage.setItem('mySessionIds',JSON.stringify(ids.slice(-200))); }
+  }catch(e){}
+}
+function _forgetSessionId(id){
+  try{ localStorage.setItem('mySessionIds',JSON.stringify(_mySessionIds().filter(x=>x!==id))); }catch(e){}
+}
+
+async function loadSessionsFromServer(){
+  try{
+    const r=await fetch('/api/sessions');
+    if(!r.ok)return;
+    const list=await r.json();
+    // Only re-list conversations THIS browser started. /api/sessions returns every
+    // session on the server (there is no auth or ownership concept), so listing it
+    // wholesale would show — and let anyone delete — other users' conversations on
+    // a shared/LAN deployment.
+    const mine=new Set(_mySessionIds());
+    (Array.isArray(list)?list:[]).forEach(s=>{
+      const id=s.id||s.session_id; if(!id)return;
+      if(!mine.has(id))return;
+      if((s.messages||0)===0)return;                 // never-used session, don't list it
+      // The server has no titles — derive a label from the stored answer preview.
+      const label=(s.preview||'').trim().replace(/\s+/g,' ').slice(0,40)||'Conversation';
+      // Keep anything already in memory (it is newer than the stored copy).
+      if(!S.sessions[id])S.sessions[id]={title:label,messages:[],_stub:true};
+    });
+    renderSessionList();
+  }catch(e){ /* offline / Redis down — sidebar just shows this page's sessions */ }
+}
+
+async function hydrateSession(id){
+  // A stub from the sidebar has no messages until it is opened.
+  const sess=S.sessions[id];
+  if(!sess||!sess._stub)return;
+  try{
+    const r=await fetch(`/api/sessions/${encodeURIComponent(id)}`);
+    if(!r.ok)return;
+    const data=await r.json();
+    const msgs=Array.isArray(data)?data:(data.messages||[]);
+    // Restored turns need a DOM id (the server does not store one) so ratings,
+    // regenerate and the RAG inspector can address them exactly as they do for
+    // live messages. Server meta supplies chunks/latency/model.
+    sess.messages=msgs.map(m=>({
+      role:m.role, content:m.content,
+      meta:{...(m.meta||{}), id:'msg_'+(++S.msgIdCounter)}
+    }));
+    delete sess._stub;
+  }catch(e){ toast('Could not load that conversation','error'); }
 }
 
 function connectWS(sid){
@@ -1371,35 +1520,77 @@ function connectWS(sid){
   S.ws=new WebSocket(`${proto}://${location.host}/ws/chat/${sid}`);
   S.ws.onmessage=e=>handleWSMsg(JSON.parse(e.data));
   S.ws.onerror=()=>toast('WebSocket error','error');
-  S.ws.onclose=()=>{setTimeout(()=>{if(S.sessionId===sid)connectWS(sid);},2000);};
+  S.ws.onclose=()=>{
+    // A drop mid-regenerate must not leave the pending version history armed,
+    // nor the composer stuck in "streaming".
+    if(_pendingRegen){_pendingRegen=null;_setStreamingUI(false);removeTyping();
+      toast('Connection lost during regenerate — the answer was not replaced','error');}
+    setTimeout(()=>{if(S.sessionId===sid)connectWS(sid);},2000);
+  };
 }
 
 function renderSessionList(){
+  // The row is a <div role="button">, not a <button>. A <button> nested inside a
+  // <button> is invalid — the parser implicitly closes the outer one, so the ✕
+  // escaped the row and rendered on its own line beneath every session.
   document.getElementById('sessions-list').innerHTML=Object.entries(S.sessions).reverse().map(([id,s])=>`
-    <button class="sidebar-btn ${id===S.sessionId?'active':''}" onclick="switchSession('${id}')">
-      <span class="icon">💬</span>
+    <div class="sidebar-btn session-row ${id===S.sessionId?'active':''}" role="button" tabindex="0"
+         aria-label="Open conversation: ${escHtml(s.title)}"
+         data-sid="${escHtml(id)}"
+         onclick="switchSession(this.dataset.sid)"
+         onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();switchSession(this.dataset.sid);}">
+      <span class="icon" aria-hidden="true">💬</span>
       <div style="flex:1;overflow:hidden">
         <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(s.title)}</div>
         <div class="session-preview">${escHtml((s.messages[s.messages.length-1]?.content||'').slice(0,40))}</div>
       </div>
-      <button onclick="event.stopPropagation();deleteSession('${id}')" style="background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;padding:0 2px">✕</button>
-    </button>`).join('');
+      <button class="session-del" aria-label="Delete conversation: ${escHtml(s.title)}"
+              title="Delete conversation" data-sid="${escHtml(id)}"
+              onclick="event.stopPropagation();deleteSession(this.dataset.sid)">✕</button>
+    </div>`).join('');
 }
 
-function switchSession(id){
+async function switchSession(id){
+  _pendingRegen=null;          // belongs to the conversation we are leaving
+  setSourceScope('');          // the scope chip is per-conversation, not global
   S.sessionId=id;
+  try{localStorage.setItem('sessionId',id);}catch(e){}
   S.sessions[id]=S.sessions[id]||{title:'Session',messages:[]};
   connectWS(id);
   clearChat(true);
+  await hydrateSession(id);          // pull history from Redis if not in memory
   const msgs=S.sessions[id].messages;
-  if(msgs.length)msgs.forEach(m=>appendMessage(m.role,m.content,m.meta||{}));
+  if(msgs.length)msgs.forEach(m=>{
+    appendMessage(m.role,m.content,m.meta||{});
+    // Replay the stored side-channel meta so a revisited answer keeps its RAG
+    // inspector, matched-chunk badge and version switcher instead of appearing
+    // as a bare bubble.
+    const mm=m.meta||{};
+    if(m.role==='assistant'&&mm.id){
+      if(mm.chunks)updateRagContext(mm.id,mm.chunks,mm.latency,mm.query||'');
+      if(mm.versions?.length>1)renderVersionSwitcher(mm.id,mm.versions,mm.versions.length-1);
+    }
+  });
   renderSessionList();
   document.getElementById('session-title').textContent=S.sessions[id].title;
 }
 
-function deleteSession(id){
-  delete S.sessions[id];
-  if(S.sessionId===id)newSession();else renderSessionList();
+async function deleteSession(id){
+  const title=S.sessions[id]?.title||'this conversation';
+  showModal('Delete conversation?',
+    `“${escHtml(title)}” and its stored history will be permanently removed.`,
+    [
+      {label:'Cancel',cls:'btn-secondary',cb:()=>{}},
+      {label:'Delete',cls:'btn-danger',cb:async()=>{
+        delete S.sessions[id];
+        _forgetSessionId(id);
+        // Remove the persisted copy too — deleting only the in-memory entry left
+        // the Redis record orphaned forever.
+        try{ await fetch(`/api/sessions/${encodeURIComponent(id)}`,{method:'DELETE'}); }
+        catch(e){ toast('Removed locally, but the stored copy could not be deleted','warning'); }
+        if(S.sessionId===id)newSession();else renderSessionList();
+      }},
+    ]);
 }
 
 // ── Models ────────────────────────────────────────────────────────────────────
@@ -1847,6 +2038,8 @@ function renderRagInstances(){
         <div class="rag-inst-meta" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
           <span>${r.chunks} chunks${r.created?' · '+r.created.split('T')[0]:''}</span>
           ${ep!=='default'?`<span class="ep-badge">🗄 ${escHtml(ep)}</span>`:''}
+          <button class="rag-docs-btn" onclick="event.stopPropagation();openDocuments(${i})"
+                  title="Browse the documents in this instance and remove individual ones">📄 Documents</button>
         </div>
       </div>
       <div class="rag-inst-actions" style="opacity:1">
@@ -2180,14 +2373,44 @@ function _stopCrawlTimers(){
   if(_crawlPollTimer){clearInterval(_crawlPollTimer);_crawlPollTimer=null;}
 }
 
+let _crawlPaused=false;
+
+async function togglePauseCrawl(){
+  const url=document.getElementById('crawl-url').value.trim();
+  if(!url)return;
+  const btn=document.getElementById('crawl-pause-btn');
+  const want=!_crawlPaused;
+  btn.disabled=true;
+  try{
+    const r=await fetch('/api/crawl/pause',{method:'POST',headers:{'Content-Type':'application/json'},
+                                            body:JSON.stringify({url,paused:want})});
+    if(!r.ok)throw new Error(r.status===404?'No crawl is running for this URL':'HTTP '+r.status);
+    _crawlPaused=want;
+    btn.textContent=_crawlPaused?'▶ Resume':'⏸ Pause';
+    // Pausing holds between pages, so pages already indexed stay indexed and the
+    // queue is preserved — this is not a cancel.
+    const bar=document.getElementById('crawl-bar');
+    if(bar) bar.style.animationPlayState=_crawlPaused?'paused':'running';
+    toast(_crawlPaused?'Ingestion paused — progress kept':'Ingestion resumed','info');
+  }catch(e){ toast('Pause failed: '+e.message,'error'); }
+  finally{ btn.disabled=false; }
+}
+
+function _resetCrawlControls(){
+  _crawlPaused=false;
+  const pb=document.getElementById('crawl-pause-btn');
+  if(pb){pb.style.display='none';pb.textContent='⏸ Pause';pb.disabled=false;}
+  document.getElementById('crawl-cancel-btn').style.display='none';
+  document.getElementById('crawl-start-btn').disabled=false;
+}
+
 async function cancelCrawl(){
   const url=document.getElementById('crawl-url').value.trim();
   // Tell the server to cancel — this also terminates the SSE generator
   if(url) await fetch('/api/crawl/cancel',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})}).catch(()=>{});
   if(_crawlAbort){_crawlAbort.abort();_crawlAbort=null;}
   _stopCrawlTimers();
-  document.getElementById('crawl-cancel-btn').style.display='none';
-  document.getElementById('crawl-start-btn').disabled=false;
+  _resetCrawlControls();
   document.getElementById('crawl-bar').style.animation='none';
   toast('Crawl cancelled','info');
 }
@@ -2234,6 +2457,8 @@ async function startCrawl(){
   bar.style.width='2%';bar.style.background='';bar.style.animation='crawlPulse 1.5s infinite alternate';
   document.getElementById('crawl-start-btn').disabled=true;
   document.getElementById('crawl-cancel-btn').style.display='inline-flex';
+  _crawlPaused=false;
+  {const _pb=document.getElementById('crawl-pause-btn');if(_pb){_pb.style.display='inline-flex';_pb.textContent='⏸ Pause';_pb.disabled=false;}}
 
   _crawlAbort=new AbortController();
   let indexed=0,skipped=0,blocked=0,errors=0,totalChunks=0;
@@ -2271,6 +2496,7 @@ async function startCrawl(){
           bar.style.background='linear-gradient(90deg,var(--green),var(--accent))';
           document.getElementById('crawl-start-btn').disabled=false;
           document.getElementById('crawl-cancel-btn').style.display='none';
+  {const _pb=document.getElementById('crawl-pause-btn');if(_pb){_pb.style.display='none';_pb.textContent='⏸ Pause';}} _crawlPaused=false;
           document.getElementById('crawl-count-rate').textContent=rate;
           _crawlAbort=null;
           await loadRagInstances();
@@ -2308,6 +2534,7 @@ async function startCrawl(){
     if(e.name!=='AbortError'){toast('Crawl failed: '+e.message,'error');}
     document.getElementById('crawl-start-btn').disabled=false;
     document.getElementById('crawl-cancel-btn').style.display='none';
+  {const _pb=document.getElementById('crawl-pause-btn');if(_pb){_pb.style.display='none';_pb.textContent='⏸ Pause';}} _crawlPaused=false;
     bar.style.animation='none';
   }
 }
@@ -2332,6 +2559,8 @@ async function checkActiveCrawls(){
   bar.style.width='50%';bar.style.animation='crawlPulse 1.5s infinite alternate';
   document.getElementById('crawl-start-btn').disabled=true;
   document.getElementById('crawl-cancel-btn').style.display='inline-flex';
+  _crawlPaused=false;
+  {const _pb=document.getElementById('crawl-pause-btn');if(_pb){_pb.style.display='inline-flex';_pb.textContent='⏸ Pause';_pb.disabled=false;}}
 
   // Poll /api/crawl/active every second to refresh stats without starting a new crawl
   _stopCrawlTimers();
@@ -2350,6 +2579,7 @@ async function checkActiveCrawls(){
       bar.style.background='linear-gradient(90deg,var(--green),var(--accent))';
       document.getElementById('crawl-start-btn').disabled=false;
       document.getElementById('crawl-cancel-btn').style.display='none';
+  {const _pb=document.getElementById('crawl-pause-btn');if(_pb){_pb.style.display='none';_pb.textContent='⏸ Pause';}} _crawlPaused=false;
       await loadRagInstances();
     }
   },1000);
@@ -2443,14 +2673,19 @@ function handleWSMsg(msg){
       removeTyping();
       currentAiMsgId='msg_'+(++S.msgIdCounter);
       appendMessage('assistant',msg.content,{id:currentAiMsgId,cacheHit:true,score:msg.score,latency:msg.latency,entryId:msg.entry_id||'',query:S.currentQuery||''});
+      {const sess=S.sessions[S.sessionId];
+       if(sess) sess.messages.push({role:'assistant',content:msg.content,
+         meta:{id:currentAiMsgId,cacheHit:true,score:msg.score,latency:msg.latency,
+               entryId:msg.entry_id||'',query:S.currentQuery||''}});}
       S.chatMetrics.hits++;
       break;
     case 'rag_context':
-      if(currentAiMsgId)updateRagContext(currentAiMsgId,msg.chunks,msg.latency,S.currentQuery||'');
+      if(currentAiMsgId)updateRagContext(currentAiMsgId,msg.chunks,msg.latency,S.currentQuery||'',msg.rag_used);
       break;
     case 'error':
       _setStreamingUI(false);
       removeTyping();
+      _pendingRegen=null;   // the replacement never arrived — don't graft it onto a later answer
       // Finalise whatever streamed before the failure, otherwise the message stays
       // in streaming state forever: the cursor keeps blinking and any rich cards in
       // the partial text are never drawn.
@@ -2503,7 +2738,8 @@ function maybeAutoScroll(){
 function finalizeStreamingMsg(id){
   if(_streamTimer[id])clearTimeout(_streamTimer[id]);   // drop any queued partial render
   delete _streamTimer[id]; delete _streamLast[id];      // don't leak per-id throttle state
-  const el=document.getElementById(id);if(!el)return;
+  const el=document.getElementById(id);
+  if(!el){ _pendingRegen=null; return; }   // no target left — the regen is void
   // Finalize exactly once: the backend emits a final token{done:true} AND a
   // separate stream_end, so this fires twice per answer. Without this guard the
   // assistant turn is pushed to history twice (doubles the token counter + exports).
@@ -2519,26 +2755,49 @@ function finalizeStreamingMsg(id){
     bubble.innerHTML=renderMarkdown(raw,{math:true});renderMath(bubble);renderAbcBlocks(bubble);renderPlotBlocks(bubble);renderRichBlocks(bubble);highlightCode(bubble);addCopyButtons(bubble);
   }
   const sess=S.sessions[S.sessionId];
-  if(sess)sess.messages.push({role:'assistant',content:raw,meta:{id}});
+  // Merge the side-channel meta (chunks/latency/cache) and record which model
+  // actually produced this answer — without it there is no way to tell, after
+  // switching providers mid-conversation, where any given answer came from.
+  const regen=_pendingRegen; _pendingRegen=null;
+  const versions=regen
+    ? [...regen.versions,{content:raw,provider:S.provider,model:S.currentModel}]
+    : null;
+  if(sess)sess.messages.push({role:'assistant',content:raw,meta:{
+    id, ts:Date.now(), provider:S.provider, model:S.currentModel,
+    ...(versions?{versions}:{}), ...(_msgMeta[id]||{})
+  }});
+  delete _msgMeta[id];
+  if(versions)renderVersionSwitcher(id,versions,versions.length-1);
   updateTokenCounter();
   maybeAutoScroll(); // deferred KaTeX / copy-buttons can grow the bubble — keep a bottom-pinned reader pinned
 }
 
-function updateRagContext(msgId,chunks,latency,query=''){
-  const el=document.getElementById(msgId);if(!el||!chunks?.length)return;
-  if(!el.querySelector('.rag-inspector')){
+function updateRagContext(msgId,chunks,latency,query='',ragUsed=undefined){
+  // Park the retrieval result even when it is EMPTY — finalizeStreamingMsg needs
+  // it, and a zero-chunk retrieval is itself meaningful (see the no-match badge).
+  _msgMeta[msgId]={...(_msgMeta[msgId]||{}),chunks:chunks||[],latency,query};
+  const el=document.getElementById(msgId);if(!el)return;
+  if(!chunks?.length){
+    // Only when a search actually RAN and matched nothing. An empty list also
+    // covers "RAG was switched off", and warning there sent the user to tune a
+    // threshold that had no bearing on the answer.
+    if(ragUsed===false) return;
+    // Retrieval ran and matched nothing. Without this the answer looks exactly
+    // like a grounded one, which is the moment the user most needs to be told.
     const meta=el.querySelector('.msg-meta');
-    if(meta){
-      const badge=document.createElement('span');
-      badge.className='rag-used-badge';
-      badge.title='Toggle matched RAG sources';
-      badge.onclick=()=>{
-        const ins=el.querySelector('.rag-inspector');
-        if(ins) ins.classList.toggle('open');
-      };
-      badge.innerHTML=`📚 ${chunks.length} chunk${chunks.length!==1?'s':''} matched`;
-      meta.insertBefore(badge,meta.firstChild);
+    if(meta&&!meta.querySelector('.rag-nomatch-badge')){
+      const b=document.createElement('span');
+      b.className='rag-nomatch-badge';
+      b.textContent='📭 No KB match';
+      b.title=`Nothing in the knowledge base cleared the similarity threshold `
+             +`(${(S.config?.rag?.similarity_threshold ?? 0.35)}). `
+             +`This answer is not grounded in your documents. Lower the threshold in Settings → RAG to widen matching.`;
+      b.onclick=()=>openSettings('rag');
+      meta.appendChild(b);
     }
+    return;
+  }
+  if(!el.querySelector('.rag-inspector')){
     const showByDefault=S.config?.ui?.show_rag_matches??false;
     const body=el.querySelector('.msg-body');
     const outputBar=el.querySelector('.msg-output-bar');
@@ -2615,7 +2874,10 @@ function _sourceLink(source){
 }
 
 function buildRagInspector(chunks,latency,openByDefault=false,query=''){
-  const avgScore=chunks.reduce((s,c)=>s+c.score,0)/chunks.length;
+  const rel=c=>(c.relevance??c.score??0);
+  // Sort defensively: cached and restored payloads predate server-side ordering.
+  chunks=[...chunks].sort((a,b)=>rel(b)-rel(a));
+  const avgScore=chunks.reduce((s,c)=>s+rel(c),0)/(chunks.length||1);
   const kws=_queryKeywords(query);
   const div=document.createElement('div');
   div.className='rag-inspector'+(openByDefault?' open':'');
@@ -2627,9 +2889,13 @@ function buildRagInspector(chunks,latency,openByDefault=false,query=''){
     return `
       <div class="rag-chunk">
         <div class="rag-chunk-summary">
-          <span class="rag-chunk-score" style="background:rgba(124,111,247,${(0.10+c.score*0.30).toFixed(2)})">#${i+1} ${(c.score*100).toFixed(1)}%</span>
+          <span class="rag-chunk-score" style="background:rgba(124,111,247,${(0.10+rel(c)*0.30).toFixed(2)})"
+                title="${c.lexical&&!(c.score>0)?'Keyword match strength (BM25) — this chunk was found by term match, not vector similarity':'Cosine similarity to your question'}">#${i+1} ${(rel(c)*100).toFixed(1)}%${c.lexical&&!(c.score>0)?' kw':''}</span>
           ${c.instance?`<span class="ep-badge" style="flex-shrink:0">🗄 ${escHtml(c.instance)}</span>`:''}
           <span class="rag-chunk-source-link">${_sourceLink(c.source)}</span>
+          <button class="rag-chunk-scope" title="Ask the next question using only this document"
+                  onclick="setSourceScope(this.dataset.src)"
+                  data-src="${escHtml(c.source||'')}">⌖ only this</button>
           <button id="${btnId}" class="rag-chunk-expand" onclick="
             const ct=document.getElementById('${contentId}');
             const btn=document.getElementById('${btnId}');
@@ -2677,6 +2943,9 @@ async function sendMessage(){
   input.value='';autoResize(input);updateCharCount();
   const tplIdx=document.getElementById('template-select').value;
   const systemPrompt=tplIdx!==''?S.templates[parseInt(tplIdx)]?.system:undefined;
+  // Record the id on the first real turn — see newSession(). A conversation
+  // earns its place in the sidebar by being used, not by being opened.
+  if(S.sessionId) _rememberSessionId(S.sessionId);
   const msgMeta={id:'msg_'+(++S.msgIdCounter)};
   appendMessage('user',content,{...msgMeta,images:S.pendingImages,files:S.pendingFiles.map(f=>f.name)});
   const sess=S.sessions[S.sessionId];
@@ -2690,7 +2959,7 @@ async function sendMessage(){
     : {rag_instance: S.activeRag?.name||'default'};
   S.currentQuery = content;
   const fileCtx=S.pendingFiles.map(f=>({name:f.name,text:f.text}));
-  S.ws.send(JSON.stringify({content,model:S.currentModel,provider:S.provider,...ragPayload,images:S.pendingImages,file_context:fileCtx,system_prompt:systemPrompt}));
+  S.ws.send(JSON.stringify({content,model:S.currentModel,provider:S.provider,...ragPayload,images:S.pendingImages,file_context:fileCtx,system_prompt:systemPrompt,source_filter:S.sourceFilter||''}));
   S.pendingImages=[];
   document.getElementById('img-preview-row').style.display='none';
   document.getElementById('img-preview-row').innerHTML='';
@@ -2717,7 +2986,7 @@ function appendMessage(role,content,meta={}){
       <div class="msg-meta">
         ${meta.cacheHit?`<span class="cache-badge cache-hit" title="Similarity: ${(meta.score*100).toFixed(1)}%">⚡ Cached ${(meta.score*100).toFixed(0)}%</span>`:''}
         ${!isUser&&!meta.cacheHit&&!meta.streaming?'<span class="cache-badge cache-miss">🔍 Live</span>':''}
-        <span style="font-size:10px;color:var(--text2)">${new Date().toLocaleTimeString()}</span>
+        <span style="font-size:10px;color:var(--text2)">${new Date(meta.ts?(meta.ts<1e12?meta.ts*1000:meta.ts):Date.now()).toLocaleTimeString()}</span>
       </div>
       ${!isUser?`<div class="msg-output-bar">
         <button class="out-btn" onclick="copyMsgText('${id}')" title="Copy plain text">📋 Copy</button>
@@ -2807,14 +3076,159 @@ function clearChat(silent=false){
   }
 }
 
+// ── Regenerate version switcher ──────────────────────────────────────────────
+// Regenerating replaces the answer in place; earlier attempts stay reachable
+// through a ‹ n/N › control so they can be compared instead of being lost.
+function renderVersionSwitcher(msgId,versions,idx){
+  const el=document.getElementById(msgId); if(!el||versions.length<2)return;
+  const meta=el.querySelector('.msg-meta'); if(!meta)return;
+  meta.querySelector('.ver-switch')?.remove();
+  const v=versions[idx]||{};
+  const wrap=document.createElement('span');
+  wrap.className='ver-switch';
+  wrap.innerHTML=`<button class="ver-btn" ${idx===0?'disabled':''} title="Previous version">‹</button>`
+    +`<span class="ver-num" title="${escHtml((v.provider||'')+' · '+(v.model||''))}">${idx+1}/${versions.length}</span>`
+    +`<button class="ver-btn" ${idx===versions.length-1?'disabled':''} title="Next version">›</button>`;
+  const [prev,,next]=wrap.children;
+  prev.onclick=()=>showVersion(msgId,versions,idx-1);
+  next.onclick=()=>showVersion(msgId,versions,idx+1);
+  meta.appendChild(wrap);
+}
+
+function showVersion(msgId,versions,idx){
+  if(idx<0||idx>=versions.length)return;
+  const el=document.getElementById(msgId); if(!el)return;
+  const bubble=el.querySelector('.msg-bubble'); if(!bubble)return;
+  const raw=versions[idx].content||'';
+  destroyRichBlocks(bubble);
+  el.setAttribute('data-raw',raw);
+  bubble.innerHTML=renderMarkdown(raw,{math:true});
+  renderMath(bubble);renderAbcBlocks(bubble);renderPlotBlocks(bubble);
+  renderRichBlocks(bubble);highlightCode(bubble);addCopyButtons(bubble);
+  renderVersionSwitcher(msgId,versions,idx);
+}
+
+// ── Document manager ─────────────────────────────────────────────────────────
+// A RAG instance used to be an opaque chunk count: /documents and per-source
+// delete existed on the server but had no UI, so removing one stale document
+// meant wiping the whole instance and re-ingesting everything.
+// Takes the instance INDEX, like every sibling action button. Passing the name
+// through an onclick string literal let a crafted instance name break out and
+// execute JS; the index cannot.
+async function openDocuments(i){
+  const r=S.ragInstances?.[i]; if(!r)return;
+  const endpoint=r.redis_endpoint||'default';
+  // showModal assigns the title via textContent, so pre-escaping renders an
+  // instance called A&B as "A&amp;B". Every sibling caller passes it raw.
+  showModal(`Documents in “${r.name}”`,'<div id="doc-list">Loading…</div>',
+            [{label:'Close',cls:'btn-secondary',cb:()=>{}}]);
+  await refreshDocuments(r.name,endpoint);
+}
+
+async function refreshDocuments(instance,endpoint){
+  const el=document.getElementById('doc-list');
+  if(!el)return;
+  try{
+    const r=await fetch(`/api/rag/${encodeURIComponent(instance)}/documents?endpoint=${encodeURIComponent(endpoint||'default')}`);
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    if(!d.documents?.length){ el.innerHTML='<div class="form-hint">No documents indexed yet.</div>'; return; }
+    el.innerHTML=`<div class="form-hint" style="margin-bottom:8px">${d.total} document(s)</div>`
+      +`<div class="doc-table">`+d.documents.map(doc=>{
+        const when=doc.ingested_at?new Date(doc.ingested_at*1000).toISOString().slice(0,10):'—';
+        return `<div class="doc-row">
+          <span class="doc-src" title="${escHtml(doc.source)}">${escHtml(doc.source)}</span>
+          <span class="doc-count">${doc.chunks}</span>
+          <span class="doc-date">${when}</span>
+          <button class="btn btn-secondary btn-sm" title="Ask using only this document"
+                  onclick="setSourceScope(this.dataset.s);closeModal()" data-s="${escHtml(doc.source)}">⌖</button>
+          <button class="btn btn-danger btn-sm" title="Delete this document's chunks"
+                  onclick="deleteDocument(this.dataset.i,this.dataset.e,this.dataset.s)"
+                  data-i="${escHtml(instance)}" data-e="${escHtml(endpoint||'default')}"
+                  data-s="${escHtml(doc.source)}">🗑</button>
+        </div>`;
+      }).join('')+`</div>`;
+  }catch(e){ el.innerHTML=`<div class="form-hint" style="color:var(--red)">Could not load documents: ${escHtml(e.message)}</div>`; }
+}
+
+function deleteDocument(instance,endpoint,source){
+  // Sits one grid cell from the scope button in a scrolling list, and there is no
+  // undo — the chunks are gone until the document is ingested again. Every other
+  // destructive action here confirms first.
+  const name=source.split('/').pop()||source;
+  showModal('Remove document?',
+    `<p>Remove <strong>${escHtml(name)}</strong> from <strong>${escHtml(instance)}</strong>?</p>`
+    +`<p class="muted">Its chunks are deleted from the index. Re-ingest the document to restore it.</p>`,
+    [{label:'Cancel',cls:'btn-ghost'},
+     {label:'Remove',cls:'btn-danger',cb:()=>_doDeleteDocument(instance,endpoint,source)}]);
+}
+async function _doDeleteDocument(instance,endpoint,source){
+  try{
+    const r=await fetch(`/api/rag/${encodeURIComponent(instance)}/documents`
+      +`?source=${encodeURIComponent(source)}&endpoint=${encodeURIComponent(endpoint||'default')}`,{method:'DELETE'});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const d=await r.json();
+    toast(`Removed ${d.deleted} chunk(s) from ${source.split('/').pop()}`,'success');
+    await refreshDocuments(instance,endpoint);
+    await loadRagInstances();          // refresh the chunk count on the card
+  }catch(e){ toast('Delete failed: '+e.message,'error'); }
+}
+
+// ── Source scoping ───────────────────────────────────────────────────────────
+// The backend has always supported `source_filter` (it is pushed into both the
+// vector and keyword legs of the query), but nothing in the UI could set it, so
+// "answer using only this document" was unreachable outside the API.
+function setSourceScope(src){
+  S.sourceFilter=src||'';
+  renderSourceScope();
+  if(src)toast('Scoped to '+src.split('/').pop().slice(0,40),'info');
+  document.getElementById('msg-input')?.focus();
+}
+function clearSourceScope(){ setSourceScope(''); }
+function renderSourceScope(){
+  const row=document.getElementById('scope-row');
+  if(!row)return;
+  if(!S.sourceFilter){ row.style.display='none'; row.innerHTML=''; return; }
+  const short=S.sourceFilter.length>52?'…'+S.sourceFilter.slice(-50):S.sourceFilter;
+  row.style.display='flex';
+  row.innerHTML=`<span class="scope-chip" title="${escHtml(S.sourceFilter)}">`
+    +`⌖ only <strong>${escHtml(short)}</strong>`
+    +`<button class="scope-chip-x" onclick="clearSourceScope()" title="Remove scope">✕</button></span>`;
+}
+
 function scrollToBottom(){const a=document.getElementById('chat-area');a.scrollTop=a.scrollHeight;}
 function sendSuggestion(text){document.getElementById('msg-input').value=text;sendMessage();}
 
 // ── Feedback / Pin / Copy / Regenerate ───────────────────────────────────────
 async function thumbs(id,val,btn){
-  btn.classList.toggle(val===1?'liked':'disliked');
-  await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({msg_id:id,value:val,session:S.sessionId})});
-  toast(val===1?'👍 Noted':'👎 Noted','info');
+  // Mutually exclusive — clicking 👍 after 👎 must not leave both lit.
+  const bar=btn.parentElement;
+  bar?.querySelector('.msg-action-btn.liked')?.classList.remove('liked');
+  bar?.querySelector('.msg-action-btn.disliked')?.classList.remove('disliked');
+  btn.classList.add(val===1?'liked':'disliked');
+  // Record enough context to act on the rating later. Previously only
+  // {msg_id,value,session} was stored, which cannot be joined to the query,
+  // the corpus or the model — so a thumbs-down told you nothing actionable.
+  const sess=S.sessions[S.sessionId];
+  const msgs=sess?.messages||[];
+  const idx=msgs.findIndex(m=>m.meta?.id===id);
+  const answer=idx>=0?msgs[idx]:null;
+  const question=idx>0?[...msgs.slice(0,idx)].reverse().find(m=>m.role==='user'):null;
+  const payload={
+    msg_id:id, value:val, session:S.sessionId,
+    query:    question?.content?.slice(0,2000)||'',
+    answer:   answer?.content?.slice(0,4000)||'',
+    provider: S.provider, model: S.currentModel,
+    rag_instances: S.ragAllMode
+      ? (S.ragInstances||[]).filter(r=>r.enabled!==false).map(r=>r.name)
+      : [S.activeRag?.name||'default'],
+    sources: (answer?.meta?.chunks||[]).map(c=>({source:c.source,score:c.score})),
+  };
+  try{
+    const r=await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    toast(val===1?'👍 Noted':'👎 Noted','info');
+  }catch(e){ toast('Could not save feedback: '+e.message,'error'); }
 }
 
 function pinMsg(id,btn){
@@ -2865,7 +3279,65 @@ async function regenerate(msgId){
   }
   if(query==null&&sess?.messages?.length)query=[...sess.messages].reverse().find(m=>m.role==='user')?.content??null;
   if(query==null){toast('Could not find the original query','error');return;}
+
+  // Replace this answer IN PLACE rather than appending another turn. The previous
+  // behaviour re-typed the question and re-sent it, so every regeneration left a
+  // duplicate of the question and a second answer in the transcript, the export
+  // and the token count. Prior answers are kept so they can be compared.
+  if(msgId&&el&&sess){
+    const ai=sess.messages.findIndex(m=>m.role==='assistant'&&m.meta?.id===msgId);
+    if(ai>=0){
+      // Validate the transport BEFORE touching any state. Doing this after the
+      // splice/DOM removal destroyed the conversation whenever the socket was
+      // down (a 2 s reconnect window is enough to hit this in normal use).
+      if(!S.ws||S.ws.readyState!==WebSocket.OPEN){
+        toast('Not connected — reconnecting, try again in a moment','error');
+        return;
+      }
+      // Regenerating a non-last answer discards every later turn — say so first.
+      const laterTurns=sess.messages.length-(ai+1);
+      if(laterTurns>0&&!_regenConfirmed){
+        showModal('Regenerate this answer?',
+          `This will discard the ${laterTurns} message(s) that came after it.`,
+          [{label:'Cancel',cls:'btn-secondary',cb:()=>{}},
+           {label:'Regenerate',cls:'btn-danger',cb:()=>{_regenConfirmed=true;regenerate(msgId).finally(()=>{_regenConfirmed=false;});}}]);
+        return;
+      }
+      const prev=sess.messages[ai];
+      const versions=prev.meta?.versions||[{content:prev.content,provider:prev.meta?.provider,model:prev.meta?.model}];
+      const ragPayload=S.ragAllMode
+        ? {rag_instances:(S.ragInstances||[]).filter(r=>r.enabled!==false&&r.reachable!==false).map(r=>r.name)}
+        : {rag_instance:S.activeRag?.name||'default'};
+      try{
+        S.ws.send(JSON.stringify({content:query,model:S.currentModel,provider:S.provider,...ragPayload,
+          bypass_cache:true,system_prompt:_currentSystemPrompt(),source_filter:S.sourceFilter||'',
+          // Ask the server to drop this answer and everything after it before
+          // appending, so the stored transcript matches what the user sees.
+          replace_from:ai}));
+      }catch(e){ toast('Could not send: '+e.message,'error'); return; }
+      // Only now mutate local state — the send succeeded.
+      sess.messages.splice(ai);
+      _pendingRegen={afterId:msgId,versions};
+      let n=el;
+      while(n){const next=n.nextElementSibling;n.remove();n=next;}
+      _setStreamingUI(true);showTyping();scrollToBottom();
+      S.currentQuery=query;
+      return;
+    }
+  }
   document.getElementById('msg-input').value=query;sendMessage();
+}
+
+// Carries version history from a regenerate into the replacement answer.
+// MUST be cleared on every path where the replacement never arrives, or it is
+// applied to an unrelated later answer (grafting a stale version history onto it).
+let _pendingRegen=null;
+let _regenConfirmed=false;
+
+// The selected template's system prompt (base_instruction is prepended server-side).
+function _currentSystemPrompt(){
+  const i=document.getElementById('template-select')?.value;
+  return i!==''&&i!=null?S.templates[parseInt(i)]?.system:undefined;
 }
 
 // ── Images ────────────────────────────────────────────────────────────────────
@@ -3069,12 +3541,12 @@ function populateSettingsForm(){
   setCheck('s-redis-ssl',c.redis?.ssl||false);
   setVal('s-ollama-host',c.ollama?.host||'http://localhost');
   setVal('s-ollama-port',c.ollama?.port||11434);
-  setVal('s-embed-model',c.embedding?.model||'all-MiniLM-L6-v2');
+  setVal('s-embed-model',c.embedding?.model??'intfloat/multilingual-e5-small');
   setVal('s-max-img-dim',c.embedding?.max_image_dim||1024);
-  setRange('s-chunk-size',c.rag?.chunk_size||512);
-  setRange('s-chunk-overlap',c.rag?.chunk_overlap||64);
+  setRange('s-chunk-size',c.rag?.chunk_size??180);
+  setRange('s-chunk-overlap',c.rag?.chunk_overlap??32);
   setRange('s-top-k',c.rag?.top_k||5);
-  setRange('s-rag-threshold',c.rag?.similarity_threshold||0.75);
+  setRange('s-rag-threshold',c.rag?.similarity_threshold??0.35);
   setCheck('s-hybrid',c.rag?.hybrid_search??true);
   setCheck('s-show-rag',c.ui?.show_rag_matches??false);
   setCheck('s-cache-enabled',c.cache?.enabled??true);
@@ -3240,7 +3712,9 @@ async function saveSettings(){
     redis:{host:getVal('s-redis-host'),port:parseInt(getVal('s-redis-port')),db:parseInt(getVal('s-redis-db')),password:getVal('s-redis-pass'),ssl:getCheck('s-redis-ssl')},
     ollama:{host:getVal('s-ollama-host'),port:parseInt(getVal('s-ollama-port')),model:S.provider==='ollama'?S.currentModel:((S.providerModels||{}).ollama||S.config.ollama?.model||'')},
     embedding:{model:getVal('s-embed-model'),max_image_dim:parseInt(getVal('s-max-img-dim'))},
-    rag:{chunk_size:parseInt(getVal('s-chunk-size')),chunk_overlap:parseInt(getVal('s-chunk-overlap')),top_k:parseInt(getVal('s-top-k')),similarity_threshold:parseFloat(getVal('s-rag-threshold')),hybrid_search:getCheck('s-hybrid')},
+    // rerank_candidates has no UI control, so carry the stored value through —
+    // a top-level _config.update() on the server would otherwise drop the key.
+    rag:{chunk_size:parseInt(getVal('s-chunk-size')),chunk_overlap:parseInt(getVal('s-chunk-overlap')),top_k:parseInt(getVal('s-top-k')),similarity_threshold:parseFloat(getVal('s-rag-threshold')),hybrid_search:getCheck('s-hybrid'),rerank_candidates:S.config.rag?.rerank_candidates??40},
     cache:{enabled:getCheck('s-cache-enabled'),similarity_threshold:parseFloat(getVal('s-cache-threshold')),ttl:parseInt(getVal('s-cache-ttl'))},
     ui:{theme:getVal('s-theme'),show_rag_matches:getCheck('s-show-rag')},
     security:{enabled:getCheck('s-auth-enabled'),password:getVal('s-auth-pass')},
@@ -3259,10 +3733,40 @@ async function saveSettings(){
     active_rag:S.activeRag?.name||'default',
     crawl:{concurrency:parseInt(getVal('crawl-concurrency'))||10,js_concurrency:parseInt(getVal('crawl-js-concurrency'))||3,js_render:getCheck('crawl-js-render'),smart_mode:getCheck('crawl-smart-mode'),min_words:100},
   };
-  await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)});
-  // Re-fetch config from server so S.config reflects server-side state (including env key flag)
+  await _postConfig(cfg);
+}
+
+// Posts the settings payload and, crucially, checks the result. A failed save used
+// to close the dialog and toast "Settings saved" anyway — so the embedding-model
+// guard's 409 silently discarded every other edit made in the same visit.
+async function _postConfig(cfg,force=false){
+  const body=force?{...cfg,force_embedding_change:true}:cfg;
+  let res;
+  try{
+    res=await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  }catch(e){ toast('Could not reach the server — settings NOT saved: '+e.message,'error'); return false; }
+
+  if(res.status===409){
+    // Changing the embedding model invalidates every index; offer the rebuild.
+    let d={};
+    try{ d=(await res.json()).detail||{}; }catch(e){}
+    showModal('Rebuild indexes to change the embedding model?',
+      `<div>${escHtml(d.message||'This change requires rebuilding the indexes.')}</div>`
+      +(d.instances?.length?`<div class="form-hint" style="margin-top:8px">Affected: ${escHtml(d.instances.join(', '))}</div>`:'')
+      +`<div class="form-hint" style="margin-top:8px">Existing chunks stay on disk but must be <strong>re-ingested</strong> before they are searchable again.</div>`,
+      [{label:'Cancel',cls:'btn-secondary',cb:()=>toast('Settings not saved','warning')},
+       {label:'Rebuild & switch',cls:'btn-danger',cb:async()=>{ if(await _postConfig(cfg,true))toast('Embedding model changed — re-ingest your documents','warning'); }}]);
+    return false;
+  }
+  if(!res.ok){
+    let msg='HTTP '+res.status;
+    try{ const j=await res.json(); msg=(typeof j.detail==='string'?j.detail:j.detail?.message)||msg; }catch(e){}
+    toast('Settings NOT saved: '+msg,'error');
+    return false;
+  }
   try{S.config=await fetch('/api/config').then(r=>r.json());}catch(e){S.config=cfg;}
   applyTheme(S.config.ui?.theme||cfg.ui.theme);closeSettings();toast('Settings saved','success');
+  return true;
 }
 
 function exportConfig(){window.location.href='/api/config/export';}
@@ -5256,7 +5760,11 @@ function toggleRawMd(id){
 }
 
 // ── Utilities ─────────────────────────────────────────────────────────────────
-function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+// Escapes BOTH quote characters. Single quotes matter because escHtml output is
+// interpolated into onclick="fn('…')" attributes in several places — leaving ' raw
+// let an attacker-controlled value (a RAG instance name, a session id arriving from
+// /api/sessions) break out of the string literal and execute arbitrary JS.
+function escHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');}
 function getVal(id){return document.getElementById(id)?.value||'';}
 function setVal(id,v){const el=document.getElementById(id);if(el)el.value=v;}
 function getCheck(id){return document.getElementById(id)?.checked||false;}
@@ -5264,12 +5772,16 @@ function setCheck(id,v){const el=document.getElementById(id);if(el)el.checked=v;
 function setRange(id,v){
   const el=document.getElementById(id);if(!el)return;
   el.value=v;
-  el.nextElementSibling.textContent=id.includes('threshold')?parseFloat(v).toFixed(2):v;
+  // Read the value BACK: a range input snaps to its step, so showing the value we
+  // asked for would display a number the control does not hold and will not post.
+  const actual=el.value;
+  el.nextElementSibling.textContent=id.includes('threshold')?parseFloat(actual).toFixed(2):actual;
 }
 function toast(msg,type='info'){
   const c=document.getElementById('toast-container');
   const t=document.createElement('div');t.className=`toast ${type}`;
-  t.innerHTML=`<span>${{success:'✓',error:'✗',info:'ℹ'}[type]||'ℹ'}</span> ${msg}`;
+  // escHtml: toast is fed crawled URLs, filenames and raw server errors.
+  t.innerHTML=`<span>${{success:'✓',error:'✗',info:'ℹ',warning:'⚠'}[type]||'ℹ'}</span> ${escHtml(msg)}`;
   c.appendChild(t);
   setTimeout(()=>{t.style.animation='toastOut .3s ease forwards';setTimeout(()=>t.remove(),300);},3000);
 }

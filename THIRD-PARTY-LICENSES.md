@@ -65,7 +65,7 @@ These are **not** bundled with RediRecall or included in the Docker image. `redi
 
 - **Redis 8** — tri-licensed RSALv2 / SSPLv1 / **AGPLv3**; RediRecall assumes the AGPLv3 option. Redis runs as a **separate process/service** reached over the network, not linked into this program.
 - **OpenStreetMap** — map tiles for the `map` block. Map data © OpenStreetMap contributors, licensed under the [ODbL](https://opendatacommons.org/licenses/odbl/); attribution is displayed on every rendered map. This is the only render type that contacts a third party.
-- **LLM providers** (Ollama, Anthropic, OpenAI, Qwen, Groq, Gemini) are contacted over their APIs. Calling a network API creates no license obligation for RediRecall; their SDKs are MIT/Apache-2.0 and listed above.
+- **LLM providers** (Ollama, Anthropic, OpenAI, Qwen, Mistral, Groq, Gemini) are contacted over their APIs. Calling a network API creates no license obligation for RediRecall; the client libraries are listed above — `anthropic` (MIT), `openai` (Apache-2.0, which also drives the OpenAI-compatible Qwen, Mistral and Groq endpoints) and `google-genai` (Apache-2.0). Ollama is reached over plain HTTP via `httpx` (BSD), with no vendor SDK.
 
 ## How this list was produced
 

@@ -57,9 +57,10 @@ Multiple Redis servers can be registered under custom names. Each RAG instance c
 Found in **Settings → RAG**.
 
 ### Chunk Size
-- **Default:** `512` words
-- **Range:** 64 – 2048 words (practical)
-- **What it does:** Controls the target size of each text chunk stored in the knowledge base. Text is split at sentence boundaries, so actual chunk sizes vary slightly.
+- **Default:** `180` words
+- **Range:** 64 – 2048 words (practical) — but see the model limit below
+- **What it does:** Controls the target size of each text chunk stored in the knowledge base. Text is split at sentence boundaries, so actual chunk sizes vary slightly. Content with no sentence punctuation (CSV rows, tables, code) is split on line boundaries instead, and no chunk may exceed twice this value.
+- **⚠️ Bounded by the embedding model.** Each model encodes at most a fixed number of tokens — `intfloat/multilingual-e5-small` handles **256 tokens ≈ 190 English words** — and silently truncates the rest. Text past the limit is still stored and shown to the model, but is **not in the vector**, so semantic search cannot find it. Raising this above the model's limit therefore *reduces* recall while appearing to add context. RediRecall warns in the log when the configured size exceeds the active model's limit, and lowers a saved value that is already over it.
 - **Smaller values (e.g. 128–256):**
   - More precise retrieval — each chunk covers a narrower topic
   - Higher storage requirements (more chunks)
@@ -69,16 +70,16 @@ Found in **Settings → RAG**.
   - More context per chunk — better for narrative or technical prose
   - Fewer chunks to store
   - May dilute the relevance score if the chunk covers multiple unrelated topics
-- **Rule of thumb:** Start at 512. If retrieval is returning chunks with only tangentially related content, reduce to 256.
+- **Rule of thumb:** Leave at 180 for `intfloat/multilingual-e5-small`. If you switch to a model with a larger context (e.g. `all-mpnet-base-v2`, 384 tokens), you can raise it proportionally.
 
 ### Chunk Overlap
-- **Default:** `64` words
+- **Default:** `32` words
 - **Range:** 0 – (chunk_size / 2)
 - **What it does:** The number of words at the end of one chunk that are repeated at the start of the next. This prevents answers from being cut off at chunk boundaries.
-- **Example:** With chunk_size=512 and overlap=64, chunk 2 starts with the last ~64 words of chunk 1. A question whose answer spans a chunk boundary can still retrieve both halves.
+- **Example:** With chunk_size=180 and overlap=32, chunk 2 starts with the last ~32 words of chunk 1. A question whose answer spans a chunk boundary can still retrieve both halves.
 - **0 overlap:** Maximum storage efficiency. Some answers near boundaries may be missed.
 - **Large overlap (128+):** Better boundary coverage at the cost of more storage and potential duplicate content in search results.
-- **Rule of thumb:** Keep at 64 unless you frequently see answers that seem truncated mid-sentence.
+- **Rule of thumb:** Keep at 32 unless you frequently see answers that seem truncated mid-sentence.
 
 ### Top-K
 - **Default:** `5`
@@ -94,15 +95,14 @@ Found in **Settings → RAG**.
 - **Rule of thumb:** 5 is a good default. Increase to 8–10 for research-style questions. Drop to 3 for fast, factual lookups.
 
 ### Similarity Threshold
-- **Default:** `0.75`
+- **Default:** `0.35`
 - **Range:** 0.0 – 1.0
-- **What it does:** The minimum cosine similarity score a chunk must achieve to be sent to the LLM. Chunks below this score are retrieved from Redis but discarded before prompt assembly.
-- **Cosine similarity scale:**
-  - `1.0` — identical vectors (exact paraphrase)
-  - `0.85+` — very strong semantic match
-  - `0.75` — good match (default sweet spot)
-  - `0.60` — weak match, likely topically related but not directly relevant
-  - `< 0.50` — probably noise
+- **What it does:** The minimum cosine similarity score a chunk must achieve to be sent to the LLM. Chunks below this score are retrieved from Redis but discarded before prompt assembly. Chunks that matched the keyword (BM25) half of hybrid search are exempt — they were selected lexically, so a cosine bar is the wrong gate for them.
+- **Cosine similarity scale — calibrate to your model.** The absolute numbers are much lower than intuition suggests. Measured with the default `intfloat/multilingual-e5-small` over a real documentation corpus, genuinely relevant question↔passage pairs score **0.35 – 0.75**, with a typical best match around **0.60**. Scores above 0.85 essentially mean near-duplicate text.
+  - `0.75+` — near-duplicate; almost nothing clears this in practice
+  - `0.50 – 0.70` — a normal good match
+  - `0.35` — weak but often still useful (default)
+  - `< 0.25` — probably noise
 - **Too high (e.g. 0.90):**
   - Only very close paraphrases of indexed content will retrieve chunks
   - High miss rate — many questions return no RAG context
@@ -111,7 +111,7 @@ Found in **Settings → RAG**.
   - Almost everything retrieves chunks
   - Risk of injecting irrelevant content into the prompt, degrading answer quality
   - May cause the model to "hallucinate" answers that blend relevant and irrelevant chunks
-- **Diagnosing:** Check **Settings → Analytics → RAG Performance**. If *Avg Best Raw* is above 0.60 but *Hit Rate* is below 50%, the threshold is too high. Lower it to 0.65–0.70.
+- **Diagnosing:** Check **Settings → Analytics → RAG Performance**. If *Avg Best Raw* is comfortably above the threshold but *Hit Rate* is low, the threshold is too high. A quick check: turn **Hybrid Search** off — if retrieval then returns nothing at all, the threshold is filtering out every vector match and hybrid search has been carrying retrieval on its own.
 
 ### Hybrid Search
 - **Default:** On
@@ -292,12 +292,12 @@ Found in **Settings → General**.
 - **`auto`:** Follows the operating system's dark/light mode preference.
 
 ### Embedding Model
-- **Default:** `all-MiniLM-L6-v2`
+- **Default:** `intfloat/multilingual-e5-small`
 - **Options:**
 
 | Model | Dimensions | Speed | Quality | Use case |
 |---|---|---|---|---|
-| `all-MiniLM-L6-v2` | 384 | Very fast | Good | General default |
+| `intfloat/multilingual-e5-small` | 384 | Very fast | Good | General default |
 | `all-mpnet-base-v2` | 768 | Moderate | Better | Higher accuracy |
 | `paraphrase-multilingual-MiniLM-L12-v2` | 384 | Fast | Good | Non-English content |
 | `BAAI/bge-base-en-v1.5` | 768 | Moderate | High | English, best quality |
