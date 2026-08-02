@@ -471,3 +471,33 @@ def test_unrecorded_provenance_is_not_a_mismatch(app_module, monkeypatch):
     m._emb_mismatch_warned.discard("probe")
     m.warn_if_vectors_are_from_another_model("probe", FakeRC())
     assert "probe" not in m._emb_mismatch_warned, "unrecorded provenance warned as a mismatch"
+
+
+# ── the console script must handle arguments, not start a server ─────────────
+
+def test_cli_help_exits_instead_of_starting_a_server():
+    """cli() ignored sys.argv entirely and went straight to uvicorn.run(), so
+    `redirecall --help` started a server and hung until CI's 25-minute job
+    timeout killed it. --port was silently discarded for the same reason."""
+    import subprocess, sys, pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    r = subprocess.run([sys.executable, "-c",
+                        "import sys; sys.argv=['redirecall','--help'];"
+                        "import redirecall.main as m; m.cli()"],
+                       cwd=root, capture_output=True, text=True, timeout=180)
+    assert r.returncode == 0, f"--help exited {r.returncode}"
+    assert "usage: redirecall" in r.stdout
+    assert "--port" in r.stdout and "--host" in r.stdout
+
+
+def test_cli_rejects_unknown_arguments():
+    """An unrecognised flag must fail loudly rather than be discarded and the
+    server started anyway."""
+    import subprocess, sys, pathlib
+    root = pathlib.Path(__file__).resolve().parents[1]
+    r = subprocess.run([sys.executable, "-c",
+                        "import sys; sys.argv=['redirecall','--bogus'];"
+                        "import redirecall.main as m; m.cli()"],
+                       cwd=root, capture_output=True, text=True, timeout=180)
+    assert r.returncode != 0
+    assert "unrecognized arguments" in r.stderr

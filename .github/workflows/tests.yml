@@ -51,6 +51,10 @@ jobs:
         run: python -m pytest tests/ -q --durations=10
 
       - name: Check the app imports and the CLI is wired
+        # Wrapped in `timeout`: cli() once ignored sys.argv and started a server
+        # on --help, which blocked this step for 22 minutes until the job-level
+        # timeout cancelled the whole run. A hang here must fail in seconds.
         run: |
-          python -c "import redirecall.main; print('import ok')"
-          redirecall --help > /dev/null && echo "cli ok"
+          timeout 60 python -c "import redirecall.main; print('import ok')"
+          timeout 60 redirecall --help > /dev/null && echo "cli ok"
+          timeout 60 redirecall --version

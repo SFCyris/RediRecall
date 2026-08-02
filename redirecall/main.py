@@ -7365,10 +7365,29 @@ def cli() -> None:
     127.0.0.1:8420). Bound to loopback by default — there is no built-in auth
     yet, so front it with a reverse proxy before exposing it to a network.
     """
+    import argparse
     import uvicorn
-    host = os.environ.get("REDIRECALL_HOST", "127.0.0.1")
-    port = int(os.environ.get("REDIRECALL_PORT", "8420"))
-    uvicorn.run(app, host=host, port=port)
+
+    # Parse BEFORE anything else: this function used to ignore sys.argv entirely
+    # and go straight to uvicorn.run(), so `redirecall --help` started a server
+    # and hung the terminal instead of printing help, and `--port` was silently
+    # discarded. Argument handling must never fall through to starting a server.
+    parser = argparse.ArgumentParser(
+        prog="redirecall",
+        description="Self-hosted retrieval-augmented chat over your own documents, "
+                    "backed by Redis vector search.",
+        epilog="Bound to loopback by default — there is no built-in auth, so front "
+               "it with a reverse proxy before exposing it to a network.",
+    )
+    parser.add_argument("--host", default=os.environ.get("REDIRECALL_HOST", "127.0.0.1"),
+                        help="interface to bind (env REDIRECALL_HOST, default 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("REDIRECALL_PORT", "8420")),
+                        help="port to listen on (env REDIRECALL_PORT, default 8420)")
+    parser.add_argument("--version", action="version",
+                        version=f"redirecall {__version__}")
+    args = parser.parse_args()
+
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
