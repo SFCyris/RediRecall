@@ -1,7 +1,7 @@
 [
  {
   "id": "M01_casesensitive_dropped",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "\"attrs\": {\"separator\": \"|\", \"case_sensitive\": True}},",
   "replace": "\"attrs\": {\"separator\": \"|\"}},",
   "defect": "#7 per-document delete casefolds again: report.pdf deletes Report.pdf",
@@ -9,39 +9,39 @@
  },
  {
   "id": "M02_fixed_temp_name",
-  "file": "redirecall/main.py",
-  "find": "    _fd, _tmp_name = tempfile.mkstemp(dir=str(CONFIG_PATH.parent),\n                                      prefix=f\".{CONFIG_PATH.name}.\", suffix=\".tmp\")\n    os.close(_fd)\n    tmp = Path(_tmp_name)",
-  "replace": "    tmp = CONFIG_PATH.parent / f\".{CONFIG_PATH.name}.tmp\"",
+  "file": "redirecall/config.py",
+  "find": "    _fd, _tmp_name = tempfile.mkstemp(dir=str(constants.CONFIG_PATH.parent),\n                                      prefix=f\".{constants.CONFIG_PATH.name}.\", suffix=\".tmp\")\n    os.close(_fd)\n    tmp = Path(_tmp_name)",
+  "replace": "    tmp = constants.CONFIG_PATH.parent / f\".{constants.CONFIG_PATH.name}.tmp\"",
   "defect": "#17 fixed temp filename: two processes splice one config file",
   "expect": "test_issue17_config_save_uses_a_unique_temp_file"
  },
  {
   "id": "M03_append_log_unguarded",
-  "file": "redirecall/main.py",
-  "find": "        try:\n            append_log({\n                \"ts\": datetime.now(timezone.utc).isoformat(),\n                \"instance\": instance, \"source\": source,\n                \"chunks\": -deleted, \"status\": \"deleted\",\n            })\n        except Exception as le:\n            log.warning(f\"delete succeeded but could not be logged: {le}\")",
-  "replace": "        append_log({\n            \"ts\": datetime.now(timezone.utc).isoformat(),\n            \"instance\": instance, \"source\": source,\n            \"chunks\": -deleted, \"status\": \"deleted\",\n        })",
+  "file": "redirecall/routes_sources.py",
+  "find": "        try:\n            config.append_log({\n                \"ts\": datetime.now(timezone.utc).isoformat(),\n                \"instance\": instance, \"source\": source,\n                \"chunks\": -deleted, \"status\": \"deleted\",\n            })\n        except Exception as le:\n            log.warning(f\"delete succeeded but could not be logged: {le}\")",
+  "replace": "        config.append_log({\n            \"ts\": datetime.now(timezone.utc).isoformat(),\n            \"instance\": instance, \"source\": source,\n            \"chunks\": -deleted, \"status\": \"deleted\",\n        })",
   "defect": "#13 a journalling failure turns a completed delete into 'Delete failed'",
   "expect": "test_issue13_log_failure_does_not_fail_the_delete"
  },
  {
   "id": "M04_delete_loop_unbounded",
-  "file": "redirecall/main.py",
-  "find": "        for _batch in range(_MAX_DELETE_BATCHES):",
-  "replace": "        while True:  # _MAX_DELETE_BATCHES",
+  "file": "redirecall/routes_sources.py",
+  "find": "        for _batch in range(rag._MAX_DELETE_BATCHES):",
+  "replace": "        while True:  # rag._MAX_DELETE_BATCHES",
   "defect": "#18 delete loop spins forever on an index entry that outlives its key",
   "expect": "test_issue18_delete_loop_is_bounded"
  },
  {
   "id": "M05_feedback_cap_not_applied",
-  "file": "redirecall/main.py",
-  "find": "        k: (v[:_MAX_FEEDBACK_FIELD] if isinstance(v, str) else v)",
+  "file": "redirecall/routes_misc.py",
+  "find": "        k: (v[:config._MAX_FEEDBACK_FIELD] if isinstance(v, str) else v)",
   "replace": "        k: v",
   "defect": "#9 unbounded POST body bloats the on-disk feedback store",
   "expect": "test_issue9_feedback_payload_is_size_capped"
  },
  {
   "id": "M06_lexical_floor_unused",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "        lex_floor = threshold * _LEXICAL_FLOOR_RATIO",
   "replace": "        lex_floor = 0.0  # _LEXICAL_FLOOR_RATIO",
   "defect": "the whole BM25 tail reaches the prompt again",
@@ -49,7 +49,7 @@
  },
  {
   "id": "M07_ef_runtime_dropped",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "            ef_runtime=_HNSW_EF_RUNTIME,\n",
   "replace": "",
   "defect": "EF_RUNTIME back to the RediSearch default of 10: recall@10 0.839",
@@ -57,23 +57,23 @@
  },
  {
   "id": "M08_query_embedded_as_passage",
-  "file": "redirecall/main.py",
-  "find": "    q_emb = query_vec if query_vec is not None else embed(query, is_query=True).astype(np.float32)",
-  "replace": "    q_emb = query_vec if query_vec is not None else embed(query).astype(np.float32)",
+  "file": "redirecall/rag.py",
+  "find": "    q_emb = query_vec if query_vec is not None else _ns_embeddings.embed(query, is_query=True).astype(np.float32)",
+  "replace": "    q_emb = query_vec if query_vec is not None else _ns_embeddings.embed(query).astype(np.float32)",
   "defect": "search_rag embeds the question with the passage prefix",
   "expect": "test_search_embeds_the_query_as_a_query"
  },
  {
   "id": "M09_upload_cap_removed",
-  "file": "redirecall/main.py",
-  "find": "        if len(blob) > _MAX_UPLOAD_BYTES:",
-  "replace": "        if False:  # _MAX_UPLOAD_BYTES",
+  "file": "redirecall/routes_ingestion.py",
+  "find": "        if len(blob) > config._MAX_UPLOAD_BYTES:",
+  "replace": "        if False:  # config._MAX_UPLOAD_BYTES",
   "defect": "#24 unbounded upload read into memory",
   "expect": "test_issue24_upload_size_is_capped"
  },
  {
   "id": "M10_dedup_global_again",
-  "file": "redirecall/main.py",
+  "file": "redirecall/ingest.py",
   "find": "        hashlib.sha256(f\"{source}\\x00{' '.join(c.lower().split())}\".encode()).hexdigest()",
   "replace": "        hashlib.sha256(f\"{' '.join(c.lower().split())}\".encode()).hexdigest()",
   "defect": "#8 global content hash: deleting doc A removes content doc B needs",
@@ -81,7 +81,7 @@
  },
  {
   "id": "M11_index_lock_removed",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "    with _index_ensure_locks.setdefault(instance, threading.Lock()):",
   "replace": "    if True:  # serialisation removed",
   "defect": "the 57k-vector migration runs twice concurrently (lock dropped at the call site)",
@@ -89,23 +89,23 @@
  },
  {
   "id": "M12_e5_prefix_not_applied",
-  "file": "redirecall/main.py",
+  "file": "redirecall/embeddings.py",
   "find": "    prefix = spec[\"query_prefix\"] if is_query else spec[\"passage_prefix\"]",
   "replace": "    prefix = \"\"  # query_prefix / passage_prefix",
-  "defect": "E5 asymmetric prefixes silently dropped \u2014 retrieval degrades",
+  "defect": "E5 asymmetric prefixes silently dropped — retrieval degrades",
   "expect": "test_e5_prefixes_are_asymmetric_and_applied"
  },
  {
   "id": "M13_emb_model_not_stored",
-  "file": "redirecall/main.py",
-  "find": "            \"emb_model\":   str(embedding_id_for()),",
+  "file": "redirecall/rag.py",
+  "find": "            \"emb_model\":   str(_ns_embeddings.embedding_id_for()),",
   "replace": "",
   "defect": "chunks stop recording which model produced their vector",
   "expect": "test_chunks_record_their_embedding_model"
  },
  {
   "id": "M14_mismatch_warner_gutted",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "def warn_if_vectors_are_from_another_model(",
   "replace": "def warn_if_vectors_are_from_another_model(*_a, **_k):\n    return\n\n\ndef _dead_warn_if_vectors_are_from_another_model(",
   "defect": "same-width model swap goes undetected: confident nonsense",
@@ -113,7 +113,7 @@
  },
  {
   "id": "M15_doc_id_indexed_again",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "            {\"name\": \"ingested_at\", \"type\": \"numeric\", \"attrs\": {\"sortable\": True}},",
   "replace": "            {\"name\": \"doc_id\", \"type\": \"tag\"},\n            {\"name\": \"pos\", \"type\": \"numeric\", \"attrs\": {\"sortable\": True}},\n            {\"name\": \"ingested_at\", \"type\": \"numeric\", \"attrs\": {\"sortable\": True}},",
   "defect": "#16 unused fields force a full DROPINDEX + backfill",
@@ -125,7 +125,7 @@
   "find": "      const el=(await _vizInst()).renderSVGElement(src);",
   "replace": "      const el=new Viz().renderSVGElement(src);",
   "defect": "the exact API break the 1.5.0 upgrade was about: v3 has no `new Viz()`",
-  "expect": "NOTHING \u2014 the dot lane has no test"
+  "expect": "NOTHING — the dot lane has no test"
  },
  {
   "id": "M17_viz_cdn_404",
@@ -178,7 +178,7 @@
  {
   "id": "M23_numeric_coercion_broken",
   "file": "redirecall/index.html",
-  "find": "const _RR_NUM=/^\\s*-?[$\u20ac\u00a3]?\\s*-?[\\d,.]+\\s*%?\\s*$/;",
+  "find": "const _RR_NUM=/^\\s*-?[$€£]?\\s*-?[\\d,.]+\\s*%?\\s*$/;",
   "replace": "const _RR_NUM=/^(?!)/;",
   "defect": "table sort falls back to lexical: '120' < '43', '$1,200.50' < '$980.00'",
   "expect": "test_table_sort_coerces_values_by_type"
@@ -194,8 +194,8 @@
  {
   "id": "M25_pendingRegen_leaks",
   "file": "redirecall/index.html",
-  "find": "  if(!el){ _pendingRegen=null; return; }   // no target left \u2014 the regen is void",
-  "replace": "  if(!el){ return; }   // no target left \u2014 the regen is void",
+  "find": "  if(!el){ _pendingRegen=null; return; }   // no target left — the regen is void",
+  "replace": "  if(!el){ return; }   // no target left — the regen is void",
   "defect": "#10 a stale version history is grafted onto an unrelated answer",
   "expect": "test_issue10_pending_regen_cleared_on_every_exit"
  },
@@ -210,8 +210,8 @@
  {
   "id": "M27_modal_title_double_escaped",
   "file": "redirecall/index.html",
-  "find": "showModal(`Documents in \u201c${r.name}\u201d`",
-  "replace": "showModal(`Documents in \u201c${escHtml(r.name)}\u201d`",
+  "find": "showModal(`Documents in “${r.name}”`",
+  "replace": "showModal(`Documents in “${escHtml(r.name)}”`",
   "defect": "#15 an instance called A&B renders as A&amp;B",
   "expect": "test_issue15_modal_title_is_not_double_escaped"
  },
@@ -228,7 +228,7 @@
   "file": "redirecall/index.html",
   "find": "_sizeFromViewBox(out)",
   "replace": "void 0 /*_sizeFromViewBox(out)*/",
-  "defect": "mermaid timeline lays out 0x0 \u2014 the card looks empty",
+  "defect": "mermaid timeline lays out 0x0 — the card looks empty",
   "expect": "test_viewbox_sizing_helper_is_wired"
  },
  {
@@ -241,10 +241,10 @@
  },
  {
   "id": "M31_csp_soundfont_blocked",
-  "file": "redirecall/main.py",
+  "file": "redirecall/appcore.py",
   "find": "    \"connect-src 'self' https://paulrosen.github.io; \"",
   "replace": "    \"connect-src 'self'; \"",
-  "defect": "P01: host dropped from the connect-src DIRECTIVE (comment kept) \u2014 abc playback fails silently",
+  "defect": "P01: host dropped from the connect-src DIRECTIVE (comment kept) — abc playback fails silently",
   "expect": "test_abc_playback_host_is_allowed_by_csp",
   "sites": 1
  },
@@ -258,7 +258,7 @@
  },
  {
   "id": "M33_tag_escape_neutered",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "_TAG_ESCAPE_RE = re.compile",
   "replace": "_TAG_ESCAPE_RE_REAL = re.compile",
   "defect": "an unescaped '|' turns one source filter into an OR across every chunk",
@@ -266,7 +266,7 @@
  },
  {
   "id": "M34_chunk_guard_overcuts",
-  "file": "redirecall/main.py",
+  "file": "redirecall/textutil.py",
   "find": "def chunk_text(",
   "replace": "def chunk_text(text, size=400, overlap=80, **_kw):\n    words = text.split()\n    step = max(1, (size - overlap) // 3)\n    return [\" \".join(words[i:i + size // 3]) for i in range(0, len(words), step)] or [text]\n\n\ndef _dead_chunk_text(",
   "defect": "#5 the token guard shreds the configured chunk size to ~40%",
@@ -274,15 +274,15 @@
  },
  {
   "id": "M35_feedback_limit_bypass",
-  "file": "redirecall/main.py",
-  "find": "    n = max(1, min(int(limit or 0) or 1, _MAX_FEEDBACK))",
+  "file": "redirecall/routes_misc.py",
+  "find": "    n = max(1, min(int(limit or 0) or 1, config._MAX_FEEDBACK))",
   "replace": "    n = max(0, int(limit or 0))",
   "defect": "#9 limit<=0 leaks the whole feedback store",
   "expect": "test_issue9_feedback_limit_cannot_be_bypassed"
  },
  {
   "id": "M36_sessions_unbounded",
-  "file": "redirecall/main.py",
+  "file": "redirecall/state.py",
   "find": "_MAX_LIVE_SESSIONS",
   "replace": "_MAX_LIVE_SESSIONS_UNUSED",
   "defect": "#25 every conversation ever opened stays resident",
@@ -290,18 +290,18 @@
  },
  {
   "id": "M37_vector_field_hardcoded",
-  "file": "redirecall/main.py",
-  "find": "            {\"name\": vector_field_for(), \"type\": \"vector\",",
+  "file": "redirecall/rag.py",
+  "find": "            {\"name\": _ns_embeddings.vector_field_for(), \"type\": \"vector\",",
   "replace": "            {\"name\": \"embedding\", \"type\": \"vector\",",
   "defect": "#29 the schema hardcodes 'embedding' while the helper advertises embedding_384",
   "expect": "test_issue29_vector_field_matches_the_helper"
  },
  {
   "id": "M38_migration_noop",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "def _migrate_vector_batch(",
   "replace": "def _migrate_vector_batch(*_a, **_k):\n    return 0\n\n\ndef _dead_migrate_vector_batch(",
-  "defect": "#29 legacy vectors stay under a field nothing writes \u2014 searchable by nothing",
+  "defect": "#29 legacy vectors stay under a field nothing writes — searchable by nothing",
   "expect": "test_issue29_migration_moves_legacy_vectors"
  },
  {
@@ -314,7 +314,7 @@
  },
  {
   "id": "M40_crawl_reaper_noop",
-  "file": "redirecall/main.py",
+  "file": "redirecall/state.py",
   "find": "def reap_finished_crawls(",
   "replace": "def reap_finished_crawls(*_a, **_k):\n    return 0\n\n\ndef _dead_reap_finished_crawls(",
   "defect": "#25 every crawl leaks one task and one gate",
@@ -322,7 +322,7 @@
  },
  {
   "id": "M41_percent_indexed_dropped",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "percent_indexed",
   "replace": "pct_indexed",
   "defect": "#11 a rebuild in progress is reported as a broken index",
@@ -330,7 +330,7 @@
  },
  {
   "id": "M42_config_quarantines_unreadable",
-  "file": "redirecall/main.py",
+  "file": "redirecall/config.py",
   "find": "        except OSError as e:",
   "replace": "        except _NeverRaisedOSError as e:",
   "defect": "a PermissionError quarantines (destroys) a perfectly good config",
@@ -338,7 +338,7 @@
  },
  {
   "id": "M43_default_model_reverted",
-  "file": "redirecall/main.py",
+  "file": "redirecall/constants.py",
   "find": "\"model\": \"intfloat/multilingual-e5-small\"",
   "replace": "\"model\": \"all-MiniLM-L6-v2\"",
   "defect": "the legacy default tokenises Thai/Chinese as [UNK]",
@@ -346,7 +346,7 @@
  },
  {
   "id": "M44_cache_scope_order_sensitive",
-  "file": "redirecall/main.py",
+  "file": "redirecall/cache.py",
   "find": "def _cache_scope(",
   "replace": "def _cache_scope(names):\n    return \"|\".join(names)\n\n\ndef _dead_cache_scope(",
   "defect": "instance order becomes part of the corpus identity; disabled instances cached",
@@ -354,7 +354,7 @@
  },
  {
   "id": "M45_lane_doc_removed",
-  "file": "redirecall/main.py",
+  "file": "redirecall/constants.py",
   "find": "```geojson",
   "replace": "```geoj",
   "defect": "a lane the model is never told about is dead code",
@@ -365,7 +365,7 @@
   "file": "redirecall/index.html",
   "find": "{gantt:{useWidth:Math.max(520,Math.round(out.clientWidth||540)),useMaxWidth:false,",
   "replace": "{gantt:{useMaxWidth:true,",
-  "defect": "mermaid measures its detached container as 0 \u2192 viewBox='0 0 0 h'",
+  "defect": "mermaid measures its detached container as 0 → viewBox='0 0 0 h'",
   "expect": "test_gantt_sets_a_tick_interval"
  },
  {
@@ -394,7 +394,7 @@
  },
  {
   "id": "M50_crawl_pause_route_gone",
-  "file": "redirecall/main.py",
+  "file": "redirecall/routes_ingestion.py",
   "find": "\"/api/crawl/pause\"",
   "replace": "\"/api/crawl/pause_DISABLED\"",
   "defect": "ingestion can only be cancelled, discarding the queue and visited set",
@@ -434,7 +434,7 @@
  },
  {
   "id": "M56_schema_version_reverted",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "_RAG_SCHEMA_VERSION = 5",
   "replace": "_RAG_SCHEMA_VERSION = 4",
   "defect": "probe: is the schema-version assertion a floor or a rubber stamp?",
@@ -453,7 +453,7 @@
   "file": "redirecall/index.html",
   "find": "  document.getElementById('modal-title').textContent=title;",
   "replace": "  document.getElementById('modal-title').innerHTML=title;",
-  "defect": "#15 inverted: the title is now an XSS sink and NEEDS escaping \u2014 the test forbids it",
+  "defect": "#15 inverted: the title is now an XSS sink and NEEDS escaping — the test forbids it",
   "expect": "test_issue15_modal_title_is_not_double_escaped (asserts the wrong invariant)"
  },
  {
@@ -472,7 +472,7 @@
  },
  {
   "id": "M61_emb_guard_line_kept_body_gutted",
-  "file": "redirecall/main.py",
+  "file": "redirecall/routes_settings.py",
   "find": "    if new_model and new_model != old_model:",
   "replace": "    if new_model and new_model != old_model and False:",
   "defect": "the model-change guard never fires; the exact source line the test counts is intact",
@@ -480,7 +480,7 @@
  },
  {
   "id": "M62_pause_never_clears_the_gate",
-  "file": "redirecall/main.py",
+  "file": "redirecall/routes_ingestion.py",
   "find": "    if paused:\n        gate.clear()\n    else:\n        gate.set()",
   "replace": "    if paused:\n        pass          # gate.clear() removed\n    else:\n        gate.set()",
   "defect": "P08: pause returns ok but never clears the gate; the worker never blocks",
@@ -497,7 +497,7 @@
  },
  {
   "id": "M64_feedback_aliases_dropped",
-  "file": "redirecall/main.py",
+  "file": "redirecall/routes_misc.py",
   "find": "    _ALIASES = {\"down\": {\"-1\"}, \"up\": {\"1\"}, \"negative\": {\"-1\"}, \"positive\": {\"1\"}}",
   "replace": "    _ALIASES = {}",
   "defect": "#12 ?value=down matches nothing again",
@@ -505,15 +505,15 @@
  },
  {
   "id": "M65_vector_field_keyed_by_model",
-  "file": "redirecall/main.py",
+  "file": "redirecall/embeddings.py",
   "find": "    dims = embedding_spec(repo).get(\"dims\") or 0\n    return f\"embedding_{dims}\" if dims else \"embedding\"",
-  "replace": "    return \"embedding_\" + (repo or _config.get(\"embedding\", {}).get(\"model\", \"\")).split(\"/\")[-1].replace(\"-\", \"_\")",
+  "replace": "    return \"embedding_\" + (repo or state._config.get(\"embedding\", {}).get(\"model\", \"\")).split(\"/\")[-1].replace(\"-\", \"_\")",
   "defect": "one vector field per MODEL, so two 384d models cannot share an index",
   "expect": "test_vector_field_is_keyed_by_width_not_model"
  },
  {
   "id": "M66_unknown_model_raises",
-  "file": "redirecall/main.py",
+  "file": "redirecall/embeddings.py",
   "find": "    return {\"repo\": repo or \"\", \"dims\": 0, \"seq\": 256, \"label\": repo or \"custom\",\n            \"query_prefix\": \"\", \"passage_prefix\": \"\", \"multilingual\": False}",
   "replace": "    raise KeyError(repo)",
   "defect": "a hand-edited config naming an unlisted model crashes the registry",
@@ -521,15 +521,15 @@
  },
  {
   "id": "M67_registry_id_renumbered",
-  "file": "redirecall/main.py",
+  "file": "redirecall/embeddings.py",
   "find": "    0: {\n        \"repo\": \"all-MiniLM-L6-v2\", \"dims\": 384, \"seq\": 256,",
   "replace": "    9: {\n        \"repo\": \"all-MiniLM-L6-v2\", \"dims\": 384, \"seq\": 256,",
-  "defect": "registry id 0 renumbered \u2014 every vector already in Redis is re-labelled",
+  "defect": "registry id 0 renumbered — every vector already in Redis is re-labelled",
   "expect": "test_registry_ids_are_a_stable_contract"
  },
  {
   "id": "M68_disabled_instance_still_scoped",
-  "file": "redirecall/main.py",
+  "file": "redirecall/cache.py",
   "find": "            if (meta or {}).get(\"enabled\", True):\n                out.append(name)",
   "replace": "            out.append(name)",
   "defect": "an answer produced with an instance off replays once it is back on",
@@ -537,8 +537,8 @@
  },
  {
   "id": "M69_count_tokens_heuristic_only",
-  "file": "redirecall/main.py",
-  "find": "        tok = getattr(get_embed_model(), \"tokenizer\", None)",
+  "file": "redirecall/textutil.py",
+  "find": "        tok = getattr(embeddings.get_embed_model(), \"tokenizer\", None)",
   "replace": "        tok = None",
   "defect": "count_tokens falls back to words*1.3: a 200 KB run counts as 3",
   "expect": "test_long_runs_do_not_collapse_to_a_single_unk / test_token_guard_holds_across_shapes"
@@ -553,7 +553,7 @@
  },
  {
   "id": "M71_network_lane_undocumented",
-  "file": "redirecall/main.py",
+  "file": "redirecall/constants.py",
   "find": "```network",
   "replace": "```netwrk",
   "defect": "the model is never told the network lane exists",
@@ -561,7 +561,7 @@
  },
  {
   "id": "M72_empty_instance_not_memoised",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "_dim_mismatch_warned.add",
   "replace": "_dim_mismatch_warned.discard",
   "defect": "an empty instance re-scans the whole keyspace on every query",
@@ -569,7 +569,7 @@
  },
  {
   "id": "M73_overlap_never_carried",
-  "file": "redirecall/main.py",
+  "file": "redirecall/textutil.py",
   "find": "        if overlap == 0 or j >= len(sentences):",
   "replace": "        if True or overlap == 0 or j >= len(sentences):",
   "defect": "#5 adjacent chunks stop sharing context: zero-overlap boundaries back to 89%",
@@ -577,18 +577,18 @@
  },
  {
   "id": "M74_upload_written_before_the_cap_check",
-  "file": "redirecall/main.py",
-  "find": "        blob = await f.read()\n        if len(blob) > _MAX_UPLOAD_BYTES:",
-  "replace": "        blob = await f.read()\n        dest.write_bytes(blob)\n        if len(blob) > _MAX_UPLOAD_BYTES:",
-  "defect": "#24 the oversized body is written to disk before the 413 \u2014 the cap protects nothing",
+  "file": "redirecall/routes_ingestion.py",
+  "find": "        blob = await f.read()\n        if len(blob) > config._MAX_UPLOAD_BYTES:",
+  "replace": "        blob = await f.read()\n        dest.write_bytes(blob)\n        if len(blob) > config._MAX_UPLOAD_BYTES:",
+  "defect": "#24 the oversized body is written to disk before the 413 — the cap protects nothing",
   "expect": "test_issue24_upload_size_is_capped"
  },
  {
   "id": "M75_e5_query_prefix_used_for_passages",
-  "file": "redirecall/main.py",
+  "file": "redirecall/embeddings.py",
   "find": "    prefix = spec[\"query_prefix\"] if is_query else spec[\"passage_prefix\"]",
   "replace": "    prefix = spec[\"query_prefix\"]",
-  "defect": "E5 asymmetry inverted: stored chunks get 'query: ' \u2014 silently degraded retrieval",
+  "defect": "E5 asymmetry inverted: stored chunks get 'query: ' — silently degraded retrieval",
   "expect": "test_e5_prefixes_are_asymmetric_and_applied"
  },
  {
@@ -601,16 +601,16 @@
  },
  {
   "id": "M77_feedback_cap_only_on_one_field",
-  "file": "redirecall/main.py",
-  "find": "        k: (v[:_MAX_FEEDBACK_FIELD] if isinstance(v, str) else v)",
-  "replace": "        k: (v[:_MAX_FEEDBACK_FIELD] if k == \"comment\" and isinstance(v, str) else v)",
+  "file": "redirecall/routes_misc.py",
+  "find": "        k: (v[:config._MAX_FEEDBACK_FIELD] if isinstance(v, str) else v)",
+  "replace": "        k: (v[:config._MAX_FEEDBACK_FIELD] if k == \"comment\" and isinstance(v, str) else v)",
   "defect": "#9 only `comment` is capped; the answer body still bloats the store unbounded",
   "expect": "test_issue9_feedback_payload_is_size_capped"
  },
  {
   "id": "M78_dot_lane_label_lost",
   "file": "redirecall/index.html",
-  "find": "    label:'\u25c8 Graph',",
+  "find": "    label:'◈ Graph',",
   "replace": "",
   "defect": "the dot card renders with an `undefined` header and no maximise affordance",
   "expect": "test_every_lane_has_a_callable_draw[dot]"
@@ -618,39 +618,39 @@
  {
   "id": "M79_gantt_lane_unregistered",
   "file": "redirecall/index.html",
-  "find": "  gantt:{\n    label:'\ud83d\udcc5 Gantt',",
-  "replace": "  ganttX:{\n    label:'\ud83d\udcc5 Gantt',",
-  "defect": "```gantt is advertised to the model but not in RICH_LANES \u2014 it renders as raw text",
+  "find": "  gantt:{\n    label:'📅 Gantt',",
+  "replace": "  ganttX:{\n    label:'📅 Gantt',",
+  "defect": "```gantt is advertised to the model but not in RICH_LANES — it renders as raw text",
   "expect": "test_new_lane_is_registered[gantt]"
  },
  {
   "id": "M80_network_lane_unregistered",
   "file": "redirecall/index.html",
-  "find": "  network:{\n    label:'\ud83d\udd78 Network', fixed:'420px',",
-  "replace": "  networkX:{\n    label:'\ud83d\udd78 Network', fixed:'420px',",
-  "defect": "```network advertised but unregistered \u2014 the user sees raw JSON",
+  "find": "  network:{\n    label:'🕸 Network', fixed:'420px',",
+  "replace": "  networkX:{\n    label:'🕸 Network', fixed:'420px',",
+  "defect": "```network advertised but unregistered — the user sees raw JSON",
   "expect": "test_new_lane_is_registered[network]"
  },
  {
   "id": "M81_gantt_doc_removed",
-  "file": "redirecall/main.py",
-  "find": "- ```gantt \u2014 a project schedule.",
-  "replace": "- gantt \u2014 a project schedule.",
-  "defect": "the gantt lane exists but the model is never told about it \u2014 dead code",
+  "file": "redirecall/constants.py",
+  "find": "- ```gantt — a project schedule.",
+  "replace": "- gantt — a project schedule.",
+  "defect": "the gantt lane exists but the model is never told about it — dead code",
   "expect": "test_new_lane_is_documented_for_the_model[gantt]"
  },
  {
   "id": "M82_timeline_doc_removed",
-  "file": "redirecall/main.py",
-  "find": "- ```timeline \u2014 a sequence of dated events.",
-  "replace": "- timeline \u2014 a sequence of dated events.",
-  "defect": "the timeline lane exists but the model is never told about it \u2014 dead code",
+  "file": "redirecall/constants.py",
+  "find": "- ```timeline — a sequence of dated events.",
+  "replace": "- timeline — a sequence of dated events.",
+  "defect": "the timeline lane exists but the model is never told about it — dead code",
   "expect": "test_new_lane_is_documented_for_the_model[timeline]"
  },
  {
   "id": "M83_chart_lane_label_lost",
   "file": "redirecall/index.html",
-  "find": "  chart:{\n    label:'\ud83d\udcca Chart', fixed:'340px',",
+  "find": "  chart:{\n    label:'📊 Chart', fixed:'340px',",
   "replace": "  chart:{\n    fixed:'340px',",
   "defect": "the chart card renders with an `undefined` header and no maximise affordance",
   "expect": "test_every_lane_has_a_callable_draw[chart]"
@@ -660,7 +660,7 @@
   "file": "redirecall/index.html",
   "find": "      const limits={x:{minRange:_cat?2:_floor(_span(p=>_pt(p)?p.x:NaN))},\n                    y:{minRange:_floor(_span(p=>_pt(p)?p.y:p))}};",
   "replace": "      const limits={x:{minRange:1e-9},y:{minRange:1e-9}};",
-  "defect": "A1 zoom trap: a token minRange is no limit \u2014 six ctrl+wheel notches take a five-label x axis to [2,2], zero width, and a linear axis 9 orders below its data",
+  "defect": "A1 zoom trap: a token minRange is no limit — six ctrl+wheel notches take a five-label x axis to [2,2], zero width, and a linear axis 9 orders below its data",
   "expect": "test_issueA1_ctrl_wheel_cannot_collapse_the_category_axis"
  },
  {
@@ -668,7 +668,7 @@
   "file": "redirecall/index.html",
   "find": "mode:'xy',onZoom:showReset},",
   "replace": "mode:'xy'},",
-  "defect": "A1: nothing unhides the reset button after a wheel zoom \u2014 offsetHeight 0, a real click times out, the zoom is unrecoverable without a page reload",
+  "defect": "A1: nothing unhides the reset button after a wheel zoom — offsetHeight 0, a real click times out, the zoom is unrecoverable without a page reload",
   "expect": "test_issueA1_reset_button_becomes_visible_and_clickable_after_a_wheel_zoom"
  },
  {
@@ -684,7 +684,7 @@
   "file": "redirecall/index.html",
   "find": "try{ inst?.obj?.resetZoom?.(); }catch(e){}",
   "replace": "try{ void inst; }catch(e){}",
-  "defect": "A1: the reset button hides itself but never restores the axes \u2014 the visible control is a no-op",
+  "defect": "A1: the reset button hides itself but never restores the axes — the visible control is a no-op",
   "expect": "test_issueA1_reset_restores_the_original_range"
  },
  {
@@ -692,7 +692,7 @@
   "file": "redirecall/index.html",
   "find": "    if(labels.length){",
   "replace": "    if(true){",
-  "defect": "A2: forcing the data table down the labels path (the per-point else branch made unreachable) rebuilds rows from data.labels, which scatter and bubble do not have \u2014 the shipped defect, measured rows: []; the exact inverse of MA2b",
+  "defect": "A2: forcing the data table down the labels path (the per-point else branch made unreachable) rebuilds rows from data.labels, which scatter and bubble do not have — the shipped defect, measured rows: []; the exact inverse of MA2b",
   "expect": "test_issueA2_scatter_data_table_lists_every_point"
  },
  {
@@ -708,7 +708,7 @@
   "file": "redirecall/index.html",
   "find": "      const hasR=sets.some(s=>pts(s).some(p=>p&&typeof p==='object'&&p.r!=null));",
   "replace": "      const hasR=false;",
-  "defect": "A2: the bubble radius column is dropped \u2014 hasR forced false, so the 'r' dimension (the only place a bubble point's size is written down) never reaches the table head or rows",
+  "defect": "A2: the bubble radius column is dropped — hasR forced false, so the 'r' dimension (the only place a bubble point's size is written down) never reaches the table head or rows",
   "expect": "test_issueA2_bubble_data_table_carries_the_radius"
  },
  {
@@ -724,7 +724,7 @@
   "file": "redirecall/index.html",
   "find": "((?:\\\\[^\\n]|[^\\\\$\\n])*?(?:\\\\[^\\s\\n]|[^\\\\\\s$\\n]))",
   "replace": "((?:\\\\[^\\n]|[^\\\\$\\n])+?)",
-  "defect": "B1: currency + math in one line ('$20 ... $e$') corrupts the sentence \u2014 the currency $ pairs with the math $ (data-tex='20 if the error')",
+  "defect": "B1: currency + math in one line ('$20 ... $e$') corrupts the sentence — the currency $ pairs with the math $ (data-tex='20 if the error')",
   "expect": "test_issue_b1_currency_then_math_not_corrupted"
  },
  {
@@ -748,15 +748,15 @@
   "file": "redirecall/index.html",
   "find": "if(ts && ts.some(t=>t.type==='rrMath')){",
   "replace": "if(false && ts && ts.some(t=>t.type==='rrMath')){",
-  "defect": "B3: $x^2$ in an image alt becomes an rr-math <span> rendered into the alt attribute (card reads \ud83d\uddbc <SPAN CLASS=)",
+  "defect": "B3: $x^2$ in an image alt becomes an rr-math <span> rendered into the alt attribute (card reads 🖼 <SPAN CLASS=)",
   "expect": "test_issue_b3_image_alt_math_is_literal_not_a_span"
  },
  {
   "id": "M88_math_preextracted_sentinel_leaks_into_url",
   "file": "redirecall/index.html",
   "find": "  _rrMathFinalize=!!opts.math;",
-  "replace": "  _rrMathFinalize=!!opts.math; text=text.replace(/\\$([^$\\n]+?)\\$/g,(m,t)=>'\ue000'+t+'\ue001');",
-  "defect": "B3: $ inside a link/image URL pre-extracted to a PUA sentinel that marked encodeURI's into %EE%80%80\u2026, a dead link",
+  "replace": "  _rrMathFinalize=!!opts.math; text=text.replace(/\\$([^$\\n]+?)\\$/g,(m,t)=>''+t+'');",
+  "defect": "B3: $ inside a link/image URL pre-extracted to a PUA sentinel that marked encodeURI's into %EE%80%80…, a dead link",
   "expect": "test_issue_b3_href_dollar_stays_literal_not_a_dead_link"
  },
  {
@@ -788,7 +788,7 @@
   "file": "redirecall/index.html",
   "find": "            else if(/^simplify$/i.test(op))   b.textContent=_solveSimplify(expr);",
   "replace": "            else if(/^simplify$/i.test(op))   b.textContent=math.simplify(expr).toString();",
-  "defect": "B6 simplify:(x^2-1)/(x-1) comes back unchanged \u2014 the documented main.py:304 example is a no-op",
+  "defect": "B6 simplify:(x^2-1)/(x-1) comes back unchanged — the documented main.py:304 example is a no-op",
   "expect": "test_issue_b6_simplify_cancels_the_documented_example"
  },
  {
@@ -796,7 +796,7 @@
   "file": "redirecall/index.html",
   "find": "            else if(/^expand$/i.test(op))     b.textContent=_solveExpand(expr);",
   "replace": "            else if(/^expand$/i.test(op))     b.textContent=math.simplify(expr,{},{exactFractions:false}).toString();",
-  "defect": "B6 expand:(x+1)^2 never expands \u2014 {} is read by mathjs as the scope slot, so it returns the input for every case",
+  "defect": "B6 expand:(x+1)^2 never expands — {} is read by mathjs as the scope slot, so it returns the input for every case",
   "expect": "test_issue_b6_expand_binomial_square"
  },
  {
@@ -828,7 +828,7 @@
   "file": "redirecall/index.html",
   "find": "  const secs = synth && typeof synth.duration==='number' ? synth.duration : 0;",
   "replace": "  const secs = 0;",
-  "defect": "B8 the reset delay is computed from a zero duration, so ms=0 and the timer never fires \u2014 the Play button stays 'Stop' forever",
+  "defect": "B8 the reset delay is computed from a zero duration, so ms=0 and the timer never fires — the Play button stays 'Stop' forever",
   "expect": "test_issue_b8_abc_reset_timer_gets_a_positive_duration"
  },
  {
@@ -841,7 +841,7 @@
  },
  {
   "id": "M105_csp_drops_jsdelivr",
-  "file": "redirecall/main.py",
+  "file": "redirecall/appcore.py",
   "find": "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; ",
   "replace": "https://cdnjs.cloudflare.com; ",
   "defect": "CSP script-src drops cdn.jsdelivr.net: the dot (viz) and molecule (smiles-drawer) lane scripts are blocked and never define their renderer",
@@ -858,7 +858,7 @@
  {
   "id": "M107_licenses_drop_soundfont_attribution",
   "file": "THIRD-PARTY-LICENSES.md",
-  "find": "- **FluidR3_GM soundfont (CC-BY-3.0 \u2014 attribution required).** The `abc` Play button synthesises audio with abcjs, which fetches General-MIDI instrument samples at play time from `https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/` (the [midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts) project's `gh-pages`). The **FluidR3_GM** SoundFont was created by **Frank Wen** and is distributed there under the **Creative Commons Attribution 3.0** license ([CC-BY-3.0](https://creativecommons.org/licenses/by/3.0/)) \u2014 this notice is the attribution that license requires. The samples are static files fetched over GET; no content-derived data is sent. If you do not need `abc` audio playback, remove `https://paulrosen.github.io` from `connect-src` in `_CSP` (`redirecall/main.py`) and the fetch never happens.\n",
+  "find": "- **FluidR3_GM soundfont (CC-BY-3.0 — attribution required).** The `abc` Play button synthesises audio with abcjs, which fetches General-MIDI instrument samples at play time from `https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/` (the [midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts) project's `gh-pages`). The **FluidR3_GM** SoundFont was created by **Frank Wen** and is distributed there under the **Creative Commons Attribution 3.0** license ([CC-BY-3.0](https://creativecommons.org/licenses/by/3.0/)) — this notice is the attribution that license requires. The samples are static files fetched over GET; no content-derived data is sent. If you do not need `abc` audio playback, remove `https://paulrosen.github.io` from `connect-src` in `_CSP` (`redirecall/main.py`) and the fetch never happens.\n",
   "replace": "",
   "defect": "FluidR3_GM soundfont is fetched at abc play time but its required CC-BY-3.0 attribution (Frank Wen) is absent",
   "expect": "test_fluidr3_soundfont_is_attributed"
@@ -866,9 +866,9 @@
  {
   "id": "M108_licenses_reintroduce_only_third_party_claim",
   "file": "THIRD-PARTY-LICENSES.md",
-  "find": "This is one of two render paths that reach a third-party host at runtime (the other is the `abc` soundfont below); the `map` lane is the only one that sends *content-derived* data \u2014 the requested tile coordinates.",
+  "find": "This is one of two render paths that reach a third-party host at runtime (the other is the `abc` soundfont below); the `map` lane is the only one that sends *content-derived* data — the requested tile coordinates.",
   "replace": "This is the only render type that contacts a third party.",
-  "defect": "licence file claims OSM tiles are the only render type that contacts a third party \u2014 false, the abc soundfont also does",
+  "defect": "licence file claims OSM tiles are the only render type that contacts a third party — false, the abc soundfont also does",
   "expect": "test_fluidr3_soundfont_is_attributed"
  },
  {
@@ -890,14 +890,14 @@
  {
   "id": "M111_readme_csp_only_channel_claim",
   "file": "readme.md",
-  "find": "`connect-src` is far narrower \u2014 `'self'` plus one fixed host, `https://paulrosen.github.io`, which abcjs fetches General-MIDI soundfont samples from for the `abc` Play button \u2014 so `img-src` remains the broad channel and `connect-src` is limited to that single static-asset host.",
+  "find": "`connect-src` is far narrower — `'self'` plus one fixed host, `https://paulrosen.github.io`, which abcjs fetches General-MIDI soundfont samples from for the `abc` Play button — so `img-src` remains the broad channel and `connect-src` is limited to that single static-asset host.",
   "replace": "`connect-src` is restricted to `'self'`, so it is the only one.",
   "defect": "readme.md Security promises connect-src is 'self'-only ('the only one'); the abc soundfont host opened it to paulrosen.github.io",
   "expect": "test_readme_csp_claim_matches_connect_src"
  },
  {
   "id": "M112_ef_runtime_wholeline_comment",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "            ef_runtime=_HNSW_EF_RUNTIME,",
   "replace": "            ef_runtime=10,\n            # ef_runtime=_HNSW_EF_RUNTIME",
   "sites": 2,
@@ -906,7 +906,7 @@
  },
  {
   "id": "M113_ef_runtime_sameline_comment",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "            ef_runtime=_HNSW_EF_RUNTIME,",
   "replace": "            ef_runtime=10,  # ef_runtime=_HNSW_EF_RUNTIME",
   "sites": 2,
@@ -915,9 +915,9 @@
  },
  {
   "id": "M114_vector_field_width_pinned",
-  "file": "redirecall/main.py",
-  "find": "            {\"name\": vector_field_for(), \"type\": \"vector\",  \"attrs\": {",
-  "replace": "            # width pinned; vector_field_for() kept in this comment as a decoy\n            {\"name\": \"embedding_384\", \"type\": \"vector\",  \"attrs\": {",
+  "file": "redirecall/rag.py",
+  "find": "            {\"name\": _ns_embeddings.vector_field_for(), \"type\": \"vector\",  \"attrs\": {",
+  "replace": "            # width pinned; _ns_embeddings.vector_field_for() kept in this comment as a decoy\n            {\"name\": \"embedding_384\", \"type\": \"vector\",  \"attrs\": {",
   "sites": 1,
   "defect": "P03: vector field pinned to embedding_384 (a bge-m3 install indexes a field nothing writes); decoy comment keeps 'vector_field_for' alive for a source grep",
   "expect": "test_issue29_vector_field_matches_the_helper"
@@ -933,7 +933,7 @@
  },
  {
   "id": "M116_doc_id_write_dropped",
-  "file": "redirecall/main.py",
+  "file": "redirecall/rag.py",
   "find": "            \"doc_id\":      doc_id_for(src),\n",
   "replace": "",
   "sites": 1,
@@ -942,9 +942,9 @@
  },
  {
   "id": "M117_http_cache_hit_not_persisted",
-  "file": "redirecall/main.py",
-  "find": "            await asyncio.to_thread(save_session, sid, _sessions[sid])\n            return {\"session_id\": sid, \"response\": hit[\"response\"]",
-  "replace": "            if False:\n                await asyncio.to_thread(save_session, sid, _sessions[sid])\n            return {\"session_id\": sid, \"response\": hit[\"response\"]",
+  "file": "redirecall/routes_chat.py",
+  "find": "            await asyncio.to_thread(sessions.save_session, sid, state._sessions[sid])\n            return {\"session_id\": sid, \"response\": hit[\"response\"]",
+  "replace": "            if False:\n                await asyncio.to_thread(sessions.save_session, sid, state._sessions[sid])\n            return {\"session_id\": sid, \"response\": hit[\"response\"]",
   "sites": 1,
   "defect": "P06: /api/chat returns a cached answer without persisting the turn (word 'save_session' kept, under if False)",
   "expect": "test_cache_hit_records_the_turn"
@@ -955,7 +955,7 @@
   "find": "function _loadScript(url){",
   "replace": "function _rrProbeTpl(){ _loadScript(`${CDN}totally-made-up/9.9.9/nope.min.js`); }\nfunction _loadScript(url){",
   "sites": 1,
-  "defect": "P07: a CDN asset loaded through a `${CDN}...` template literal _cdn_asset_urls() cannot resolve \u2014 never HEAD-verified",
+  "defect": "P07: a CDN asset loaded through a `${CDN}...` template literal _cdn_asset_urls() cannot resolve — never HEAD-verified",
   "expect": "test_lane_cdn_paths_are_the_verified_ones"
  },
  {
@@ -964,7 +964,7 @@
   "find": "function _loadScript(url){",
   "replace": "const _RR_NOPE='totally-made-up/9.9.9/nope.min.js';\nfunction _rrProbeVar(){ _loadScript(CDN+_RR_NOPE); }\nfunction _loadScript(url){",
   "sites": 1,
-  "defect": "P11: a CDN asset loaded through `_loadScript(CDN+VAR)` _cdn_asset_urls() cannot resolve \u2014 never HEAD-verified",
+  "defect": "P11: a CDN asset loaded through `_loadScript(CDN+VAR)` _cdn_asset_urls() cannot resolve — never HEAD-verified",
   "expect": "test_lane_cdn_paths_are_the_verified_ones"
  },
  {
@@ -973,21 +973,21 @@
   "find": "    bar.appendChild(filter);",
   "replace": "    if(bar.closest('.rich-wrap')) return;\n    bar.appendChild(filter);",
   "sites": 1,
-  "defect": "P09b: the .rich-wrap guard re-added at offset 1,514 (past the old 900-char window) \u2014 chart Data renders unsortable",
+  "defect": "P09b: the .rich-wrap guard re-added at offset 1,514 (past the old 900-char window) — chart Data renders unsortable",
   "expect": "test_enhance_tables_does_not_skip_the_chart_data_view"
  },
  {
   "id": "M121_molecule_fence_removed",
-  "file": "redirecall/main.py",
-  "find": "- ```molecule \u2014",
-  "replace": "- ```moleculeXX \u2014",
+  "file": "redirecall/constants.py",
+  "find": "- ```molecule —",
+  "replace": "- ```moleculeXX —",
   "sites": 1,
-  "defect": "P14: the ```molecule fence-catalogue entry renamed \u2014 the model is never told to emit it (only 4 of 19 lanes were guarded before)",
+  "defect": "P14: the ```molecule fence-catalogue entry renamed — the model is never told to emit it (only 4 of 19 lanes were guarded before)",
   "expect": "test_new_lane_is_documented_for_the_model[molecule]"
  },
  {
   "id": "M122_reaper_drops_running_crawls",
-  "file": "redirecall/main.py",
+  "file": "redirecall/state.py",
   "find": "    done = [u for u, t in _crawl_tasks.items() if t.done()]",
   "replace": "    done = list(_crawl_tasks)",
   "sites": 1,
@@ -1000,7 +1000,7 @@
   "find": "      await _loadScript(CDN+'vis-network/10.1.0/dist/vis-network.min.js');",
   "replace": "      await _loadScript(CDN+'vis-network/10.1.0/dist/vis-network.min.js'); _rrProbeUndefinedHelper();",
   "sites": 1,
-  "defect": "a runtime error inside network.load() (undefined helper) \u2014 invisible to a source grep for _loadScript('literal'), only executing load() catches it",
+  "defect": "a runtime error inside network.load() (undefined helper) — invisible to a source grep for _loadScript('literal'), only executing load() catches it",
   "expect": "test_every_lane_has_a_callable_draw[network]"
  },
  {
@@ -1009,7 +1009,31 @@
   "find": "\n  molecule:{",
   "replace": "\n  moleculeGONE:{",
   "sites": 1,
-  "defect": "the ```molecule lane removed from RICH_LANES \u2014 documented but unregistered, renders as a raw code block",
+  "defect": "the ```molecule lane removed from RICH_LANES — documented but unregistered, renders as a raw code block",
   "expect": "test_new_lane_is_registered[molecule]"
+ },
+ {
+  "id": "M125_plot_defs_not_inserted",
+  "file": "redirecall/index.html",
+  "find": "wrap.insertAdjacentHTML('beforebegin', defs);",
+  "replace": "void defs;",
+  "defect": "the function-definition block is never placed in front of the plot card",
+  "expect": "test_defs_are_inserted_in_front_of_the_card"
+ },
+ {
+  "id": "M126_plot_defs_drop_expression",
+  "file": "redirecall/index.html",
+  "find": "<b>${_plotEsc(f.name)}</b> = ${_plotEsc(f.expr)}",
+  "replace": "<b>${_plotEsc(f.name)}</b>",
+  "defect": "the defs block shows only the name f(x), not the actual expression sin(x)",
+  "expect": "test_defs_list_every_function_expression test_defs_colour_matches_the_curve_order"
+ },
+ {
+  "id": "M127_plot_defs_domain_as_function",
+  "file": "redirecall/index.html",
+  "find": "if(dm){ const a=_plotNum(dm[1]),b=_plotNum(dm[2]); if(isFinite(a)&&isFinite(b)&&b>a) return; }",
+  "replace": "if(dm){ const a=_plotNum(dm[1]),b=_plotNum(dm[2]); if(false) return; }",
+  "defect": "the domain line x = a .. b is listed as a bogus function x(x) = a .. b",
+  "expect": "test_defs_do_not_treat_the_domain_line_as_a_function"
  }
 ]

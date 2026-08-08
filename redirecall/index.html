@@ -519,6 +519,10 @@ table.data-table tr:last-child td{border-bottom:none}
 [data-theme="dark"] .abc-src-pre{background:rgba(0,0,0,.25)}
 .abc-src-pre code{font-family:'SF Mono','Fira Code',monospace;font-size:12px;white-space:pre;color:var(--text1);display:block;overflow-x:auto}
 .plot-render-wrap{margin:10px 0;border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;background:var(--glass)}
+.plot-defs-block{margin:10px 0 -2px;display:flex;flex-direction:column;gap:2px;font-family:'SF Mono','Fira Code',ui-monospace,monospace;font-size:12.5px;line-height:1.5}
+.plot-defs-block .plot-def{white-space:normal;word-break:break-word}
+.plot-defs-block .plot-def b{font-weight:700}
+.plot-defs-block .plot-defs-cap{font-family:inherit;font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--text2);margin-bottom:1px}
 .plot-src-pre{margin:0;border-top:1px solid var(--border);background:rgba(0,0,0,.04);padding:10px 12px;display:none}
 [data-theme="dark"] .plot-src-pre{background:rgba(0,0,0,.25)}
 
@@ -3005,10 +3009,11 @@ function appendMessage(role,content,meta={}){
   const id=meta.id||('msg_'+(++S.msgIdCounter));
   const isUser=role==='user';
   const rawAttr=isUser?'':` data-raw="${escHtml(content)}"`;
+  const queryAttr=isUser?` data-query="${escHtml(content)}"`:'';
   const cacheAttrs=meta.cacheHit?` data-entry-id="${escHtml(meta.entryId||'')}" data-cache-query="${escHtml(meta.query||'')}"` :'';
   const avatarContent = isUser ? 'U' : (meta.streaming ? _streamingAvatarSVG() : '✦');
   const avatarClass = isUser ? 'user-av' : (meta.streaming ? 'ai-av streaming-av' : 'ai-av');
-  const html=`<div class="msg-wrap ${isUser?'user':''}" id="${id}"${rawAttr}${cacheAttrs}>
+  const html=`<div class="msg-wrap ${isUser?'user':''}" id="${id}"${rawAttr}${queryAttr}${cacheAttrs}>
     <div class="msg-avatar ${avatarClass}">${avatarContent}</div>
     <div class="msg-body">
       ${meta.images?.length?meta.images.map(img=>`<img src="${img}" class="msg-img" alt="attached"/>`).join(''):''}
@@ -3034,6 +3039,11 @@ function appendMessage(role,content,meta={}){
         ${meta.cacheHit?`<span style="width:1px;height:14px;background:var(--border);display:inline-block;margin:0 2px"></span>
         <button class="msg-action-btn" id="${id}-uncache" onclick="deleteCacheEntry('${id}',this)" title="Remove this response from the cache">🗑 Uncache</button>
         <button class="msg-action-btn" onclick="rerunSkipCache('${id}')" title="Re-generate bypassing the cache (overwrites cached response)">↺ Re-run fresh</button>`:''}
+      </div>`:''}
+      ${isUser?`<div class="msg-output-bar">
+        <button class="out-btn" onclick="copyQueryText('${id}')" title="Copy this query to the clipboard">📋 Copy</button>
+        <button class="out-btn" onclick="rerunQuery('${id}',false)" title="Ask this question again (may return a cached answer)">↻ Rerun</button>
+        <button class="out-btn" onclick="rerunQuery('${id}',true)" title="Ask this question again, bypassing the cache for a fresh answer">↺ Force rerun</button>
       </div>`:''}
     </div>
   </div>`;
@@ -4100,6 +4110,45 @@ function rerunSkipCache(msgId){
   S.currentQuery=query;
   _setStreamingUI(true);showTyping();scrollToBottom();
   S.ws.send(JSON.stringify({content:query,model:S.currentModel,provider:S.provider,...ragPayload,bypass_cache:true,system_prompt:systemPrompt}));
+}
+
+// The query-bubble action bar. `_queryOf` resolves the text from the data
+// attribute appendMessage stamps on the user wrap, falling back to the rendered
+// bubble so it still works on turns restored before that attribute existed.
+function _queryOf(id){
+  const wrap=document.getElementById(id);
+  return wrap?.dataset?.query ?? wrap?.querySelector('.msg-bubble.user')?.textContent ?? '';
+}
+function copyQueryText(id){
+  const q=_queryOf(id);
+  if(!q){toast('Nothing to copy','error');return;}
+  navigator.clipboard.writeText(q).then(()=>toast('Query copied','success')).catch(()=>toast('Copy failed','error'));
+}
+// Re-ask a past query as a NEW turn (mirrors sendMessage, but sourced from the
+// clicked bubble rather than the input box). bypassCache=true forces a fresh
+// answer instead of a semantic-cache hit.
+function rerunQuery(id,bypassCache){
+  const query=_queryOf(id);
+  if(!query){toast('Could not find the query text','error');return;}
+  if(S.streaming){toast('Wait for the current response to finish','warning');return;}
+  if(!S.ws||S.ws.readyState!==WebSocket.OPEN){toast('Not connected — reconnecting, try again in a moment','error');return;}
+  if(!S.currentModel){toast('Select a model first','error');return;}
+  const tplIdx=document.getElementById('template-select').value;
+  const systemPrompt=tplIdx!==''?S.templates[parseInt(tplIdx)]?.system:undefined;
+  const msgMeta={id:'msg_'+(++S.msgIdCounter)};
+  appendMessage('user',query,msgMeta);
+  const sess=S.sessions[S.sessionId];
+  if(sess)sess.messages.push({role:'user',content:query,meta:msgMeta});
+  if(S.sessionId)_rememberSessionId(S.sessionId);
+  updateTokenCounter();
+  _setStreamingUI(true);showTyping();scrollToBottom();
+  const ragPayload=S.ragAllMode
+    ?{rag_instances:S.ragInstances.filter(r=>r.enabled!==false&&r.reachable!==false).map(r=>r.name)}
+    :{rag_instance:S.activeRag?.name||'default'};
+  S.currentQuery=query;
+  const payload={content:query,model:S.currentModel,provider:S.provider,...ragPayload,system_prompt:systemPrompt,source_filter:S.sourceFilter||''};
+  if(bypassCache)payload.bypass_cache=true;
+  S.ws.send(JSON.stringify(payload));
 }
 
 // ── Logs ────────────────────────────────────────────────────────────────────────
@@ -5790,6 +5839,12 @@ function renderPlotBlocks(el){
     try{
       const params=_parsePlotParams(spec);
       out.innerHTML=_buildFunctionPlot(spec, params.values);
+      // Put the function list in front of the card, in the message flow — not inside
+      // the plot, where it would fight the SVG for space and re-render on every slider tick.
+      const defs=_plotDefsHtml(spec);
+      if(defs && !(wrap.previousElementSibling&&wrap.previousElementSibling.classList.contains('plot-defs-block'))){
+        wrap.insertAdjacentHTML('beforebegin', defs);
+      }
       // Declared parameters become live sliders. Dragging one re-evaluates the
       // formula in the browser — no WebSocket round trip, no tokens, no wait.
       if(params.list.length)_attachPlotParams(wrap,out,spec,params);
@@ -5859,6 +5914,30 @@ function _plotNum(s){ try{ return Number(math.evaluate(String(s))); }catch(e){ r
 function _plotTicks(min,max,n){ const a=[]; for(let i=0;i<=n;i++) a.push(min+(max-min)*i/n); return a; }
 function _plotFmt(v){ if(Math.abs(v)<1e-9) return '0'; const a=Math.abs(v); if(a>=10000||a<0.001) return (+v.toExponential(1)).toString(); return String(Math.round(v*1000)/1000); }
 function _plotEsc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+// The definitions the plot draws, coloured to match the curves. Rendered as a block
+// in FRONT of the graph card (see renderPlotBlocks) so the reader knows what each
+// curve is before seeing it — a legend of bare "f(x)" does not say what f is.
+function _plotDefsHtml(spec){
+  const colors=['#2563eb','#dc2626','#059669','#d97706','#7c3aed'];
+  const fns=[];
+  String(spec).split(/\n+/).forEach(line=>{
+    line=line.trim();
+    if(!line||line[0]==='#'||/^param\s*:/i.test(line))return;
+    // Domain line — same detection as _buildFunctionPlot, so the two never disagree:
+    // "x = a .. b", "x from a to b", "domain: a..b", or a bare "a..b" that parses to
+    // a valid ascending numeric range. Skip it — it is not a function.
+    const dm=line.match(/^(?:x\s*=|x\s+(?:from|in)|domain)\s*:?\s*\[?\s*(.+?)\s*(?:\.\.|\bto\b|,|;)\s*(.+?)\s*\]?$/i)
+          || line.match(/^\s*(-?[\w.+\-*/^()\s]+?)\s*\.\.\s*(-?[\w.+\-*/^()\s]+?)\s*$/);
+    if(dm){ const a=_plotNum(dm[1]),b=_plotNum(dm[2]); if(isFinite(a)&&isFinite(b)&&b>a) return; }
+    const fm=line.match(/^\s*([A-Za-z]\w*)\s*(?:\(\s*x\s*\))?\s*=\s*(.+)$/);
+    if(fm)fns.push({name:fm[1]+'(x)', expr:fm[2].trim()});
+    else fns.push({name:'y', expr:line});
+  });
+  if(!fns.length)return '';
+  const rows=fns.map((f,i)=>`<span class="plot-def" style="color:${colors[i%colors.length]}"><b>${_plotEsc(f.name)}</b> = ${_plotEsc(f.expr)}</span>`).join('');
+  return `<div class="plot-defs-block"><span class="plot-defs-cap">${fns.length>1?'Functions':'Function'}</span>${rows}</div>`;
+}
+
 function _buildFunctionPlot(spec, params){
   const W=640,H=360,L=52,Rr=624,T=22,Bb=316;
   const colors=['#2563eb','#dc2626','#059669','#d97706','#7c3aed'];

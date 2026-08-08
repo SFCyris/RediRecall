@@ -5,6 +5,23 @@ All notable changes to RediRecall are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] — 2026-08-08
+
+### Added
+- Each question you asked now carries its own action bar (on hover): **Copy** puts
+  the query text on the clipboard, **Rerun** asks it again (a matching cached answer
+  may be served), and **Force rerun** asks it again while bypassing the cache for a
+  fresh answer.
+- Function plots (` ```plot `) now list each function's definition —
+  `name(x) = expression` — colour-matched to its curve, in a block in front of the
+  graph. A legend of bare `f(x)`, `g(x)`, `h(x)` no longer hides what each function
+  is. The domain line is not treated as a function.
+
+### Fixed
+- The JavaScript test helpers ran snippets via `node -e`, whose single-argument
+  size limit on Linux (128 KB) failed the CI `tests` workflow on large snippets
+  while passing on macOS; they now run the program from a temp file.
+
 ## [1.5.0] — 2026-08-07
 
 Upgrading from an earlier version keeps working immediately; the search index
@@ -78,6 +95,7 @@ keep working with the model they were built with.
 See the [GitHub releases](https://github.com/SFCyris/RediRecall/releases) for
 1.3.x and 1.2.0.
 
+[1.5.1]: https://github.com/SFCyris/RediRecall/releases/tag/v1.5.1
 [1.5.0]: https://github.com/SFCyris/RediRecall/releases/tag/v1.5.0
 [1.4.1]: https://github.com/SFCyris/RediRecall/releases/tag/v1.4.1
 [1.4.0]: https://github.com/SFCyris/RediRecall/releases/tag/v1.4.0

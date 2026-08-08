@@ -42,6 +42,18 @@ def _pysrc(obj) -> str:
     return _code(inspect.getsource(obj))
 
 
+def _app_source(app_module) -> str:
+    """Concatenated source of the whole redirecall package.
+
+    The backend used to be one file, so tests scanned ``main.py``. After the split
+    the code lives in sibling modules, so scan every ``redirecall/*.py`` — the
+    assertion no longer cares which module a given literal ended up in.
+    """
+    import pathlib
+    d = pathlib.Path(app_module.__file__).parent
+    return "\n".join(p.read_text(encoding="utf-8") for p in sorted(d.glob("*.py")))
+
+
 _JS_FN = re.compile(r"\n(?:async\s+)?function\s+[A-Za-z0-9_$]+\s*\(")
 
 
@@ -158,7 +170,7 @@ def test_issue7_delete_is_case_sensitive(app_module, clean_redis, monkeypatch):
     rc = clean_redis
     inst = "t7"
     ns = rc.key("t7")                       # __rrtest_<pid>__t7 → conftest purges it
-    monkeypatch.setattr(m, "rag_prefix", lambda i: ns)
+    monkeypatch.setattr(m.rag, "rag_prefix", lambda i: ns)
     idx = m._get_rag_index(inst, rc)
     idx.create(overwrite=True)
     try:
@@ -201,7 +213,7 @@ def test_issue7_schema_marks_source_casesensitive(app_module):
 def test_issue9_feedback_limit_cannot_be_bypassed(app_module):
     """items[-max(0, limit):] is items[0:] for limit<=0 — the whole store leaked."""
     m = app_module
-    m._feedback = [{"i": i} for i in range(50)]
+    m.state._feedback = [{"i": i} for i in range(50)]
     for bad in (0, -5, -1):
         got = m.api_feedback_list(limit=bad)
         assert len(got["items"]) < 50, f"limit={bad} returned {len(got['items'])} of 50"
@@ -216,8 +228,8 @@ def test_issue9_feedback_payload_is_size_capped(app_module, data_dir, monkeypatc
     an oversized field through the real handler and measures what was stored.
     """
     m = app_module
-    monkeypatch.setattr(m, "FEEDBACK_PATH", data_dir / "feedback.json")
-    monkeypatch.setattr(m, "_feedback", [])
+    monkeypatch.setattr(m.constants, "FEEDBACK_PATH", data_dir / "feedback.json")
+    monkeypatch.setattr(m.state, "_feedback", [])
     assert m._MAX_FEEDBACK_FIELD <= 20000, "the cap itself has been raised too far"
     asyncio.run(m.api_feedback({"comment": "x" * 50000, "answer": "y" * 50000, "value": 1}))
     stored = m._feedback[-1]
@@ -234,7 +246,7 @@ def test_issue9_feedback_payload_is_size_capped(app_module, data_dir, monkeypatc
 def test_issue12_feedback_value_filter_accepts_up_and_down(app_module):
     """The docstring advertised value=down but the client stores 1/-1."""
     m = app_module
-    m._feedback = [{"value": 1, "id": "a"}, {"value": -1, "id": "b"}, {"value": 1, "id": "c"}]
+    m.state._feedback = [{"value": 1, "id": "a"}, {"value": -1, "id": "b"}, {"value": 1, "id": "c"}]
     assert len(m.api_feedback_list(limit=10, value="down")["items"]) == 1
     assert len(m.api_feedback_list(limit=10, value="up")["items"]) == 2
     assert len(m.api_feedback_list(limit=10, value="-1")["items"]) == 1
@@ -251,8 +263,8 @@ def test_issue17_config_save_uses_a_unique_temp_file(app_module, data_dir, monke
     Record the names actually used and require two saves to use two files.
     """
     m = app_module
-    monkeypatch.setattr(m, "DATA_DIR", data_dir)
-    monkeypatch.setattr(m, "CONFIG_PATH", data_dir / "config.json")
+    monkeypatch.setattr(m.constants, "DATA_DIR", data_dir)
+    monkeypatch.setattr(m.constants, "CONFIG_PATH", data_dir / "config.json")
 
     names = []
     real_mkstemp = m.tempfile.mkstemp
@@ -279,7 +291,7 @@ def test_config_read_is_utf8_and_unreadable_is_not_quarantined(app_module, data_
     m = app_module
     path = data_dir / "config.json"
     path.write_text(json.dumps({"redis": {"host": "näs", "port": 6390}}), encoding="utf-8")
-    monkeypatch.setattr(m, "CONFIG_PATH", path)
+    monkeypatch.setattr(m.constants, "CONFIG_PATH", path)
     os.chmod(path, 0o000)
     try:
         m.load_config()
@@ -346,11 +358,11 @@ def test_issue18_delete_loop_is_bounded(app_module, monkeypatch):
     handler against an index that never stops returning full pages.
     """
     m = app_module
-    monkeypatch.setattr(m, "_MAX_DELETE_BATCHES", 3)
+    monkeypatch.setattr(m.rag, "_MAX_DELETE_BATCHES", 3)
     # Four pages available, three permitted: a fourth FT.SEARCH raises.
     fake = _FakeDeleteRedis([_full_page() for _ in range(4)])
-    monkeypatch.setattr(m, "_rc_for", lambda *a, **k: fake)
-    monkeypatch.setattr(m, "append_log", lambda e: None)
+    monkeypatch.setattr(m.rag_admin, "_rc_for", lambda *a, **k: fake)
+    monkeypatch.setattr(m.config, "append_log", lambda e: None)
 
     out = m.api_delete_document(instance="t18", source="ghost.pdf")
     assert out["ok"] is True, out
@@ -412,13 +424,13 @@ def test_cache_scope_ignores_disabled_instances(app_module):
         return ({"enabled": name != "archive"}, "default")
 
     original = m._rag_meta_cached_async
-    m._rag_meta_cached_async = fake
+    m.rag_admin._rag_meta_cached_async = fake
     try:
         eff = asyncio.run(m._effective_rag_instances(["docs", "archive"]))
         assert eff == ["docs"]
         assert m._cache_scope(["docs", "archive"]) != m._cache_scope(eff)
     finally:
-        m._rag_meta_cached_async = original
+        m.rag_admin._rag_meta_cached_async = original
 
 
 def test_cache_scope_is_order_independent(app_module):
@@ -479,7 +491,7 @@ def test_issue11_backfill_is_not_reported_as_disabled(app_module, monkeypatch):
     """Mid-rebuild num_docs is 0 while chunk keys exist; warning there also
     memoised the instance and suppressed the real diagnostic afterwards."""
     m = app_module
-    monkeypatch.setattr(m, "_dim_mismatch_warned", set())
+    monkeypatch.setattr(m.rag, "_dim_mismatch_warned", set())
     assert "percent_indexed" in _pysrc(m._warn_if_index_empty_but_data_exists)
 
     rebuilding = _FakeInfoRC(num_docs=b"0", percent_indexed=b"0.42",
@@ -505,7 +517,7 @@ def test_empty_instance_is_memoised(app_module, monkeypatch):
     the other memoisation call. Count the scans instead.
     """
     m = app_module
-    monkeypatch.setattr(m, "_dim_mismatch_warned", set())
+    monkeypatch.setattr(m.rag, "_dim_mismatch_warned", set())
     rc = _FakeInfoRC(num_docs=b"0", percent_indexed=b"1", keys=[])
     for _ in range(3):
         m._warn_if_index_empty_but_data_exists("empty", rc)
@@ -528,12 +540,12 @@ def test_issue13_log_failure_does_not_fail_the_delete(app_module, monkeypatch):
     m = app_module
     page = [1, b"k0", [b"text", b"the only chunk"]]
     fake = _FakeDeleteRedis([page])
-    monkeypatch.setattr(m, "_rc_for", lambda *a, **k: fake)
+    monkeypatch.setattr(m.rag_admin, "_rc_for", lambda *a, **k: fake)
 
     def boom(entry):
         raise OSError(28, "No space left on device")
 
-    monkeypatch.setattr(m, "append_log", boom)
+    monkeypatch.setattr(m.config, "append_log", boom)
 
     out = m.api_delete_document(instance="t13", source="report.pdf")
     assert out == {"ok": True, "source": "report.pdf", "deleted": 1}, out
@@ -644,13 +656,13 @@ def test_cache_hit_records_the_turn(app_module, monkeypatch):
 
     m = app_module
     saved = []
-    monkeypatch.setattr(m, "save_session", lambda sid, msgs: saved.append((sid, list(msgs))))
-    monkeypatch.setattr(m, "cache_lookup",
+    monkeypatch.setattr(m.sessions, "save_session", lambda sid, msgs: saved.append((sid, list(msgs))))
+    monkeypatch.setattr(m.cache, "cache_lookup",
                         lambda q, thr, scope: {"response": "cached answer", "score": 0.99, "chunks": []})
-    monkeypatch.setattr(m, "_cache_scope", lambda *a, **k: "scope")
+    monkeypatch.setattr(m.cache, "_cache_scope", lambda *a, **k: "scope")
     async def _eff(x):
         return list(x)
-    monkeypatch.setattr(m, "_effective_rag_instances", _eff)
+    monkeypatch.setattr(m.cache, "_effective_rag_instances", _eff)
     try:
         out = asyncio.run(m.api_chat({"content": "q", "session_id": "probe-sid",
                                       "provider": "ollama", "model": "probe-model",
@@ -784,7 +796,7 @@ def test_e5_prefixes_are_asymmetric_and_applied(app_module, cfg, monkeypatch):
             return 384
 
     monkeypatch.setitem(m._config, "embedding", {"model": "intfloat/multilingual-e5-small"})
-    monkeypatch.setattr(m, "get_embed_model", lambda: _StubModel())
+    monkeypatch.setattr(m.embeddings, "get_embed_model", lambda: _StubModel())
 
     m.embed("how do i reindex?", is_query=True)
     m.embed("the index is rebuilt on schema change")
@@ -820,14 +832,14 @@ def test_search_embeds_the_query_as_a_query(app_module):
         recorded.append((text, is_query))
         return np.zeros(384, dtype=np.float32)
 
-    m.embed = spy
+    m.embeddings.embed = spy
     try:
         try:
             m.search_rag("t8", "how do i reindex?", rc=object())
         except Exception:
             pass          # the fake client fails later; we only need the embed call
     finally:
-        m.embed = real_embed
+        m.embeddings.embed = real_embed
     assert recorded, "search_rag never embedded the question"
     assert recorded[0] == ("how do i reindex?", True), \
         f"the question was embedded as {recorded[0]!r} — a passage, not a query"
@@ -846,10 +858,10 @@ def test_search_embeds_the_query_as_a_query(app_module):
 
 def test_chunks_record_their_embedding_model(app_module):
     """Without a per-chunk model id a corpus can never hold more than one."""
-    whole = _code(open(app_module.__file__, encoding="utf-8").read())
+    whole = _code(_app_source(app_module))
     # Whitespace-insensitive: the literal used to be pinned with its exact column
     # alignment, so a reformat would have false-red a correct file.
-    assert re.search(r'"emb_model"\s*:\s*str\(embedding_id_for\(\)\)', whole), \
+    assert re.search(r'"emb_model"\s*:\s*str\((?:\w+\.)?embedding_id_for\(\)\)', whole), \
         "chunks do not store the model id"
     assert '"name": "emb_model"' in _pysrc(app_module._get_rag_index), "emb_model is not indexed"
 
@@ -927,16 +939,16 @@ def test_embedding_change_guard_fires_on_name_not_dimension(app_module, cfg, mon
     helper) while a gutted guard body kept the line intact. Drive the handler.
     """
     m = app_module
-    monkeypatch.setattr(m, "save_config", lambda c: None)
-    monkeypatch.setattr(m, "invalidate_redis_clients", lambda: None)
-    monkeypatch.setattr(m, "invalidate_provider_clients", lambda: None)
-    monkeypatch.setattr(m, "list_rag_instances", lambda: [{"name": "docs", "chunks": 12}])
+    monkeypatch.setattr(m.config, "save_config", lambda c: None)
+    monkeypatch.setattr(m.redis_store, "invalidate_redis_clients", lambda: None)
+    monkeypatch.setattr(m.config, "invalidate_provider_clients", lambda: None)
+    monkeypatch.setattr(m.rag_admin, "list_rag_instances", lambda: [{"name": "docs", "chunks": 12}])
     resets = []
 
     async def _reset():
         resets.append(1)
 
-    monkeypatch.setattr(m, "_reset_index_markers_for_embedding_change", _reset)
+    monkeypatch.setattr(m.redis_store, "_reset_index_markers_for_embedding_change", _reset)
     # MiniLM → e5-small: both 384d, so nothing about the DIMENSION changes.
     m._config["embedding"] = {"model": "all-MiniLM-L6-v2"}
 
@@ -1032,7 +1044,7 @@ def test_issue29_vector_field_matches_the_helper(app_module, monkeypatch, model,
     import types
     m = app_module
     monkeypatch.setitem(m._config, "embedding", {"model": model})
-    monkeypatch.setattr(m, "get_embed_model",
+    monkeypatch.setattr(m.embeddings, "get_embed_model",
                         lambda *a, **k: types.SimpleNamespace(
                             get_sentence_embedding_dimension=lambda: dims))
     assert m.vector_field_for() == expected, \
@@ -1083,9 +1095,9 @@ def test_index_ensure_is_serialised(app_module, monkeypatch):
         time.sleep(0.2)          # long enough that unsynchronised callers overlap
         m._index_ensured.add(instance)   # what the real slow path does last
 
-    monkeypatch.setattr(m, "_ensure_rag_index_locked", slow_path)
-    monkeypatch.setattr(m, "_index_ensured", set())
-    monkeypatch.setattr(m, "_index_ensure_locks", {})
+    monkeypatch.setattr(m.rag, "_ensure_rag_index_locked", slow_path)
+    monkeypatch.setattr(m.rag, "_index_ensured", set())
+    monkeypatch.setattr(m.rag, "_index_ensure_locks", {})
 
     threads = [threading.Thread(target=m.ensure_rag_index, args=("race",), kwargs={"rc": object()})
                for _ in range(8)]
@@ -1110,17 +1122,17 @@ def test_issue24_upload_size_is_capped(app_module, data_dir, monkeypatch):
     oversized file through the real handler.
     """
     m = app_module
-    monkeypatch.setattr(m, "_MAX_UPLOAD_BYTES", 1024)
-    monkeypatch.setattr(m, "_rc_for", lambda *a, **k: object())
+    monkeypatch.setattr(m.config, "_MAX_UPLOAD_BYTES", 1024)
+    monkeypatch.setattr(m.rag_admin, "_rc_for", lambda *a, **k: object())
     dest = data_dir / "big.txt"
-    monkeypatch.setattr(m, "safe_upload_dest", lambda name: (dest, "big.txt"))
+    monkeypatch.setattr(m.constants, "safe_upload_dest", lambda name: (dest, "big.txt"))
     ingested = []
 
     async def fake_ingest(instance, path, name, rc):
         ingested.append(name)
         return {"ok": True}
 
-    monkeypatch.setattr(m, "ingest_file", fake_ingest)
+    monkeypatch.setattr(m.ingest, "ingest_file", fake_ingest)
 
     class _Upload:
         filename = "big.txt"
@@ -1145,18 +1157,18 @@ def test_issue24_upload_size_is_capped(app_module, data_dir, monkeypatch):
 def test_issue25_sessions_are_bounded(app_module, monkeypatch):
     """Every conversation ever opened stayed resident, so RSS grew on uptime."""
     m = app_module
-    monkeypatch.setattr(m, "_MAX_LIVE_SESSIONS", 5)
+    monkeypatch.setattr(m.state, "_MAX_LIVE_SESSIONS", 5)
     saved = m._sessions
     try:
         from collections import OrderedDict
-        m._sessions = OrderedDict()
+        m.state._sessions = OrderedDict()
         for i in range(20):
             m._sessions[f"s{i}"] = []
             m.touch_session(f"s{i}")
         assert len(m._sessions) == 5, f"{len(m._sessions)} sessions retained, cap is 5"
         assert "s19" in m._sessions and "s0" not in m._sessions, "wrong end evicted"
     finally:
-        m._sessions = saved
+        m.state._sessions = saved
 
 
 def test_issue25_finished_crawls_are_reaped(app_module):
@@ -1211,8 +1223,8 @@ def test_hnsw_ef_runtime_is_raised_above_the_default(app_module, monkeypatch):
             seen.update(kw)
             raise RuntimeError("stop after construction")
 
-    monkeypatch.setattr(m, "VectorQuery", _RecordingVQ)
-    monkeypatch.setattr(m, "embed", lambda t, is_query=False: np.zeros(384, dtype=np.float32))
+    monkeypatch.setattr(m.rag, "VectorQuery", _RecordingVQ)
+    monkeypatch.setattr(m.embeddings, "embed", lambda t, is_query=False: np.zeros(384, dtype=np.float32))
     try:
         m.search_rag("tef", "q", rc=object())
     except Exception:
@@ -1271,7 +1283,7 @@ def test_new_lane_is_documented_for_the_model(app_module, lane):
     deleting the gantt bullet outright kept it green (mutations M81/M82). Require
     the lane's own entry in the fence catalogue.
     """
-    src = open(app_module.__file__, encoding="utf-8").read()
+    src = _app_source(app_module)
     assert f"- ```{lane} —" in src, \
         f"the fence catalogue has no ```{lane} entry — the model will never emit it"
 
