@@ -48,6 +48,7 @@ import shutil
 import socket
 import sys
 import threading
+from collections import OrderedDict
 import time
 import uuid
 import zipfile
@@ -286,17 +287,21 @@ Draw a chart ONLY when the user asks for one (graph/plot/chart/diagram/visualise
 Always prefer one of these over hand-drawing an SVG: you supply a short description and the app does the drawing exactly.
 Every fenced block below is BLOCK-LEVEL: put it on its own lines with a blank line before and after, and with REAL newlines inside (never the literal characters backslash-n). NEVER place a fence inside a Markdown table cell, list item, or blockquote — a fence in a table cell renders as raw text, not a figure. To show structures/figures for several items, put the plain formula or SMILES string as text in the table, then render each item as its own labelled block AFTER the table (e.g. a short heading followed by a ```molecule block).
 - ```plot — a function graph. Body: `y = x^2 + 3x - 2` (one function per line; optional `x = -5 .. 5`). The app has NO predefined constants beyond a bare number you write yourself — physical/mathematical constants (speed of light, gravitational constant, Boltzmann constant, …) are NOT built in. If a formula uses a named constant instead of writing its number directly, you MUST declare it with its own `param:` line, BEFORE any other line that uses it — never leave a symbol undeclared and never assume the app knows what it stands for. A fixed (non-adjustable) constant is just a param with equal bounds, e.g. for `y = sqrt(1-(v/c)^2)` declare `param: c = 299792458 .. 299792458 (299792458)` first, then `param: v = 0 .. 0.99c (0.01)` — a param's own bounds can reference an EARLIER param (implicit multiplication: `0.99c` = 0.99×c). An undeclared symbol, or a bound that references a constant declared later or not at all, makes evaluation fail and the whole plot error out. Declaring a param with a REAL range instead renders a live slider that re-plots instantly with no further request: `y = a*sin(b*x)` then `param: a = 0.5 .. 3 (1)` and `param: b = 1 .. 5 (2)`. Prefer this over answering the same question again for a different value.
-- ```chart — data chart (bar/line/pie/doughnut/scatter/radar). Body: Chart.js JSON, e.g. {"type":"bar","data":{"labels":["Q1","Q2"],"datasets":[{"label":"Sales","data":[120,150]}]}}
-- ```mermaid — flowchart, sequence, class, state, ER or Gantt diagram. Body: mermaid syntax, e.g. `graph TD` then `A[Start] --> B{Choice}`.
+- ```chart — data chart (bar/line/pie/doughnut/scatter/radar). Body: Chart.js JSON, e.g. {"type":"bar","data":{"labels":["Q1","Q2"],"datasets":[{"label":"Sales","data":[120,150]}]}}. Line/scatter/bubble charts get wheel-zoom and drag-pan automatically, and every chart has a Data button that reveals the underlying series as a sortable table — so you do NOT need to repeat the numbers as a Markdown table alongside the chart.
+- ```gantt — a project schedule. Body: mermaid gantt syntax WITHOUT the leading `gantt` line, e.g. `title Release` then `dateFormat YYYY-MM-DD` then `section Build` then `design :a1, 2026-01-01, 20d` and `build :a2, after a1, 15d`. Use this rather than a table when the answer is about dates, durations or dependencies.
+- ```timeline — a sequence of dated events. Body: mermaid timeline syntax WITHOUT the leading `timeline` line, e.g. `title Project` then `2026-01 : kickoff` then `2026-04 : beta`. Use for history/roadmap answers; use ```gantt instead when durations and dependencies matter.
+- ```network — a force-directed, draggable node graph. Body: JSON {"directed":true,"nodes":["client","api","db"],"edges":[{"from":"client","to":"api","label":"HTTP"}]}. A node may also be an object {"id":"api","label":"API","group":"svc"}. Prefer ```dot for a strict hierarchy and ```network when the reader benefits from exploring the layout.
+- ```geojson — geographic features with attributes. Body: a GeoJSON FeatureCollection, e.g. {"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"Berlin"},"geometry":{"type":"Point","coordinates":[13.405,52.52]}}]}. Coordinates are [lng,lat] (NOT lat,lng). Each feature's properties become a click popup. Use ```map for simple pins, ```geojson for shapes/regions or per-feature data.
+- ```mermaid — flowchart, sequence, class, state or ER diagram (for Gantt prefer the dedicated ```gantt fence). Body: mermaid syntax, e.g. `graph TD` then `A[Start] --> B{Choice}`.
 - ```dot — a graph best drawn by automatic layout (dependencies, call graphs). Body: Graphviz DOT, e.g. `digraph G { A -> B }`.
 - ```geometry — an exact geometric construction. Body: JSON {"boundingbox":[xmin,ymax,xmax,ymin],"axis":true,"elements":[…]}. Each element is {"type":…,"args":[…],"attrs":{…}}. Coordinates must be NUMBERS. A text element takes its content as the LAST arg: {"type":"text","args":[1.5,-1.5,"a²=9"]}. Colours use fillColor/strokeColor/strokeWidth (plain fill/stroke are also accepted). Allowed types: point, line, segment, circle, ellipse, polygon, text, angle, arc, sector, midpoint, perpendicular, parallel, tangent, intersection, arrow, vector. Data only — never a function or code string (use ```plot for curves).
 - ```map — a map. Body: JSON {"center":[lat,lng],"zoom":11,"markers":[{"lat":..,"lng":..,"label":".."}]} (optional "geojson").
-- ```plot3d — a 3-D surface/scatter. For a formula, let the app compute it: {"zfunction":"x*y","x":[-5,5],"y":[-5,5],"layout":{"title":"…"}}. For explicit data use Plotly JSON {"data":[{"type":"surface","z":[[1,2],[3,4]]}]} — z must be NUMBERS; never write an expression such as [[x*y]] inside JSON.
+- ```plot3d — a 3-D surface/scatter. For a formula, let the app compute it: {"zfunction":"x*y","x":[-5,5],"y":[-5,5],"layout":{"title":{"text":"…"}}}. For explicit data use Plotly JSON {"data":[{"type":"surface","z":[[1,2],[3,4]]}]} — z must be NUMBERS; never write an expression such as [[x*y]] inside JSON.
 - ```molecule — a chemical structure. Body: one SMILES string, e.g. CC(=O)Oc1ccccc1C(=O)O
 - ```molecule3d — the same structure, rotatable in 3D. Body: standard XYZ format — atom count, a comment line, then one `Element x y z` line per atom (plain numbers, Å). No bonds needed; they're inferred from distance.
 - ```calc — arithmetic, unit conversion, dates, matrices. Body: one expression per line, e.g. `5 km/h to m/s` or `(1250 * 1.19) / 3`. Never do multi-step arithmetic in prose — emit it here and the app computes it exactly.
 - ```stats — descriptive statistics and linear regression. Body: `data: 4, 8, 15, 16, 23, 42` (optionally `x:` and `y:` lines for regression). The app computes mean/median/sd/quartiles/correlation — do not compute them yourself.
-- ```solve — symbolic algebra. Body: one per line — `derivative: x^3 + 2x` , `simplify: (x^2-1)/(x-1)` , `solve: x^2 - 5x + 6 = 0` , `evaluate: ...`.
+- ```solve — symbolic algebra. Body: one per line — `derivative: x^3 + 2x` , `simplify: (x^2-1)/(x-1)` , `expand: (x + 1)^2` , `solve: x^2 - 5x + 6 = 0` , `evaluate: ...`.
 - ```table — a sortable, filterable data table with computed totals and CSV export. Body: JSON {"columns":["Item","Qty","Price"],"rows":[["A",2,9.99]],"total":["Price"]} — never add up a column yourself; list `total` and the app sums it.
 - ```diff — compare two texts. Body: `--- before` / lines / `--- after` / lines. The app computes the real diff.
 - ```regex — test a pattern. Body: `pattern: \d{4}-\d{2}` then `test:` lines. The app runs it and shows real matches.
@@ -482,14 +487,23 @@ if _cors_origins:
 _CSP = (
     "default-src 'self'; "
     # cdnjs: marked/DOMPurify/KaTeX/abcjs/math.js + the lazy-loaded renderers
-    # (mermaid, Chart.js, highlight.js, Viz/Graphviz, JSXGraph, Leaflet, Plotly).
-    # jsDelivr: smiles-drawer (molecules) — not published on cdnjs.
-    "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
+    # (mermaid, Chart.js, highlight.js, JSXGraph, Leaflet, Plotly).
+    # jsDelivr: smiles-drawer (molecules) and @viz-js/viz (Graphviz) — neither is
+    # published on cdnjs at a current version.
+    # 'wasm-unsafe-eval': @viz-js/viz 3.x is a WebAssembly build (the old viz.js
+    # 2.1.2 was asm.js). Without it the script loads but WebAssembly.instantiate()
+    # is blocked and the ```dot lane dies with a CompileError. This directive
+    # permits WebAssembly compilation ONLY — it does not enable eval() or
+    # new Function().
+    "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' "
+    "https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; "
     "style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; "
     # https: is needed for map tiles (e.g. OpenStreetMap) in the ```map lane.
     "img-src 'self' data: blob: https:; "
     "font-src 'self' https://cdnjs.cloudflare.com data:; "
-    "connect-src 'self'; "
+    # paulrosen.github.io: abcjs fetches soundfont samples at play time for the
+    # ```abc Play button. Scoped to that one host rather than opening connect-src.
+    "connect-src 'self' https://paulrosen.github.io; "
     "worker-src 'self' blob:; "
     "object-src 'none'; "
     "base-uri 'self'; "
@@ -525,7 +539,30 @@ _embed_model: Optional[Any] = None  # SentenceTransformer, lazily loaded
 _embed_model_name: str = ""
 
 # In-memory session store: session_id → list of {role, content} dicts
-_sessions: dict[str, list] = {}
+# Bounded: every conversation ever opened used to stay resident for the life of
+# the process, so RSS grew on uptime alone. Sessions are persisted in Redis, so
+# evicting the least-recently-touched one only costs a reload on next access.
+_MAX_LIVE_SESSIONS = int(os.environ.get("REDIRECALL_MAX_LIVE_SESSIONS", "500"))
+_sessions: "OrderedDict[str, list]" = OrderedDict()
+
+
+def touch_session(sid: str) -> None:
+    """Mark a session most-recently-used and evict the coldest beyond the cap."""
+    if sid in _sessions:
+        _sessions.move_to_end(sid)
+    while len(_sessions) > _MAX_LIVE_SESSIONS:
+        old, _ = _sessions.popitem(last=False)
+        log.debug(f"evicted session {old} from memory (still in Redis)")
+
+
+def reap_finished_crawls() -> int:
+    """Drop completed crawl tasks. They were never removed, so every crawl left a
+    dead asyncio.Task behind for the life of the process."""
+    done = [u for u, t in _crawl_tasks.items() if t.done()]
+    for u in done:
+        _crawl_tasks.pop(u, None)
+        _crawl_gates.pop(u, None)
+    return len(done)
 
 _feedback: list = []
 _ingestion_logs: list = []
@@ -783,6 +820,11 @@ _MAX_FEEDBACK = 2000
 # Per-field cap on a feedback POST. The store is rewritten in full on every
 # rating, so one oversized body permanently inflates the cost of every later one.
 _MAX_FEEDBACK_FIELD = 8000
+
+# Largest single upload accepted. api_ingest_files reads the whole body into
+# memory before touching disk, so without a bound one file can exhaust RAM and
+# then the volume. Override with REDIRECALL_MAX_UPLOAD_MB.
+_MAX_UPLOAD_BYTES = int(os.environ.get("REDIRECALL_MAX_UPLOAD_MB", "100")) * 1024 * 1024
 
 
 def load_logs():
@@ -1375,7 +1417,7 @@ def _get_rag_index(instance: str, rc: redis.Redis) -> SearchIndex:
             # keyspace scan.
             {"name": "emb_model",   "type": "numeric", "attrs": {"sortable": True}},
 
-            {"name": "embedding", "type": "vector",  "attrs": {
+            {"name": vector_field_for(), "type": "vector",  "attrs": {
                 "algorithm":       "hnsw",   # HNSW, not SVS-VAMANA: the latter targets
                 "datatype":        "float32", # >10K-vector corpora (10 240-vector training
                 "dims":            dim,        # threshold before its compression engages).
@@ -1389,6 +1431,8 @@ def _get_rag_index(instance: str, rc: redis.Redis) -> SearchIndex:
 
 
 _index_ensured: set[str] = set()
+# One lock per instance so the schema migration cannot run concurrently with itself.
+_index_ensure_locks: dict[str, threading.Lock] = {}
 
 # Bump when _get_rag_index's schema changes in a way that needs a reindex.
 #   v2: source TEXT→TAG, chunk_id made SORTABLE (2026-07).
@@ -1400,17 +1444,70 @@ _index_ensured: set[str] = set()
 # fresh installs get the lean schema. Both remain fully queryable — nothing in the
 # codebase filters or sorts on @doc_id or @pos, and both are still written to the
 # hash for provenance.
-_RAG_SCHEMA_VERSION = 4
+_RAG_SCHEMA_VERSION = 5
 
 # A keyword-only hit may sit below the cosine threshold and still be the right
 # answer, so it is admitted at a fraction of it. Below that it is tail noise:
 # one common term matching an otherwise unrelated document.
 _LEXICAL_FLOOR_RATIO = 0.7
 
+# HNSW search breadth. RediSearch defaults EF_RUNTIME to 10, which on a 57,805-
+# vector index measured recall@10 of 0.839 against exact brute force — one query
+# in six returned nothing from the true top-10. Raising it to 128 measured
+# recall 1.000 AND was faster (0.81 ms median / 0.98 ms p95, versus 1.19 / 3.67
+# at the default): a wider beam converges more predictably than a narrow one that
+# wanders. Cost grows again beyond ~256, so this is near the sweet spot.
+_HNSW_EF_RUNTIME = int(os.environ.get("REDIRECALL_HNSW_EF_RUNTIME", "128"))
+
 # Backstop for the per-document delete loop. It re-queries at offset 0 by design
 # (each batch is deleted before the next search), so any state where DEL does not
 # retract the index entry would otherwise spin a worker thread forever.
 _MAX_DELETE_BATCHES = 10_000
+
+def _migrate_vector_field(instance: str, rc: redis.Redis) -> int:
+    """Move each chunk's vector from the legacy "embedding" field to the
+    width-named one, so a v4-or-older corpus stays searchable after the rename.
+
+    Idempotent: a chunk that already carries the new field is skipped, and the
+    legacy field is only deleted once the new one is written. Returns the number
+    of chunks moved.
+    """
+    field = vector_field_for()
+    if field == "embedding":
+        return 0                       # unregistered model — nothing renamed
+    moved, batch = 0, []
+    try:
+        for key in rc.scan_iter(f"{rag_prefix(instance)}:chunk:*", count=500):
+            batch.append(key)
+            if len(batch) >= 500:
+                moved += _migrate_vector_batch(rc, batch, field); batch = []
+        if batch:
+            moved += _migrate_vector_batch(rc, batch, field)
+    except Exception as e:
+        log.warning(f"vector-field migration for '{instance}' stopped early: {e}")
+    if moved:
+        log.info(f"'{instance}': moved {moved} vectors to field '{field}'")
+    return moved
+
+
+def _migrate_vector_batch(rc: redis.Redis, keys: list, field: str) -> int:
+    """One pipelined pass: read legacy vectors, write them under the new name."""
+    pipe = rc.pipeline(transaction=False)
+    for k in keys:
+        pipe.hmget(k, "embedding", field)
+    rows = pipe.execute()
+    write = rc.pipeline(transaction=False)
+    n = 0
+    for k, (legacy, current) in zip(keys, rows):
+        if current or not legacy:
+            continue                   # already migrated, or nothing to move
+        write.hset(k, field, legacy)
+        write.hdel(k, "embedding")
+        n += 1
+    if n:
+        write.execute()
+    return n
+
 
 def ensure_rag_index(instance: str, rc: redis.Redis | None = None):
     """
@@ -1430,6 +1527,17 @@ def ensure_rag_index(instance: str, rc: redis.Redis | None = None):
         return
     rc = rc or r()
     ver_key = f"rag:{instance}:schema_ver"
+    # _index_ensured is only set at the END, so concurrent first-callers all ran
+    # the slow path. Harmless when it was just FT.CREATE; not harmless now that
+    # it can move 57k vectors — the migration ran twice on a real corpus.
+    with _index_ensure_locks.setdefault(instance, threading.Lock()):
+        if instance in _index_ensured:
+            return                      # won by another thread while we waited
+        _ensure_rag_index_locked(instance, rc, ver_key)
+
+
+def _ensure_rag_index_locked(instance: str, rc: redis.Redis, ver_key: str) -> None:
+    """The slow path of ensure_rag_index, serialised per instance."""
     try:
         raw = rc.get(ver_key)
         have_ver = int(raw) if raw else 0
@@ -1440,6 +1548,13 @@ def ensure_rag_index(instance: str, rc: redis.Redis | None = None):
             # Up to date — create only if the index is somehow missing (no-op otherwise).
             _get_rag_index(instance, rc).create(overwrite=False)
         else:
+            # v5 renamed the vector hash field from "embedding" to
+            # "embedding_<dim>". Recreating the index alone would leave every
+            # existing chunk with its vector under the OLD name, so the new index
+            # would find nothing and the whole corpus would go dark with no error.
+            # Move the field first, then rebuild.
+            if have_ver < 5:
+                _migrate_vector_field(instance, rc)
             # New or outdated schema: recreate the index definition, keeping the
             # chunk data (overwrite drops the index only, not the documents).
             _get_rag_index(instance, rc).create(overwrite=True)
@@ -1505,7 +1620,7 @@ def add_chunks(instance: str, chunks: list[dict], rc: redis.Redis | None = None)
             # Which registry model produced this vector. Per chunk, not per index,
             # so an instance can later hold vectors from several models at once.
             "emb_model":   str(embedding_id_for()),
-            "embedding":   emb.astype(np.float32).tobytes(),
+            vector_field_for(): emb.astype(np.float32).tobytes(),
         })
     pipe.execute()
 
@@ -1749,7 +1864,8 @@ def search_rag(
         fetch_k = top_k * 2 if hybrid else top_k
         vq = VectorQuery(
             vector=q_emb.tolist(),
-            vector_field_name="embedding",
+            vector_field_name=vector_field_for(),
+            ef_runtime=_HNSW_EF_RUNTIME,
             return_fields=["text", "source"],
             num_results=fetch_k,
             filter_expression=src_expr,   # None → unfiltered KNN
@@ -1846,7 +1962,7 @@ def search_rag(
             try:
                 pipe = rc.pipeline(transaction=False)
                 for r in missing:
-                    pipe.hget(r["_key"], "embedding")
+                    pipe.hget(r["_key"], vector_field_for())
                 blobs = pipe.execute()
                 qv = np.asarray(q_emb, dtype=np.float32)
                 qn = float(np.linalg.norm(qv)) or 1.0
@@ -1916,7 +2032,8 @@ def search_rag(
                           else embed(query, is_query=True).astype(np.float32))
                 vq2 = VectorQuery(
                     vector=q_emb2.tolist(),
-                    vector_field_name="embedding",
+                    vector_field_name=vector_field_for(),
+                    ef_runtime=_HNSW_EF_RUNTIME,
                     return_fields=["text", "source"],
                     num_results=fetch_k,
                     filter_expression=src_expr,   # keep source scoping on retry
@@ -5658,7 +5775,13 @@ async def api_ingest_files(instance: str, files: list[UploadFile] = File(...), e
     results = []
     for f in files:
         dest, safe_name = safe_upload_dest(f.filename)
-        dest.write_bytes(await f.read())
+        blob = await f.read()
+        if len(blob) > _MAX_UPLOAD_BYTES:
+            raise HTTPException(
+                413, f"{f.filename!r} is {len(blob) // (1024 * 1024)} MB; the limit is "
+                     f"{_MAX_UPLOAD_BYTES // (1024 * 1024)} MB "
+                     f"(raise REDIRECALL_MAX_UPLOAD_MB to change it)")
+        dest.write_bytes(blob)
         result = await ingest_file(instance, dest, safe_name, rc)
         results.append(result)
         # Remove the uploaded file now that it has been indexed — the content
@@ -5865,6 +5988,7 @@ async def api_ingest_url(instance: str, payload: dict, endpoint: str | None = No
                   js_concurrency=js_concurrency, smart_mode=smart_mode,
                   min_words=min_words, rc=rc, force_reindex=force_reindex)
     )
+    reap_finished_crawls()          # drop tasks left by earlier crawls
     _crawl_tasks[url] = task
     try:
         await task
@@ -5955,6 +6079,7 @@ async def api_ingest_url_stream(
             await queue.put(None)   # sentinel: signals the generator to stop
 
     task = asyncio.create_task(run())
+    reap_finished_crawls()          # drop tasks left by earlier crawls
     _crawl_tasks[url] = task
 
     async def generate():
@@ -6018,7 +6143,7 @@ def _iter_chunks_pipelined(rc: redis.Redis, prefix: str):
                 pipe.hgetall(k)
             for d in pipe.execute():
                 if d:
-                    emb_raw = d.get(b"embedding", b"")
+                    emb_raw = d.get(vector_field_for().encode(), b"")
                     yield {
                         "id":            d.get(b"chunk_id", b"").decode(),
                         "text":          d.get(b"text",     b"").decode(),
@@ -6509,6 +6634,7 @@ async def ws_chat(ws: WebSocket, sid: str):
     await mgr.connect(ws, sid)
     if sid not in _sessions:
         _sessions[sid] = await asyncio.to_thread(load_session, sid)
+    touch_session(sid)
     try:
         while True:
             raw = await ws.receive_text()

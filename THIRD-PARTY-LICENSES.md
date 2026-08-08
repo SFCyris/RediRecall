@@ -49,22 +49,26 @@ These are **not** bundled with RediRecall or included in the Docker image. `redi
 | [KaTeX](https://katex.org) | LaTeX math | MIT |
 | [math.js](https://mathjs.org) | `plot` function graphs | Apache-2.0 |
 | [Chart.js](https://www.chartjs.org) | `chart` data charts | MIT |
+| [chartjs-plugin-zoom](https://github.com/chartjs/chartjs-plugin-zoom) | `chart` pan/zoom | MIT |
+| [Hammer.js](https://hammerjs.github.io/) | touch-gesture recognition for the `chart` zoom plugin | MIT |
 | [Mermaid](https://mermaid.js.org) | `mermaid` diagrams | MIT |
-| [Viz.js](https://github.com/mdaines/viz.js) | `dot` graph layout | MIT — embeds [Graphviz](https://graphviz.org) (EPL-1.0) |
+| [@viz-js/viz](https://github.com/mdaines/viz.js) | `dot` graph layout | MIT — embeds [Graphviz](https://graphviz.org) 15.1.1 (EPL-2.0) and Expat (MIT) |
 | [JSXGraph](https://jsxgraph.org) | `geometry` constructions | MIT or LGPL-3.0-or-later (**MIT elected**) |
 | [Leaflet](https://leafletjs.com) | `map` maps | BSD-2-Clause |
 | [Plotly.js](https://plotly.com/javascript/) | `plot3d` 3-D plots | MIT |
 | [SmilesDrawer](https://github.com/reymond-group/smilesDrawer) | `molecule` structures | MIT |
 | [3Dmol.js](https://3dmol.csb.pitt.edu/) | `molecule3d` 3D structures | BSD-3-Clause |
 | [abcjs](https://www.abcjs.net) | `abc` sheet music | MIT |
+| [vis-network](https://github.com/visjs/vis-network) | `network` force-directed graphs | Apache-2.0 or MIT |
 | [highlight.js](https://highlightjs.org) | code syntax highlighting | BSD-3-Clause |
 
-**Graphviz / EPL-1.0.** `viz.js` is MIT-licensed but embeds Graphviz, which is under the Eclipse Public License 1.0 — a license the FSF regards as GPL-incompatible. Because RediRecall neither bundles nor conveys it (the browser loads it from a CDN at runtime), it does not form a combined work with this AGPL codebase. Anyone who chooses to **vendor** the browser libraries into a distributed build should review that themselves; the `dot` lane can simply be dropped if that is a concern.
+**Graphviz / EPL-2.0.** `@viz-js/viz` is MIT-licensed but embeds Graphviz — version **15.1.1** in the `@viz-js/viz@3.29.0` build loaded here (the `graphvizVersion` string compiled into `viz-global.js`). Graphviz relicensed to the **Eclipse Public License 2.0** at **14.1.4** (early 2026; it was the Common Public License 1.0 before that, which downstream tools often labelled EPL-1.0), so every 14.1.4-or-later build — including the 15.1.1 embedded here — is EPL-2.0, a license the FSF still regards as GPL-incompatible. EPL-2.0 adds a "Secondary Licenses" mechanism that can grant GPL compatibility, but Graphviz did not elect it: Exhibit A of its `COPYING` is left as the unfilled `{name license(s)…}` boilerplate, so the GPL-incompatibility conclusion holds. Because RediRecall neither bundles nor conveys it (the browser loads it from a CDN at runtime), it does not form a combined work with this AGPL codebase. Anyone who chooses to **vendor** the browser libraries into a distributed build should review that themselves; the `dot` lane can simply be dropped if that is a concern. Note that EPL-2.0 §3.3 forbids stripping the `Copyright (c) Michael Daines … Graphviz, Expat` header from `viz-global.js` if the file is ever copied into a build.
 
 ## Services
 
 - **Redis 8** — tri-licensed RSALv2 / SSPLv1 / **AGPLv3**; RediRecall assumes the AGPLv3 option. Redis runs as a **separate process/service** reached over the network, not linked into this program.
-- **OpenStreetMap** — map tiles for the `map` block. Map data © OpenStreetMap contributors, licensed under the [ODbL](https://opendatacommons.org/licenses/odbl/); attribution is displayed on every rendered map. This is the only render type that contacts a third party.
+- **OpenStreetMap** — map tiles for the `map` block. Map data © OpenStreetMap contributors, licensed under the [ODbL](https://opendatacommons.org/licenses/odbl/); attribution is displayed on every rendered map. This is one of two render paths that reach a third-party host at runtime (the other is the `abc` soundfont below); the `map` lane is the only one that sends *content-derived* data — the requested tile coordinates.
+- **FluidR3_GM soundfont (CC-BY-3.0 — attribution required).** The `abc` Play button synthesises audio with abcjs, which fetches General-MIDI instrument samples at play time from `https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/` (the [midi-js-soundfonts](https://github.com/gleitz/midi-js-soundfonts) project's `gh-pages`). The **FluidR3_GM** SoundFont was created by **Frank Wen** and is distributed there under the **Creative Commons Attribution 3.0** license ([CC-BY-3.0](https://creativecommons.org/licenses/by/3.0/)) — this notice is the attribution that license requires. The samples are static files fetched over GET; no content-derived data is sent. If you do not need `abc` audio playback, remove `https://paulrosen.github.io` from `connect-src` in `_CSP` (`redirecall/main.py`) and the fetch never happens.
 - **LLM providers** (Ollama, Anthropic, OpenAI, Qwen, Mistral, Groq, Gemini) are contacted over their APIs. Calling a network API creates no license obligation for RediRecall; the client libraries are listed above — `anthropic` (MIT), `openai` (Apache-2.0, which also drives the OpenAI-compatible Qwen, Mistral and Groq endpoints) and `google-genai` (Apache-2.0). Ollama is reached over plain HTTP via `httpx` (BSD), with no vendor SDK.
 
 ## How this list was produced

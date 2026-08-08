@@ -11,11 +11,18 @@
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>RediRecall</title>
 <!-- defer: these libs are only used after load (chat render), so they must not block first paint -->
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/marked/9.1.6/marked.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.11/purify.min.js"></script>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css"/>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
-<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+<!-- marked 16.x DELETED marked.min.js (and lib/marked.cjs); the browser build now
+     only ships at the lib/ subpath, so <ver>/marked.min.js 404s. Pinned to 16.3.0
+     on purpose: 17.0.0 changed list/listItem token handling, which would alter how
+     chat answers render. -->
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/marked/16.3.0/lib/marked.umd.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.4.11/purify.min.js"></script>
+<!-- KaTeX CSS and JS must move together: the stylesheet carries version-locked
+     metrics (.katex-version). Pinned to 0.17.0: 0.18.0 prefixes every internal CSS
+     class, which would silently break the .katex-display override in this file. -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.17.0/katex.min.css"/>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.17.0/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.17.0/contrib/auto-render.min.js"></script>
 <!-- abcjs: renders ```abc music notation → SVG (post-render, like KaTeX for math) -->
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/abcjs/6.6.4/abcjs-basic-min.min.js"></script>
 <!-- math.js: evaluates ```plot formulas so we draw exact function graphs (no LLM arithmetic) -->
@@ -421,6 +428,20 @@ table.data-table tr:last-child td{border-bottom:none}
 .viz-restore-slot{display:flex;align-items:center;justify-content:center;gap:8px;padding:28px 14px;color:var(--text2);font-size:12px;border:1px dashed var(--border2);border-radius:var(--r3);margin:10px;cursor:pointer}
 .viz-restore-slot:hover{background:var(--glass2)}
 /* ── RAG used indicator ── */
+.rr-chart-data{border-top:1px solid var(--border);max-height:320px;overflow:auto;padding:8px}
+.rr-chart-data .rr-table-wrap{margin:0;border:0}
+.rr-table-wrap{position:relative;margin:10px 0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.rr-table-bar{display:flex;align-items:center;gap:6px;padding:5px 8px;background:var(--bg2);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.rr-table-filter{flex:1;min-width:90px;font-size:11px;padding:3px 7px;border:1px solid var(--border);border-radius:5px;background:var(--bg);color:var(--text)}
+.rr-table-scroll{overflow:auto;max-height:60vh}
+.rr-table-wrap table{margin:0;border:0;width:100%}
+.rr-table-wrap thead th{position:sticky;top:0;z-index:1;background:var(--bg2);cursor:pointer;user-select:none;white-space:nowrap}
+.rr-table-wrap thead th:hover{background:var(--bg3,var(--bg2));filter:brightness(1.08)}
+.rr-table-wrap thead th::after{content:'⇅';opacity:.28;margin-left:5px;font-size:10px}
+.rr-table-wrap thead th[data-dir="asc"]::after{content:'▲';opacity:.95}
+.rr-table-wrap thead th[data-dir="desc"]::after{content:'▼';opacity:.95}
+.rr-table-wrap td.rr-num,.rr-table-wrap th.rr-num{text-align:right;font-variant-numeric:tabular-nums}
+.rr-table-count{font-size:10px;color:var(--text2);white-space:nowrap}
 .rag-used-badge{display:inline-flex;align-items:center;gap:5px;font-size:10px;padding:2px 9px;border-radius:10px;font-weight:600;background:rgba(124,111,247,.13);border:1px solid rgba(124,111,247,.28);color:var(--accent3);white-space:nowrap;cursor:pointer}
 /* Session row: a div acting as a button so the delete control can nest legally. */
 .session-row{cursor:pointer}
@@ -556,12 +577,23 @@ table.data-table tr:last-child td{border-bottom:none}
 .rich-output.rich-loading::after{content:'Loading renderer…';display:block;width:100%;
   text-align:center;color:var(--text2);font-size:12px;animation:pulse 1.2s ease-in-out infinite}
 /* Wide diagrams should scroll, not be squashed to an illegible hairline. */
-.rich-wrap[data-kind="mermaid"] .rich-output,.rich-wrap[data-kind="dot"] .rich-output{
+.rich-wrap[data-kind="mermaid"] .rich-output,.rich-wrap[data-kind="dot"] .rich-output,
+.rich-wrap[data-kind="gantt"] .rich-output,.rich-wrap[data-kind="timeline"] .rich-output{
   justify-content:flex-start;overflow-x:auto}
-.rich-wrap[data-kind="mermaid"] .rich-output svg,.rich-wrap[data-kind="dot"] .rich-output svg{
+.rich-wrap[data-kind="mermaid"] .rich-output svg,.rich-wrap[data-kind="dot"] .rich-output svg,
+.rich-wrap[data-kind="gantt"] .rich-output svg,.rich-wrap[data-kind="timeline"] .rich-output svg{
   max-width:none;min-width:0}
+/* mermaid's timeline emits a viewBox with no width/height, so without an explicit
+   size it lays out as 0x0 and the card looks empty despite correct content. */
+.rich-wrap[data-kind="timeline"] .rich-output svg,
+.rich-wrap[data-kind="gantt"] .rich-output svg{flex:0 0 auto}
 .rich-output>*{max-width:100%}
 .rich-output svg{max-width:100%;height:auto}
+/* smiles-drawer emits a square SVG sized to its viewBox (measured 530×530); with the
+   generic height:auto above it overflows the molecule card's fixed 320px height and is
+   flex-centred, so ~60px is sliced off each end. Cap it to the card so the whole
+   structure fits (scrollHeight then equals clientHeight). */
+.rich-wrap[data-kind="molecule"] .rich-output svg{max-height:100%;width:auto;height:auto;max-width:100%}
 .rich-wrap[data-kind="map"] .rich-output,.rich-wrap[data-kind="geometry"] .rich-output,
 .rich-wrap[data-kind="plot3d"] .rich-output,.rich-wrap[data-kind="chart"] .rich-output{padding:0;display:block}
 .rich-wrap[data-kind="map"] .rich-output{padding:0}
@@ -2752,7 +2784,7 @@ function finalizeStreamingMsg(id){
   const bubble=el.querySelector('.msg-bubble');
   if(bubble){
     bubble.classList.remove('streaming-active'); // stop colour cycling
-    bubble.innerHTML=renderMarkdown(raw,{math:true});renderMath(bubble);renderAbcBlocks(bubble);renderPlotBlocks(bubble);renderRichBlocks(bubble);highlightCode(bubble);addCopyButtons(bubble);
+    bubble.innerHTML=renderMarkdown(raw,{math:true});renderMath(bubble);renderAbcBlocks(bubble);renderPlotBlocks(bubble);renderRichBlocks(bubble);highlightCode(bubble);addCopyButtons(bubble);enhanceTables(bubble);
   }
   const sess=S.sessions[S.sessionId];
   // Merge the side-channel meta (chunks/latency/cache) and record which model
@@ -3006,7 +3038,7 @@ function appendMessage(role,content,meta={}){
     </div>
   </div>`;
   area.insertAdjacentHTML('beforeend',html);
-  if(!isUser){const el=document.getElementById(id);renderMath(el);renderAbcBlocks(el);renderPlotBlocks(el);renderRichBlocks(el);highlightCode(el);addCopyButtons(el);}
+  if(!isUser){const el=document.getElementById(id);renderMath(el);renderAbcBlocks(el);renderPlotBlocks(el);renderRichBlocks(el);highlightCode(el);addCopyButtons(el);enhanceTables(el);}
   scrollToBottom();
 }
 
@@ -3104,7 +3136,7 @@ function showVersion(msgId,versions,idx){
   el.setAttribute('data-raw',raw);
   bubble.innerHTML=renderMarkdown(raw,{math:true});
   renderMath(bubble);renderAbcBlocks(bubble);renderPlotBlocks(bubble);
-  renderRichBlocks(bubble);highlightCode(bubble);addCopyButtons(bubble);
+  renderRichBlocks(bubble);highlightCode(bubble);addCopyButtons(bubble);enhanceTables(bubble);
   renderVersionSwitcher(msgId,versions,idx);
 }
 
@@ -4275,6 +4307,15 @@ function _loadCss(url){
     document.head.appendChild(l);
   });
 }
+// @viz-js/viz 3.x: Viz.instance() compiles and instantiates a fresh 1.3 MB WASM
+// module on every call, so the promise is cached — otherwise every ```dot block on
+// the page pays the full cold cost and keeps its own module alive.
+// The cache is dropped if instantiation itself rejects (same reasoning as
+// _loadScript's onerror: one transient failure must not disable the lane for the
+// rest of the session). A *render* failure is different — bad DOT throws out of
+// renderSVGElement without touching _vizP, and the instance stays reusable.
+let _vizP=null;
+const _vizInst=()=>_vizP||(_vizP=Viz.instance().catch(e=>{ _vizP=null; throw e; }));
 // Own-property lookup only. A fenced block whose language is `__proto__` or
 // `constructor` would otherwise pass a plain `RICH_LANES[k]` truthiness check and
 // be treated as a renderer.
@@ -4383,17 +4424,80 @@ function _solveRoots(expr){
   return found.length? 'x ≈ '+found.map(x=>fmt(Math.round(x*1000)/1000)).join(' , ')
                      : 'no root found in [-100, 100]';
 }
+// ── ```solve simplify / expand ──────────────────────────────────────────────
+// mathjs 15's simplify() cancels a common factor only when it is ALREADY factored
+// — (x-1)*(x+1)/(x-1) → x+1 — but it never factors x^2-1 itself, so the documented
+// example  simplify:(x^2-1)/(x-1)  (main.py:304) came back untouched. rationalize()
+// splits a polynomial fraction into numerator and denominator polynomials; dividing
+// them exactly (zero remainder) gives the cancelled form. Univariate only —
+// multivariate rational reduction is out of scope and falls through to simplify().
+function _polyCoeffs(node){                       // ascending-degree coefficients, or null
+  let d; try{ d=math.rationalize(node,{},true); }catch(e){ return null; }
+  if(d.denominator && d.denominator.toString()!=='1') return null;   // not a pure polynomial
+  if(d.variables.length!==1) return null;                           // one variable only
+  return {c:d.coefficients.slice(), v:d.variables[0]};
+}
+function _polyDivExact(num,den){                  // returns quotient coeffs iff remainder≈0
+  num=num.slice(); const dl=den.length, lead=den[dl-1];
+  if(num.length<dl || !isFinite(lead) || lead===0) return null;
+  const q=new Array(num.length-dl+1).fill(0);
+  for(let i=num.length-1;i>=dl-1;i--){ const f=num[i]/lead; q[i-(dl-1)]=f;
+    for(let j=0;j<dl;j++) num[i-(dl-1)+j]-=f*den[j]; }
+  if(num.slice(0,dl-1).some(r=>Math.abs(r)>1e-9)) return null;      // non-zero remainder
+  return q;
+}
+function _polyStr(c,v){                            // coeff array → algebraic string
+  const t=[];
+  for(let i=c.length-1;i>=0;i--){ if(Math.abs(c[i])<1e-12) continue;
+    const sign = c[i]<0 ? ' - ' : (t.length?' + ':''); const co=Math.abs(c[i]);
+    const coStr=(co===1&&i!==0)?'':String(co);
+    const pow = i===0?'':(i===1?v:v+'^'+i);
+    t.push(sign + coStr + (coStr&&pow?'*':'') + pow); }
+  return t.length ? t.join('').trim() : '0';
+}
+function _solveSimplify(expr){
+  let det; try{ det=math.rationalize(expr,{},true); }catch(e){ det=null; }
+  if(det && det.denominator && det.denominator.toString()!=='1'){
+    const N=_polyCoeffs(det.numerator), D=_polyCoeffs(det.denominator);
+    if(N && D && N.v===D.v){ const q=_polyDivExact(N.c,D.c);
+      if(q) return math.simplify(_polyStr(q,N.v)).toString(); }
+  }
+  return math.simplify(expr).toString();
+}
+function _solveExpand(expr){
+  // rationalize() multiplies products and powers out to a single polynomial —
+  // (x+1)^2 → x^2+2*x+1 — which is what expand means. The old call
+  // simplify(expr,{},{exactFractions:false}) read {} as the scope slot, so it
+  // never expanded anything.
+  try{ return math.rationalize(expr).toString(); }
+  catch(e){ return math.simplify(expr).toString(); }
+}
+// mermaid's gantt and timeline emit an SVG carrying only a viewBox. As a flex
+// item with min-width:0 that lays out 0px wide, so the card looks empty even
+// though the content is correct. Give it the intrinsic size the viewBox implies.
+function _sizeFromViewBox(out){
+  const svg=out.querySelector('svg'); if(!svg)return;
+  const vb=(svg.getAttribute('viewBox')||'').split(/[\s,]+/).map(Number);
+  if(vb.length!==4||!isFinite(vb[2])||!isFinite(vb[3])||vb[2]<=0)return;
+  svg.setAttribute('width',vb[2]);
+  svg.setAttribute('height',vb[3]);
+  svg.style.width=vb[2]+'px';
+  svg.style.height='auto';
+  svg.style.maxWidth='none';
+  svg.style.flex='0 0 auto';
+}
+
 const RICH_LANES={
   mermaid:{
     label:'⬗ Diagram',
     load:()=>_loadScript(CDN+'mermaid/11.12.0/mermaid.min.js'),
-    async draw(out,src,uid){
+    async draw(out,src,uid,extra){
       // htmlLabels:false must be set at BOTH levels — otherwise mermaid emits node
       // labels inside <foreignObject>, which the SVG sanitiser strips, leaving
       // shapes with no text. With it off, labels are real <text> and survive.
       mermaid.initialize({startOnLoad:false,securityLevel:'strict',
         theme:_isDark()?'dark':'default',htmlLabels:false,
-        flowchart:{htmlLabels:false},class:{htmlLabels:false}});
+        flowchart:{htmlLabels:false},class:{htmlLabels:false},...(extra||{})});
       try{
         const {svg}=await mermaid.render('mmd-'+uid,src);
         out.innerHTML=window.DOMPurify?DOMPurify.sanitize(svg,{USE_PROFILES:{svg:true,svgFilters:true}}):svg;
@@ -4407,21 +4511,179 @@ const RICH_LANES={
     }},
   chart:{
     label:'📊 Chart', fixed:'340px',
-    load:()=>_loadScript(CDN+'Chart.js/4.5.0/chart.umd.min.js'),
+    load:async()=>{
+      await _loadScript(CDN+'Chart.js/4.5.0/chart.umd.min.js');
+      // hammer.js first: the zoom plugin needs it for pinch/drag gestures.
+      await _loadScript(CDN+'hammer.js/2.0.8/hammer.min.js');
+      await _loadScript(CDN+'chartjs-plugin-zoom/2.2.0/chartjs-plugin-zoom.min.js');
+      // The UMD build self-registers only when it can see a global Chart at load
+      // time; register defensively so ordering changes cannot silently disable it.
+      try{ if(window.ChartZoom&&Chart.registry.plugins.get('zoom')===undefined) Chart.register(window.ChartZoom); }catch(e){}
+    },
     async draw(out,src){
       const cfg=JSON.parse(src);
       const cv=document.createElement('canvas'); out.appendChild(cv);
-      out._richInst={kind:'chart',obj:new Chart(cv,{...cfg,options:{...(cfg.options||{}),animation:false,responsive:true,maintainAspectRatio:false}})};
+      // Wheel/pinch zoom and drag-pan, only on charts with a continuous x axis —
+      // panning a bar or pie chart is meaningless.
+      const zoomable=['line','scatter','bubble'].includes(cfg.type);
+      // Zoom floors derived from the DATA. `minRange:1e-9` was a token value and
+      // it made zoom a one-way trap: on a category axis the plugin steps by whole
+      // label indices, so five labels collapsed from [0,4] to [2,2] — zero width,
+      // one label — in two wheel notches, and on a linear axis 1e-9 lets the
+      // window shrink past float resolution. Two whole labels on a category axis
+      // and a thousandth of the data span on a numeric one both leave plenty of
+      // zoom while keeping the range non-degenerate.
+      const _pt=p=>p&&typeof p==='object'&&('x' in p||'y' in p);
+      const _num=v=>typeof v==='number'?v:(typeof v==='string'?Date.parse(v):NaN);
+      // Chart.js takes three data shapes — numbers, {x,y[,r]} points, and an
+      // object map {"Jan":10}. Normalise so the span below sees all three.
+      const _pts=(cfg.data?.datasets||[]).flatMap(s=>Array.isArray(s.data)?s.data
+        :(s.data&&typeof s.data==='object')?Object.entries(s.data).map(([k,v])=>({x:k,y:v})):[]);
+      // Category axis — the one that steps by whole indices and can collapse —
+      // unless the x values are genuinely numeric (or dates). Labels and object
+      // map keys both produce one.
+      const _cat=(cfg.data?.labels||[]).length>0||!_pts.some(p=>_pt(p)&&isFinite(_num(p.x)));
+      // Reduce, not Math.max(...arr): a long series would blow the argument limit.
+      const _span=sel=>{let lo=Infinity,hi=-Infinity;
+        for(const p of _pts){const v=_num(sel(p));
+          if(isFinite(v)){if(v<lo)lo=v; if(v>hi)hi=v;}}
+        return hi>lo?hi-lo:0;};
+      const _floor=s=>s>0?s/1000:1e-9;
+      const limits={x:{minRange:_cat?2:_floor(_span(p=>_pt(p)?p.x:NaN))},
+                    y:{minRange:_floor(_span(p=>_pt(p)?p.y:p))}};
+      // Reveal ⟲ Reset zoom as soon as the view stops matching the data. The
+      // button ships hidden and there was no onZoom/onPan callback at all, so it
+      // stayed display:none in every state (measured offsetHeight 0, and a real
+      // click timed out): a zoomed or panned chart could only be restored by
+      // reloading the page.
+      // The card is captured HERE, not looked up from the canvas when the
+      // callback fires: openMaximize() moves this .rich-output into the overlay,
+      // so at that point the canvas has no .rich-wrap ancestor and a zoom made
+      // while maximized would leave the button hidden again after restoring.
+      const card=out.closest?.('.rich-wrap');
+      const showReset=({chart})=>{
+        const w=card||chart?.canvas?.closest?.('.rich-wrap');
+        const b=w?.querySelector('[data-act="chart-reset"]');
+        if(b)b.style.display='';
+      };
+      const opts={...(cfg.options||{}),animation:false,responsive:true,maintainAspectRatio:false,
+        plugins:{...((cfg.options||{}).plugins||{}),
+          ...(zoomable?{zoom:{zoom:{wheel:{enabled:true,modifierKey:'ctrl'},pinch:{enabled:true},mode:'xy',onZoom:showReset},
+                              pan:{enabled:true,mode:'xy',onPan:showReset},
+                              limits}}:{})}};
+      const obj=new Chart(cv,{...cfg,options:opts});
+      out._richInst={kind:'chart',obj,cfg,zoomable};
+    }},
+
+  // Gantt and timeline are mermaid dialects. Giving them their own fence means the
+  // model can emit ```gantt directly instead of remembering the mermaid header.
+  gantt:{
+    label:'📅 Gantt',
+    load:()=>RICH_LANES.mermaid.load(),
+    async draw(out,src,uid){
+      const body=/^\s*gantt\b/.test(src)?src:('gantt\n'+src);
+      // Without useWidth the chart measures its (detached) container as 0 wide and
+      // mermaid emits viewBox="0 0 0 h" — correct bars, zero-width canvas.
+      // Sized to the card, not wider: at 900 the bars ran past the right edge and
+      // the date ticks collided. Wide charts still scroll via overflow-x.
+      await RICH_LANES.mermaid.draw(out,body,uid,
+        {gantt:{useWidth:Math.max(520,Math.round(out.clientWidth||540)),useMaxWidth:false,
+                barHeight:22,barGap:6,leftPadding:88,gridLineStartPadding:28,fontSize:12,
+                // Default ticks land every few days and smear into an unreadable
+                // band at card width. Weekly ticks with a short format fit.
+                tickInterval:'1week',axisFormat:'%b %d'}});
+      _sizeFromViewBox(out);
+    }},
+  timeline:{
+    label:'🕒 Timeline',
+    load:()=>RICH_LANES.mermaid.load(),
+    async draw(out,src,uid){
+      const body=/^\s*timeline\b/.test(src)?src:('timeline\n'+src);
+      await RICH_LANES.mermaid.draw(out,body,uid);
+      _sizeFromViewBox(out);
+    }},
+
+  // Force-directed network. `dot` renders Graphviz statically; this one is
+  // draggable and physics-laid-out, which is what "network" usually means.
+  network:{
+    label:'🕸 Network', fixed:'420px',
+    load:async()=>{
+      // v10's only breaking change is packaging (hybrid ESM+CJS); the standalone
+      // UMD bundle still sets window.vis, so `new vis.Network(...)` below is unchanged.
+      // The doubled /dist/dist/ in the CSS path is correct — the flat path 404s.
+      await _loadCss(CDN+'vis-network/10.1.0/dist/dist/vis-network.min.css');
+      await _loadScript(CDN+'vis-network/10.1.0/dist/vis-network.min.js');
+    },
+    async draw(out,src,uid){
+      const spec=JSON.parse(src);
+      const host=document.createElement('div');
+      host.id='net-'+uid; host.style.width='100%'; host.style.height='100%';
+      out.appendChild(host);
+      const dark=_isDark();
+      const nodes=(spec.nodes||[]).map(n=>typeof n==='string'?{id:n,label:n}:n);
+      const edges=(spec.edges||spec.links||[]).map(e=>({from:e.from??e.source,to:e.to??e.target,label:e.label}));
+      const net=new vis.Network(host,{nodes,edges},{
+        nodes:{shape:'dot',size:14,font:{color:dark?'#e6e6e6':'#222',size:13}},
+        edges:{color:{color:dark?'#8a8a9a':'#9aa'},arrows:spec.directed?'to':undefined,smooth:{type:'dynamic'}},
+        physics:{stabilization:{iterations:180}},
+        interaction:{hover:true,tooltipDelay:150},
+        ...(spec.options||{})});
+      out._richInst={kind:'network',obj:net};
+    }},
+
+  // GeoJSON on the Leaflet map the `map` lane already loads.
+  geojson:{
+    label:'🌍 GeoJSON', fixed:'420px',
+    load:()=>RICH_LANES.map.load(),
+    async draw(out,src,uid){
+      const gj=JSON.parse(src);
+      const host=document.createElement('div');
+      host.id='geo-'+uid; host.style.width='100%'; host.style.height='100%';
+      out.appendChild(host);
+      const map=L.map(host,{scrollWheelZoom:false});
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        {maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+      const layer=L.geoJSON(gj,{
+        onEachFeature:(f,l)=>{
+          const p=f.properties||{};
+          const html=Object.keys(p).slice(0,12)
+            .map(k=>`<b>${escHtml(String(k))}</b>: ${escHtml(String(p[k]))}`).join('<br>');
+          if(html) l.bindPopup(html);
+        },
+        pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:6,weight:2})});
+      layer.addTo(map);
+      try{
+        const b=layer.getBounds();
+        if(b.isValid()) map.fitBounds(b,{padding:[18,18]}); else map.setView([20,0],2);
+      }catch(e){ map.setView([20,0],2); }
+      setTimeout(()=>map.invalidateSize(),60);
+      out._richInst={kind:'map',obj:map};
     }},
   dot:{
     label:'◈ Graph',
-    load:async()=>{ await _loadScript(CDN+'viz.js/2.1.2/viz.js'); await _loadScript(CDN+'viz.js/2.1.2/full.render.js'); },
+    // @viz-js/viz 3.x replaces the abandoned viz.js 2.1.2 (frozen on cdnjs since
+    // 2018, Graphviz 2.40.1). It is NOT on cdnjs, so the jsDelivr URL is spelled
+    // out in full rather than built from CDN. One 1.3 MB bundle replaces the old
+    // two-file 2.0 MB asm.js pair, and the WASM is inlined (no separate .wasm fetch)
+    // — which is why main.py's script-src needs 'wasm-unsafe-eval'.
+    // Graphviz 15.1.1 also parses #RGB shorthand colours, which 2.40.1 silently
+    // failed on and fell back to black (the "invisible label" bug).
+    load:()=>_loadScript('https://cdn.jsdelivr.net/npm/@viz-js/viz@3.29.0/dist/viz-global.js'),
     async draw(out,src){
-      const el=await new Viz().renderSVGElement(src);
+      // v3 dropped the `new Viz()` constructor: the global is now a namespace
+      // object and Viz.instance() returns a Promise<Viz>. renderSVGElement() on the
+      // resolved instance is synchronous. The instance is cached because every
+      // instance() call spins up its own 1.3 MB WASM module (~63 ms cold vs ~5 ms
+      // reused), and a render that throws leaves the instance usable.
+      const el=(await _vizInst()).renderSVGElement(src);
       el.removeAttribute('width'); el.style.maxWidth='100%'; el.style.height='auto';
-      // MUST sanitise: Graphviz does not escape '"' when writing a node's URL=/href=
-      // into xlink:href, so DOT input can break out of the attribute and inject an
-      // element with an auto-firing handler. Never append Viz output directly.
+      // MUST sanitise. Graphviz 2.40.1 did not escape '"' when writing a node's
+      // URL=/href= into xlink:href, so DOT input could break out of the attribute
+      // and inject an element with an auto-firing handler. Graphviz 15.1.1 does
+      // escape it (measured: the breakout DOT now yields a single, inert
+      // xlink:href="&quot; onload=&quot;alert(1)"), but this stays as the
+      // defence-in-depth layer — it is also what strips javascript: URLs, which
+      // Graphviz passes through verbatim. Never append Viz output directly.
       out.innerHTML=window.DOMPurify
         ? DOMPurify.sanitize(el.outerHTML,{USE_PROFILES:{svg:true,svgFilters:true}})
         : '';
@@ -4435,7 +4697,24 @@ const RICH_LANES={
       host.id='jxg-'+uid; host.style.width='100%'; host.style.height='100%';
       out.appendChild(host);
       // Global default too: JSXGraph's own axis/tick labels also go through this.
-      try{ JXG.Options.text.display='internal'; JXG.Options.label.display='internal'; }catch(e){}
+      try{
+        JXG.Options.text.display='internal'; JXG.Options.label.display='internal';
+        // JSXGraph paints no backdrop (unlike Graphviz), so axis/tick/label text sits
+        // straight on the card. In dark mode the default black text is ~2:1 on the dark
+        // card — below WCAG AA (4.5:1). Repaint text and labels light for dark mode.
+        // JXG.Options is a process-wide singleton, so snapshot the pristine defaults
+        // once and restore them in light mode, or a dark board would leave light text on
+        // the next light one. label.strokeColor covers BOTH the numeric axis tick labels
+        // and element name-labels; text.strokeColor covers standalone text elements.
+        if(!JXG._rrGeoDefaults) JXG._rrGeoDefaults={
+          text:JXG.Options.text.strokeColor, label:JXG.Options.label.strokeColor,
+          axis:JXG.Options.axis.strokeColor, atick:JXG.Options.axis.ticks.strokeColor};
+        const _d=JXG._rrGeoDefaults, _dark=_isDark();
+        JXG.Options.text.strokeColor       = _dark?'#e6e6e6':_d.text;
+        JXG.Options.label.strokeColor      = _dark?'#e6e6e6':_d.label;
+        JXG.Options.axis.strokeColor       = _dark?'#8a8a9a':_d.axis;
+        JXG.Options.axis.ticks.strokeColor = _dark?'#8a8a9a':_d.atick;
+      }catch(e){}
       const board=JXG.JSXGraph.initBoard(host.id,{
         boundingbox:_geoNum(spec.boundingbox||[-6,6,6,-6]), axis:spec.axis!==false,
         showCopyright:false, showNavigation:false, keepaspectratio:spec.keepaspectratio!==false});
@@ -4515,9 +4794,28 @@ const RICH_LANES={
       const _strip=v=>typeof v==='string'?v.replace(/<[^>]*>/g,''):
         (Array.isArray(v)?v.map(_strip):(v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,x])=>[k,_strip(x)])):v));
       spec.layout=_strip(spec.layout||{});
+      // Plotly 3.x dropped the string form of every `title` — a bare string is
+      // ignored and the placeholder ("Click to enter … title") is shown instead,
+      // silently. The base instruction documents the string form, and so does most
+      // Plotly material on the web, so accept both and normalise to {text:…} at
+      // every place Plotly takes a title: the plot, the cartesian axes, the 3-D
+      // scene axes, the legend, the shared coloraxis colorbar, and each trace's own
+      // colorbar (direct for surface/heatmap, or via marker/line for scatter). _strip
+      // has already run over layout, so wrapping a layout title is a no-op there;
+      // trace titles below have not been stripped, so _titleFix strips them too.
+      const _titleFix=o=>{ if(o&&typeof o.title==='string') o.title={text:_strip(o.title)}; };
+      _titleFix(spec.layout);
+      for(const ax of ['xaxis','yaxis','zaxis']) _titleFix(spec.layout[ax]);
+      if(spec.layout.scene) for(const ax of ['xaxis','yaxis','zaxis']) _titleFix(spec.layout.scene[ax]);
+      _titleFix(spec.layout.legend);
+      if(spec.layout.coloraxis) _titleFix(spec.layout.coloraxis.colorbar);
       spec.data=spec.data.map(t=>t&&typeof t==='object'
         ? {...t, ...(t.text!==undefined?{text:_strip(t.text)}:{}), ...(t.name!==undefined?{name:_strip(t.name)}:{}),
            ...(t.hovertext!==undefined?{hovertext:_strip(t.hovertext)}:{})} : t);
+      spec.data.forEach(t=>{ if(!t||typeof t!=='object')return;
+        _titleFix(t.colorbar);
+        if(t.marker) _titleFix(t.marker.colorbar);
+        if(t.line)   _titleFix(t.line.colorbar); });
       const host=document.createElement('div'); host.style.width='100%'; host.style.height='100%';
       out.appendChild(host);
       await Plotly.newPlot(host, spec.data, {autosize:true,margin:{l:0,r:0,t:40,b:0},...(spec.layout||{})},
@@ -4565,8 +4863,8 @@ const RICH_LANES={
           const [,op,expr]=m; a.textContent=op+': '+expr;
           try{
             if(/^derivative$/i.test(op))      b.textContent=math.derivative(expr,'x').toString();
-            else if(/^simplify$/i.test(op))   b.textContent=math.simplify(expr).toString();
-            else if(/^expand$/i.test(op))     b.textContent=math.simplify(expr,{},{exactFractions:false}).toString();
+            else if(/^simplify$/i.test(op))   b.textContent=_solveSimplify(expr);
+            else if(/^expand$/i.test(op))     b.textContent=_solveExpand(expr);
             else if(/^evaluate$/i.test(op))   b.textContent=math.format(math.evaluate(expr),{precision:12});
             else                              b.textContent=_solveRoots(expr);
           }catch(err){ b.textContent='✕ '+err.message.slice(0,70); b.classList.add('calc-bad'); }
@@ -4896,16 +5194,78 @@ function _syncHljsTheme(create){
   });
 }
 
-// Configure marked once: intercept ```svg and ```xml-with-svg code fences and
-// render the SVG directly instead of displaying escaped source code.
+// _rrMathFinalize toggles how the rrMath extension (below) renders a math token:
+// on finalize (opts.math) it emits a fillable rr-math span that renderMath() later
+// fills with KaTeX; mid-stream it re-emits the raw delimiters, so a half-typed
+// formula shows as plain text instead of a broken span. renderMarkdown sets it per
+// call — safe because marked.parse is synchronous, so there is no reentrancy.
+let _rrMathFinalize=true;
+// Configure marked once: register the inline math tokeniser AND intercept ```svg /
+// ```xml-with-svg code fences so SVG renders directly instead of as escaped source.
 (function setupMarked(){
   // With deferred CDN scripts, `marked` may not exist at parse time — re-run once it's ready.
   if(typeof marked==='undefined'){document.addEventListener('DOMContentLoaded',setupMarked,{once:true});return;}
   marked.use({
+    // Inline math tokeniser. Math is recognised by MARKED ITSELF, in document order,
+    // not pre-extracted from the raw text with a global regex. That ordering is the
+    // whole fix for three long-standing corruptions:
+    //   • currency + math in one line ("Refund $20 if the error $e$ …"): the old
+    //     regex paired the currency $ with the math $. Here a $ opens math only when
+    //     it is immediately followed by a non-space AND the closing $ is immediately
+    //     preceded by a non-space and not followed by a digit — so "$20 …" can never
+    //     be an opener that swallows the real "$e$".
+    //   • $ inside a link URL or image alt ([d](…/$a^2$/…), ![$x^2$](…)): marked's
+    //     link/image tokenisers claim those spans first, so this tokeniser never sees
+    //     the $, and no private-use sentinel is left to be encodeURI'd into an href
+    //     or injected into an alt attribute.
+    //   • $ inside `code` / ```fences```: marked's code tokenisers claim them first.
+    // Order matters: $$…$$ and \[…\] (display) are tried before $…$ and \(…\) (inline).
+    extensions:[{
+      name:'rrMath',
+      level:'inline',
+      start(src){
+        const i=[src.indexOf('$'),src.indexOf('\\('),src.indexOf('\\[')].filter(x=>x>=0);
+        return i.length?Math.min.apply(null,i):undefined;
+      },
+      tokenizer(src){
+        let m;
+        if((m=/^\$\$([\s\S]+?)\$\$/.exec(src)))  return {type:'rrMath',raw:m[0],text:m[1],display:true};
+        if((m=/^\\\[([\s\S]+?)\\\]/.exec(src)))   return {type:'rrMath',raw:m[0],text:m[1],display:true};
+        if((m=/^\\\(([\s\S]+?)\\\)/.exec(src)))   return {type:'rrMath',raw:m[0],text:m[1],display:false};
+        // $ inline $: open not followed by whitespace; close preceded by a non-space
+        // (content can't end in a space — this is the rule that stops "$20 … $e$" from
+        // pairing the currency $ with the math $) and not followed by a digit; \$ allowed.
+        // The two content alternatives are DISJOINT (one requires a leading backslash,
+        // the other forbids it) so the lazy quantifier can't backtrack quadratically —
+        // "$" + "a\" repeated with no close hung a naive /(?:\\.|[^$\n])*?/ for seconds.
+        if((m=/^\$(?!\$)(?!\s)((?:\\[^\n]|[^\\$\n])*?(?:\\[^\s\n]|[^\\\s$\n]))\$(?!\d)/.exec(src))) return {type:'rrMath',raw:m[0],text:m[1],display:false};
+      },
+      renderer(token){
+        if(_rrMathFinalize)
+          return '<span class="rr-math'+(token.display?' rr-display':'')+'" data-display="'+(token.display?1:0)+'" data-tex="'+escHtml(token.text)+'"></span>';
+        return escHtml((token.display?'$$':'$')+token.text+(token.display?'$$':'$'));
+      }
+    }],
     renderer:{
+      // Math inside an image's alt ("![$x^2$](…)") must NOT become an rr-math <span>:
+      // marked renders the alt's inline tokens into the alt="" attribute, so the span
+      // would truncate it at its first quote (the card then read 🖼 <SPAN CLASS=). An
+      // alt is plain text a screen reader speaks, so math there degrades to its raw
+      // source. Neutralise any rrMath tokens to text, then return false so marked's own
+      // image renderer builds the <img> exactly as it does for every other image.
+      image(token){
+        const ts=token.tokens;
+        if(ts && ts.some(t=>t.type==='rrMath')){
+          token.tokens=ts.map(t=> t.type==='rrMath'
+            ? {type:'text',raw:t.raw,text:(t.display?'$$':'$')+t.text+(t.display?'$$':'$'),escaped:false}
+            : t);
+        }
+        return false;   // defer to marked's default <img> rendering
+      },
       code(codeOrToken, langArg){
-        // marked v9 passes a token object {text, lang}; older versions pass (code, lang).
-        // Normalise to plain strings so the rest of the handler is version-agnostic.
+        // marked v9+ passes a token object {text, lang} as the ONLY argument (v16
+        // still does); older versions pass (code, lang). Normalise to plain strings
+        // so the rest of the handler is version-agnostic.
         const isToken = codeOrToken !== null && typeof codeOrToken === 'object';
         const code = isToken ? (codeOrToken.text ?? '') : (codeOrToken ?? '');
         const lang = (isToken ? codeOrToken.lang : langArg) ?? '';
@@ -4948,6 +5308,7 @@ function _syncHljsTheme(create){
               <span class="svg-render-label">♪ Music</span>
               <button class="svg-act-btn" data-act="abc-src">Source</button>
               <button class="svg-act-btn" data-act="abc-copy">Copy ABC</button>
+              <button class="svg-act-btn" data-act="abc-play">▶ Play</button>
               <button class="svg-act-btn" data-act="rich-png">⬇ PNG</button>
               <button class="svg-act-btn" data-act="viz-max">⛶ Maximize</button>
             </div>
@@ -4991,7 +5352,7 @@ function _syncHljsTheme(create){
           // a DOM-to-canvas dependency just for this.
           const svgPngLanes=new Set(['mermaid','dot','geometry','molecule']);
           const pngBtn = svgPngLanes.has(laneKey) ? `<button class="svg-act-btn" data-act="rich-png">⬇ PNG</button>`
-                       : laneKey==='chart' ? `<button class="svg-act-btn" data-act="chart-png">⬇ PNG</button>`
+                       : laneKey==='chart' ? `<button class="svg-act-btn" data-act="chart-data">▦ Data</button><button class="svg-act-btn" data-act="chart-reset" style="display:none">⟲ Reset zoom</button><button class="svg-act-btn" data-act="chart-png">⬇ PNG</button>`
                        : laneKey==='plot3d' ? `<button class="svg-act-btn" data-act="plot3d-png">⬇ PNG</button>`
                        : laneKey==='molecule3d' ? `<button class="svg-act-btn" data-act="molecule3d-png">⬇ PNG</button>`
                        : '';
@@ -5078,6 +5439,55 @@ document.addEventListener('click',function(e){
     openMaximize(btn);
   }else if(act==='viz-restore'){
     closeMaximize();
+  }else if(act==='chart-data'){
+    // Show the numbers behind the chart. A generated chart is only trustworthy if
+    // the reader can check the series it was drawn from.
+    const wrap=btn.closest('.rich-wrap'); const out=wrap?.querySelector('.rich-output');
+    const inst=out?._richInst; if(!inst?.cfg)return;
+    let tbl=wrap.querySelector('.rr-chart-data');
+    if(tbl){ tbl.remove(); btn.textContent='▦ Data'; return; }
+    const d=inst.cfg.data||{}; const labels=d.labels||[]; const sets=d.datasets||[];
+    let head,rows;
+    if(labels.length){
+      head=['#',...sets.map((x,i)=>x.label||('series '+(i+1)))];
+      rows=labels.map((l,i)=>[l,...sets.map(x=>{
+        const v=(x.data||[])[i];
+        return (v&&typeof v==='object')?(v.y??JSON.stringify(v)):v;
+      })]);
+    }else{
+      // scatter and bubble carry no `labels` at all, so building rows out of
+      // d.labels produced an empty table for exactly the two types that also get
+      // zoom (measured rows: []). One row per POINT instead, with the radius
+      // column only when some point actually has one.
+      // Chart.js also renders object-form data ({"Jan":10}), which has no labels
+      // either, so it lands here — and `.some`/`.forEach` on a plain object throws
+      // out of the click handler and leaves no table at all.
+      const pts=s=>Array.isArray(s.data)?s.data
+        :(s.data&&typeof s.data==='object')?Object.entries(s.data).map(([k,v])=>({x:k,y:v})):[];
+      const hasR=sets.some(s=>pts(s).some(p=>p&&typeof p==='object'&&p.r!=null));
+      head=['series','x','y',...(hasR?['r']:[])];
+      rows=[];
+      sets.forEach((s,si)=>{
+        const name=s.label||('series '+(si+1));
+        pts(s).forEach((p,pi)=>{
+          const o=(p&&typeof p==='object')?p:{x:pi,y:p};
+          rows.push([name,o.x,o.y,...(hasR?[o.r]:[])]);
+        });
+      });
+    }
+    tbl=document.createElement('div'); tbl.className='rr-chart-data';
+    tbl.innerHTML='<table><thead><tr>'+head.map(h=>`<th>${escHtml(String(h))}</th>`).join('')+
+      '</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(c=>`<td>${escHtml(String(c??''))}</td>`).join('')+'</tr>').join('')+
+      '</tbody></table>';
+    wrap.appendChild(tbl);
+    enhanceTables(tbl);
+    btn.textContent='▦ Hide data';
+  }else if(act==='chart-reset'){
+    const inst=btn.closest('.rich-wrap')?.querySelector('.rich-output')?._richInst;
+    try{ inst?.obj?.resetZoom?.(); }catch(e){}
+    btn.style.display='none';
+  }else if(act==='abc-play'){
+    _abcPlay(btn);
   }else if(act==='chart-png'){
     const wrap=btn.closest('.rich-wrap'); const inst=wrap?.querySelector('.rich-output')?._richInst;
     if(inst?.kind==='chart'){ const a=document.createElement('a'); a.href=inst.obj.toBase64Image(); a.download=`chart_${Date.now()}.png`; a.click(); toast('PNG downloaded','success'); }
@@ -5133,40 +5543,27 @@ function _wrapLooseSvg(text){
 function renderMarkdown(text,opts){
   opts=opts||{};
   if(!text)return'';
+  // Defensive strip of the private-use sentinels the old pipeline stashed code/math
+  // with. The rrMath extension no longer uses them, so this is no longer load-bearing,
+  // but a stray PUA char in model/RAG output is never legitimate chrome and dropping it
+  // keeps any future marker collision-free. PDF text layers emit PUA routinely.
+  text=String(text).replace(/[\uE000\uE001\uE100\uE101]/g,'');
   // Fail closed: the sanitiser is the only thing standing between untrusted
   // model/RAG output and the DOM. If DOMPurify didn't load (CDN blocked, offline
   // install), render escaped plain text rather than raw, unsanitised HTML.
   if(!window.DOMPurify || typeof marked==='undefined'){ return escHtml(text); }
   text=_wrapLooseSvg(text);   // models often emit a raw <svg> with no code fence
-  // Protect LaTeX from the markdown parser: marked would consume the underscores
-  // in e.g. \text{H}_{12} as emphasis and corrupt the math BEFORE KaTeX renders it.
-  // Code spans are hidden FIRST so the math extractor never reaches a `$` that lives
-  // inside inline/fenced code (e.g. `$PATH`, `$HOME`) — those must stay literal text,
-  // not be swallowed as a math span. Code is restored before marked so it still renders.
-  const _code=[];
-  const _cstash=m=>{_code.push(m);return '\uE100'+(_code.length-1)+'\uE101';};
-  text=text
-    .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g,_cstash)   // fenced code / render-lane blocks
-    .replace(/(`+)[^\n]*?\1/g,_cstash);                    // inline `code`
-  const _math=[];  // {tex, display} — delimiters stripped, display mode recorded
-  const _mstash=display=>(m,tex)=>{_math.push({tex,display});return '\uE000'+(_math.length-1)+'\uE001';};
-  text=text
-    .replace(/\$\$([\s\S]+?)\$\$/g,_mstash(true))              // $$ display $$
-    .replace(/\\\[([\s\S]+?)\\\]/g,_mstash(true))            // \[ display \]
-    .replace(/\\\(([\s\S]+?)\\\)/g,_mstash(false))           // \( inline \)
-    .replace(/\$(?=\S)((?:\\.|[^$\n])+?)\$(?!\d)/g,_mstash(false)); // $ inline $ (skip $5 … $10 currency)
-  text=text.replace(/\uE100(\d+)\uE101/g,(m,i)=>_code[Number(i)]); // restore code so marked renders it
+  // Math ($…$, $$…$$, \(…\), \[…\]) is tokenised by marked's rrMath extension
+  // (registered in setupMarked), NOT pre-extracted here with a regex. Letting marked
+  // own the tokenisation, in document order, is what keeps currency ("$20 … $e$"),
+  // shell vars ($PATH in code) and $ inside link URLs / image alts from being
+  // mis-read as math — see the extension for the full rationale. It also means the
+  // underscores in e.g. \text{H}_{12} are consumed as part of the math token, so
+  // marked never emphasis-processes them. _rrMathFinalize tells the extension's
+  // renderer to emit a fillable rr-math span (finalize) or, mid-stream, the raw
+  // delimiters so a half-typed formula never renders as a broken span.
+  _rrMathFinalize=!!opts.math;
   let html=marked.parse(text,{breaks:true,gfm:true});
-  // Restore math. At finalize (opts.math) emit an rr-math marker span carrying the TeX;
-  // renderMath() fills ONLY those spans — so a `$` never extracted (currency like $5 and
-  // $10, or a `$` inside code) stays plain text and is never mis-rendered as math.
-  html=html.replace(/\uE000(\d+)\uE001/g,(m,i)=>{
-    const M=_math[Number(i)];
-    if(opts.math){
-      return '<span class="rr-math'+(M.display?' rr-display':'')+'" data-display="'+(M.display?1:0)+'" data-tex="'+escHtml(M.tex)+'"></span>';
-    }
-    return (M.display?'$$':'$')+M.tex+(M.display?'$$':'$'); // streaming/fallback: raw delimiters
-  });
   html=_wrapImagesInCards(html);
   // Final XSS gate: strips <script>, event-handler attributes, javascript: URLs
   // and <style>, while keeping our SVG/LaTeX/image chrome (data-act, not onclick).
@@ -5312,6 +5709,55 @@ function renderMath(el){
 // Draw any ```abc music blocks with abcjs. Runs after the card is in the DOM
 // (abcjs renders INTO an element). Deferred to finalize like KaTeX, so a partial
 // tune mid-stream isn't rendered. The ABC source is read from the hidden <pre>.
+// ── ABC playback ────────────────────────────────────────────────────────────
+// abcjs-basic bundles the synth, but the soundfont samples are fetched at play
+// time — hence the explicit host in connect-src. Audio is created on the click so
+// the AudioContext starts from a user gesture, which browsers require.
+const _ABC_SOUNDFONT='https://paulrosen.github.io/midi-js-soundfonts/FluidR3_GM/';
+// getTotalTime() on the parsed visual object returns null until abcjs computes the
+// tune's playback timing, which the synth-only play path never triggers — so the old
+// reset delay ms=round((getTotalTime()||0)*1000) was 0, the timer never fired, and the
+// button stayed "⏸ Stop" for good. The synth knows the real length in seconds once
+// primed (synth.duration = flattened total × ms-per-measure, set at the top of
+// prime()), so derive the reset delay from that instead.
+function _abcDurationMs(synth){
+  const secs = synth && typeof synth.duration==='number' ? synth.duration : 0;
+  return Math.round((secs*1000)||0);
+}
+async function _abcPlay(btn){
+  const wrap=btn.closest('.abc-render-wrap');
+  const out=wrap?.querySelector('.abc-render-output');
+  if(!out)return;
+  if(out._abcSynth&&out._abcPlaying){        // toggle off
+    try{ out._abcSynth.stop(); }catch(e){}
+    out._abcPlaying=false; btn.textContent='▶ Play'; return;
+  }
+  if(!window.ABCJS?.synth?.CreateSynth||!ABCJS.synth.supportsAudio()){
+    toast('Audio playback is not available in this browser','warning'); return;
+  }
+  btn.disabled=true; btn.textContent='… loading';
+  try{
+    if(!out._abcSynth){
+      const tune=out._abcTune;
+      if(!tune){ toast('Nothing to play — the score did not parse','error'); return; }
+      const synth=new ABCJS.synth.CreateSynth();
+      const ac=new (window.AudioContext||window.webkitAudioContext)();
+      await synth.init({audioContext:ac,visualObj:tune,
+        options:{soundFontUrl:_ABC_SOUNDFONT,program:0}});
+      await synth.prime();
+      out._abcSynth=synth;
+    }
+    out._abcSynth.start();
+    out._abcPlaying=true; btn.textContent='⏸ Stop';
+    // No 'ended' event on the basic synth, so fall back to the primed synth's length.
+    const ms=_abcDurationMs(out._abcSynth);
+    if(ms>0) setTimeout(()=>{ if(out._abcPlaying){out._abcPlaying=false;btn.textContent='▶ Play';} },ms+250);
+  }catch(e){
+    toast('Playback failed: '+(e&&e.message?e.message:e),'error');
+    btn.textContent='▶ Play';
+  }finally{ btn.disabled=false; }
+}
+
 function renderAbcBlocks(el){
   if(!el || !window.ABCJS) return;
   el.querySelectorAll('.abc-render-wrap').forEach(wrap=>{
@@ -5321,7 +5767,9 @@ function renderAbcBlocks(el){
     if(!src) return;
     out.dataset.rendered='1';
     try{
-      ABCJS.renderAbc(out, src, {responsive:'resize', add_classes:true, paddingtop:8, paddingbottom:8, paddingleft:8, paddingright:8});
+      // Keep the parsed tune: the synth needs the visual object, not the source.
+      const tunes=ABCJS.renderAbc(out, src, {responsive:'resize', add_classes:true, paddingtop:8, paddingbottom:8, paddingleft:8, paddingright:8});
+      out._abcTune=Array.isArray(tunes)?tunes[0]:tunes;
     }catch(err){
       out.dataset.rendered='';
       out.textContent='Music render error: '+((err&&err.message)||err);
@@ -5470,6 +5918,94 @@ function _buildFunctionPlot(spec, params){
   if(showLegend) series.forEach((se,i)=>{ const ly=T+8+i*15; s+=`<line x1="${Rr-116}" y1="${ly}" x2="${Rr-98}" y2="${ly}" stroke="${se.color}" stroke-width="2.5"/><text x="${Rr-94}" y="${ly+4}" font-size="11" font-family="sans-serif" fill="${se.color}">${_plotEsc(se.label)}</text>`; });
   return s+'</svg>';
 }
+// ── Tables: sort / filter / export ──────────────────────────────────────────
+// Markdown tables rendered as static HTML with no affordances. Everything here
+// is client-side over the DOM the model already produced, so it applies to old
+// answers on reload as well as new ones.
+const _RR_NUM=/^\s*-?[$€£]?\s*-?[\d,.]+\s*%?\s*$/;
+function _rrCellVal(td){
+  const t=(td.textContent||'').trim();
+  if(_RR_NUM.test(t)&&/\d/.test(t)){
+    const n=parseFloat(t.replace(/[^0-9.\-]/g,''));
+    if(!isNaN(n))return n;
+  }
+  const d=Date.parse(t);
+  if(!isNaN(d)&&/\d{4}|\d{1,2}[\/-]\d{1,2}/.test(t))return d;
+  return t.toLowerCase();
+}
+function _rrTableCsv(table,sep){
+  const rows=[...table.querySelectorAll('tr')].filter(r=>r.style.display!=='none');
+  return rows.map(r=>[...r.children].map(c=>{
+    const v=(c.textContent||'').trim();
+    return (sep===','&&/[",\n]/.test(v))?'"'+v.replace(/"/g,'""')+'"':v;
+  }).join(sep)).join('\n');
+}
+function enhanceTables(root){
+  if(!root)return;
+  root.querySelectorAll('table').forEach(table=>{
+    // Skip tables already enhanced and tables that ARE a lane's rendered output;
+    // the chart data view lives inside .rich-wrap on purpose and must be enhanced.
+    if(table.closest('.rr-table-wrap')||table.closest('.rich-output'))return;
+    const body=table.tBodies[0]; if(!body||body.rows.length<2)return;         // not worth chrome
+    const wrap=document.createElement('div'); wrap.className='rr-table-wrap';
+    table.parentNode.insertBefore(wrap,table);
+    const scroll=document.createElement('div'); scroll.className='rr-table-scroll';
+    const bar=document.createElement('div'); bar.className='rr-table-bar';
+    wrap.appendChild(bar); wrap.appendChild(scroll); scroll.appendChild(table);
+
+    const total=body.rows.length;
+    const count=document.createElement('span'); count.className='rr-table-count';
+    const setCount=n=>{count.textContent=(n===total)?`${total} rows`:`${n} of ${total} rows`;};
+
+    const filter=document.createElement('input');
+    filter.className='rr-table-filter'; filter.type='search';
+    filter.placeholder='Filter rows…'; filter.setAttribute('aria-label','Filter table rows');
+    filter.oninput=()=>{
+      const q=filter.value.trim().toLowerCase(); let shown=0;
+      [...body.rows].forEach(r=>{
+        const hit=!q||(r.textContent||'').toLowerCase().includes(q);
+        r.style.display=hit?'':'none'; if(hit)shown++;
+      });
+      setCount(shown);
+    };
+    bar.appendChild(filter);
+
+    const mk=(txt,title,fn)=>{const b=document.createElement('button');
+      b.className='out-btn'; b.textContent=txt; b.title=title; b.onclick=fn; bar.appendChild(b); return b;};
+    mk('📋 CSV','Copy as CSV',()=>{navigator.clipboard.writeText(_rrTableCsv(table,','))
+      .then(()=>toast('Table copied as CSV','success'),()=>toast('Copy failed','error'));});
+    mk('⬇ .csv','Download as CSV',()=>{
+      const blob=new Blob([_rrTableCsv(table,',')],{type:'text/csv;charset=utf-8'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+      a.download='table.csv'; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000);});
+    bar.appendChild(count); setCount(total);
+
+    // Right-align columns whose body cells are numeric, and make headers sort.
+    const heads=[...table.querySelectorAll('thead th')];
+    heads.forEach((th,i)=>{
+      const numeric=[...body.rows].every(r=>{
+        const c=r.cells[i]; if(!c)return true;
+        const t=(c.textContent||'').trim();
+        return !t||(_RR_NUM.test(t)&&/\d/.test(t));
+      });
+      if(numeric){th.classList.add('rr-num');[...body.rows].forEach(r=>r.cells[i]&&r.cells[i].classList.add('rr-num'));}
+      th.tabIndex=0;
+      const sort=()=>{
+        const dir=th.dataset.dir==='asc'?'desc':'asc';
+        heads.forEach(h=>{delete h.dataset.dir;});
+        th.dataset.dir=dir;
+        const sign=dir==='asc'?1:-1;
+        [...body.rows]
+          .map(r=>[_rrCellVal(r.cells[i]||document.createElement('td')),r])
+          .sort((a,b)=>(a[0]<b[0]?-1:a[0]>b[0]?1:0)*sign)
+          .forEach(([,r])=>body.appendChild(r));
+      };
+      th.onclick=sort;
+      th.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();sort();}};
+    });
+  });
+}
+
 function addCopyButtons(el){
   el.querySelectorAll('pre').forEach(pre=>{
     if(pre.querySelector('.copy-code-btn'))return;

@@ -165,7 +165,11 @@ Answers are rendered inline: the model writes a short, declarative block and the
 | ` ```plot3d ` | **3-D surface / scatter** | Plotly JSON | Plotly |
 | ` ```molecule ` | **Chemical structure** | a SMILES string | SmilesDrawer |
 | ` ```molecule3d ` | **3D structure**, rotatable/zoomable | XYZ format: atom count, comment line, then `Element x y z` per atom | 3Dmol.js |
-| ` ```abc ` | **Sheet music** | ABC notation | abcjs |
+| ` ```gantt ` | **Project schedule** — dates, durations, dependencies | mermaid gantt syntax (no leading `gantt` line) | mermaid |
+| ` ```timeline ` | **Dated event sequence** | mermaid timeline syntax (no leading `timeline` line) | mermaid |
+| ` ```network ` | **Force-directed graph**, draggable nodes | JSON `{"nodes":[…],"edges":[{"from":…,"to":…}]}` | vis-network |
+| ` ```geojson ` | **Geographic features** with click popups | a GeoJSON FeatureCollection (coordinates are `[lng,lat]`) | Leaflet |
+| ` ```abc ` | **Sheet music**, with a Play button | ABC notation | abcjs |
 | ` ```calc ` | **Computed arithmetic** — units, dates, matrices | one expression per line, e.g. `5 km/h to m/s` | math.js |
 | ` ```solve ` | **Symbolic algebra** — derivative, simplify, expand, roots, evaluate | `derivative: x^3 + 2x` | math.js |
 | ` ```stats ` | **Descriptive statistics** + linear regression | `data: 4, 8, 15` (or `x:` / `y:` lines) | math.js |
@@ -194,6 +198,28 @@ Notes:
 | ![Graphviz graph](screenshots/rendering/dot.png) | ![Geometric construction](screenshots/rendering/geometry.png) |
 | ![Map](screenshots/rendering/map.png) | ![3D surface plot](screenshots/rendering/plot3d.png) |
 | ![Molecule](screenshots/rendering/molecule.png) | ![3D molecule](screenshots/rendering/molecule3d.png) |
+
+| | |
+|---|---|
+| ![Timeline](screenshots/rendering/timeline.png) | ![Gantt](screenshots/rendering/gantt.png) |
+| ![Network](screenshots/rendering/network.png) | ![GeoJSON](screenshots/rendering/geojson.png) |
+
+### Working with tables and charts
+
+Every Markdown table an answer produces gets a toolbar: click any header to sort
+(numbers, currency and dates sort by value, not alphabetically), filter rows as
+you type, and copy or download the visible rows as CSV. The header stays put
+while the body scrolls.
+
+![Sortable table](screenshots/rendering/table-sort.png)
+
+Line, scatter and bubble charts support wheel-zoom (hold Ctrl) and drag-to-pan,
+with a **Reset zoom** button once you have moved. Every chart also has a **Data**
+button that reveals the series behind it as one of those sortable tables — so you
+can check the numbers a chart was drawn from.
+
+![Chart data view](screenshots/rendering/chart-data.png)
+
 
 ### RAG context inspector
 
@@ -917,6 +943,63 @@ The container also needs GPU access (`--gpus all`, or a `deploy.resources` reser
 
 ---
 
+## Backup and Restore
+
+Two things hold state, and they are separate:
+
+| What | Where | Contains |
+|---|---|---|
+| Redis | the `redirecall-redis` volume (`/data` in that container) | every chunk, vector and index; sessions; the semantic cache |
+| App data | the `redirecall-data` volume, or `$REDIRECALL_DATA_DIR` | `config.json`, uploads, ingestion logs, feedback |
+
+A backup needs both. Restoring only Redis leaves the app without API keys or
+endpoints; restoring only the app data leaves it with no documents.
+
+### Docker
+
+Redis writes an append-only file, so snapshot it after asking for a rewrite:
+
+```bash
+docker compose exec redis redis-cli BGREWRITEAOF
+docker run --rm -v redirecall-redis:/src -v "$PWD":/out alpine \
+  tar czf /out/redis-backup.tgz -C /src .
+docker run --rm -v redirecall-data:/src -v "$PWD":/out alpine \
+  tar czf /out/appdata-backup.tgz -C /src .
+```
+
+Restore into a stopped stack:
+
+```bash
+docker compose down
+docker run --rm -v redirecall-redis:/dst -v "$PWD":/in alpine \
+  sh -c "rm -rf /dst/* && tar xzf /in/redis-backup.tgz -C /dst"
+docker run --rm -v redirecall-data:/dst -v "$PWD":/in alpine \
+  sh -c "rm -rf /dst/* && tar xzf /in/appdata-backup.tgz -C /dst"
+docker compose up -d
+```
+
+### Local install
+
+```bash
+redis-cli -p 6390 BGREWRITEAOF
+tar czf redis-backup.tgz -C /path/to/redis/dir .
+tar czf appdata-backup.tgz -C "$REDIRECALL_DATA_DIR" .
+```
+
+### Verifying a restore
+
+`GET /api/health` returns `status: ok`, and `GET /api/rag/instances` lists each
+instance with a non-zero chunk count. If chunk counts are zero while the keys
+exist, the index did not rebuild — restart once and check the log for the schema
+version line.
+
+### What a backup does not protect
+
+Chunks are stored with the vector produced by the embedding model configured at
+ingest time. Restoring a backup onto an install with a different embedding model
+leaves the vectors intact but unsearchable by the new model; RediRecall logs a
+warning when it detects this. Re-ingest after changing models.
+
 ## Optional Dependencies
 
 Most of the packages below are **installed automatically** by `install.sh` and the Docker image (they're declared in `pyproject.toml`) — PDF/DOCX/XLSX extraction, web-content extraction, and the provider SDKs are all included by default. The app guards their imports with try/except so a hand-trimmed install still starts, but a standard install has them all. The only genuinely optional add-on is **`crawl4ai`** (JavaScript rendering for crawling SPAs), installed separately via `pip install '.[crawl]'`.
@@ -941,7 +1024,7 @@ The browser rendering libraries — marked (Markdown), DOMPurify (SVG sanitising
 RediRecall is built on open-source projects, each under its own license:
 
 - **[Redis](https://redis.io)** *(AGPLv3)* — datastore + vector/query engine
-- **Rendering** (all CDN-loaded on first use, never bundled) — [marked](https://marked.js.org) *(MIT)*, [DOMPurify](https://github.com/cure53/DOMPurify) *(Apache-2.0 / MPL-2.0)*, [KaTeX](https://katex.org) *(MIT)*, [math.js](https://mathjs.org) *(Apache-2.0)*, [Chart.js](https://www.chartjs.org) *(MIT)*, [Mermaid](https://mermaid.js.org) *(MIT)*, [Viz.js](https://github.com/mdaines/viz.js) *(MIT; embeds [Graphviz](https://graphviz.org), EPL-1.0)*, [JSXGraph](https://jsxgraph.org) *(MIT or LGPL-3.0-or-later)*, [Leaflet](https://leafletjs.com) *(BSD-2-Clause)*, [Plotly.js](https://plotly.com/javascript/) *(MIT)*, [SmilesDrawer](https://github.com/reymond-group/smilesDrawer) *(MIT)*, [abcjs](https://www.abcjs.net) *(MIT)*, [highlight.js](https://highlightjs.org) *(BSD-3-Clause)*
+- **Rendering** (all CDN-loaded on first use, never bundled) — [marked](https://marked.js.org) *(MIT)*, [DOMPurify](https://github.com/cure53/DOMPurify) *(Apache-2.0 / MPL-2.0)*, [KaTeX](https://katex.org) *(MIT)*, [math.js](https://mathjs.org) *(Apache-2.0)*, [Chart.js](https://www.chartjs.org) *(MIT)*, [Mermaid](https://mermaid.js.org) *(MIT)*, [Viz.js](https://github.com/mdaines/viz.js) *(MIT; embeds [Graphviz](https://graphviz.org) 15.1.1, EPL-2.0)*, [JSXGraph](https://jsxgraph.org) *(MIT or LGPL-3.0-or-later)*, [Leaflet](https://leafletjs.com) *(BSD-2-Clause)*, [Plotly.js](https://plotly.com/javascript/) *(MIT)*, [SmilesDrawer](https://github.com/reymond-group/smilesDrawer) *(MIT)*, [abcjs](https://www.abcjs.net) *(MIT)*, [highlight.js](https://highlightjs.org) *(BSD-3-Clause)*
 - **Map data** — © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, [ODbL](https://opendatacommons.org/licenses/odbl/) (attribution rendered on every map)
 - **Backend** — [FastAPI](https://fastapi.tiangolo.com)/[Uvicorn](https://www.uvicorn.org) *(MIT/BSD)*, [redis-py](https://github.com/redis/redis-py) & [RedisVL](https://github.com/redis/redis-vl-python) *(MIT)*, [NumPy](https://numpy.org) *(BSD)*, [sentence-transformers](https://www.sbert.net) *(Apache-2.0)*, [PyMuPDF](https://pymupdf.readthedocs.io) *(AGPLv3)*, [Trafilatura](https://trafilatura.readthedocs.io) *(Apache-2.0)*, [Beautiful Soup](https://www.crummy.com/software/BeautifulSoup/) *(MIT)*, [Pillow](https://python-pillow.org) *(HPND)*, [httpx](https://www.python-httpx.org) *(BSD)*, [Crawl4AI](https://github.com/unclecode/crawl4ai) + [Playwright](https://playwright.dev) *(Apache-2.0)*, [python-docx](https://python-docx.readthedocs.io) & [openpyxl](https://openpyxl.readthedocs.io) *(MIT)*
 - **LLM SDKs** — [Ollama](https://ollama.com), plus the [Anthropic](https://github.com/anthropics/anthropic-sdk-python) *(MIT)*, [OpenAI](https://github.com/openai/openai-python), [Groq](https://github.com/groq/groq-python), and [Google GenAI](https://github.com/googleapis/python-genai) *(Apache-2.0)* SDKs

@@ -46,7 +46,14 @@ services:
   redis:
     image: redis:8
     container_name: redirecall-redis
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    # maxmemory bounds the vector index so Redis cannot grow until the host
+    # OOM-kills it, which takes the whole corpus offline with no warning.
+    # noeviction is deliberate: the index IS the data, so a write must fail
+    # loudly rather than have chunks silently evicted out from under a query.
+    # Size it above your corpus — roughly 4 KB per chunk at 384 dimensions.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec",
+              "--maxmemory", "${REDIRECALL_REDIS_MAXMEMORY:-2gb}",
+              "--maxmemory-policy", "noeviction"]
     volumes:
       - redirecall-redis:/data       # AOF/RDB persistence for the vector index
     healthcheck:

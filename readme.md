@@ -59,7 +59,11 @@ The model writes a short, declarative block — the browser does the drawing. Th
 | ` ```plot3d ` | 3-D surface / scatter | Plotly JSON |
 | ` ```molecule ` | Chemical structure | a SMILES string |
 | ` ```molecule3d ` | 3D structure, rotatable/zoomable | XYZ format (atoms + coordinates) |
-| ` ```abc ` | Sheet music | ABC notation |
+| ` ```gantt ` | Project schedule — dates, durations, dependencies | mermaid gantt syntax |
+| ` ```timeline ` | Dated event sequence | mermaid timeline syntax |
+| ` ```network ` | Force-directed graph, draggable nodes | JSON nodes + edges |
+| ` ```geojson ` | Geographic features with popups | a GeoJSON FeatureCollection |
+| ` ```abc ` | Sheet music, with a Play button | ABC notation |
 | ` ```calc ` | Arithmetic, unit conversion, dates, matrices — **computed, not guessed** | `5 km/h to m/s` |
 | ` ```solve ` | Symbolic algebra — derivative, simplify, roots | `derivative: x^3 + 2x` |
 | ` ```stats ` | Descriptive statistics & linear regression | `data: 4, 8, 15, 16, 23` |
@@ -220,7 +224,7 @@ RediRecall has **no built-in authentication**. The **local runtime** (`start.sh`
 
 **Untrusted content.** Model and RAG output is treated as untrusted: rendered Markdown and every SVG/diagram is sanitised (DOMPurify) before it reaches the DOM, the `geometry` block accepts data only — never expressions — and a Content-Security-Policy restricts scripts to the app itself plus the two CDNs the renderers come from. Ingested pages can carry prompt injections, so this matters in normal use, not just under attack.
 
-One deliberate trade-off: `img-src` permits any `https:` source, because answers legitimately show images from the pages and documents you ingest, plus map tiles. In principle that is an exfiltration channel if script execution were ever achieved; `connect-src` is restricted to `'self'`, so it is the only one. If your deployment does not need remote images, tighten `img-src` in `_CSP` (`redirecall/main.py`) to `'self' data: blob:`.
+One deliberate trade-off: `img-src` permits any `https:` source, because answers legitimately show images from the pages and documents you ingest, plus map tiles. In principle that is an exfiltration channel if script execution were ever achieved. `connect-src` is far narrower — `'self'` plus one fixed host, `https://paulrosen.github.io`, which abcjs fetches General-MIDI soundfont samples from for the `abc` Play button — so `img-src` remains the broad channel and `connect-src` is limited to that single static-asset host. If your deployment does not need remote images, tighten `img-src` in `_CSP` (`redirecall/main.py`) to `'self' data: blob:`; if you do not need `abc` audio playback, drop `https://paulrosen.github.io` from `connect-src` to bring it back to `'self'`.
 
 ---
 
@@ -252,7 +256,7 @@ RediRecall is built on excellent open-source projects:
 | [math.js](https://mathjs.org) | evaluating ` ```plot ` functions | Apache-2.0 |
 | [Chart.js](https://www.chartjs.org) | ` ```chart ` data charts | MIT |
 | [Mermaid](https://mermaid.js.org) | ` ```mermaid ` diagrams | MIT |
-| [Viz.js](https://github.com/mdaines/viz.js) | ` ```dot ` graph layout — a build of [Graphviz](https://graphviz.org) *(EPL-1.0)* | MIT |
+| [Viz.js](https://github.com/mdaines/viz.js) | ` ```dot ` graph layout — a build of [Graphviz](https://graphviz.org) 15.1.1 *(EPL-2.0)* | MIT |
 | [JSXGraph](https://jsxgraph.org) | ` ```geometry ` constructions | MIT or LGPL-3.0-or-later |
 | [Leaflet](https://leafletjs.com) | ` ```map ` maps | BSD-2-Clause |
 | [Plotly.js](https://plotly.com/javascript/) | ` ```plot3d ` 3-D plots | MIT |
@@ -272,4 +276,4 @@ RediRecall is licensed under the **[AGPL-3.0-or-later](LICENSE)**.
 
 This matches what the dependency stack requires: **PyMuPDF** (PDF extraction) and **Redis 8** are themselves AGPLv3, and the other Python dependencies are permissive (MIT / BSD / MIT-CMU) or Apache-2.0 — all one-way compatible into AGPLv3, so the combined work is cleanly licensable under the AGPL. Using RediRecall under different terms would mean replacing the AGPL components (for example, obtaining a commercial PyMuPDF license from Artifex).
 
-The browser rendering libraries are **not bundled or redistributed** — RediRecall ships only a URL, and the browser fetches each one from a public CDN at runtime. They are MIT / BSD / Apache-2.0 / MPL-2.0 (JSXGraph is dual MIT-or-LGPL, used here under MIT). One note for completeness: `viz.js` is MIT but embeds **Graphviz**, which is under the Eclipse Public License 1.0 — a license the FSF considers GPL-incompatible. Because it is loaded at runtime by the browser rather than distributed with RediRecall, it does not form a combined work with this AGPL codebase; anyone who chooses to *vendor* these libraries into a distributed build should review that themselves.
+The browser rendering libraries are **not bundled or redistributed** — RediRecall ships only a URL, and the browser fetches each one from a public CDN at runtime. They are MIT / BSD / Apache-2.0 / MPL-2.0 (JSXGraph is dual MIT-or-LGPL, used here under MIT). One note for completeness: `viz.js` is MIT but embeds **Graphviz** 15.1.1, which is under the Eclipse Public License 2.0 — a license the FSF considers GPL-incompatible. Because it is loaded at runtime by the browser rather than distributed with RediRecall, it does not form a combined work with this AGPL codebase; anyone who chooses to *vendor* these libraries into a distributed build should review that themselves.

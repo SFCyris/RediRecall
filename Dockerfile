@@ -44,8 +44,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends build-essential
     && apt-get purge -y --auto-remove build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Run as a non-root user. A write-path bug or container escape otherwise acts as
+# uid 0, and every file written into the mounted /data is root-owned on the host.
+# This MUST precede VOLUME: filesystem changes to a declared volume path are
+# discarded from the image layer, so a chown after it silently does nothing.
+RUN useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin redirecall \
+    && mkdir -p /data && chown -R redirecall:redirecall /data /app
+
 # Config, uploads, logs, ingestion history — back this up.
 VOLUME ["/data"]
+USER redirecall
 EXPOSE 8420
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \

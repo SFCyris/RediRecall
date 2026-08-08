@@ -27,6 +27,13 @@ REDIS_DB = 0
 KEY_PREFIX = f"__rrtest_{os.getpid()}__"
 
 
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "network: reaches the public internet; runs only with REDIRECALL_TEST_NETWORK=1",
+    )
+
+
 @pytest.fixture(scope="session")
 def app_module():
     """The imported application module, pointed at the test data dir."""
