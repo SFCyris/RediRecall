@@ -24,6 +24,8 @@ import re
 import shutil
 import subprocess
 
+from _jsrun import run_node
+
 import pytest
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -81,7 +83,7 @@ def _run(lines):
         "  process.stdout.write(JSON.stringify(rows));\n"
         "})().catch(e=>{ console.error(e && e.stack || e); process.exit(3); });\n"
     )
-    r = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=60)
+    r = run_node(js, timeout=60)
     assert r.returncode == 0, f"node exited {r.returncode}:\n{r.stderr[:1600]}"
     return json.loads(r.stdout)
 

@@ -13,6 +13,8 @@ import os
 import re
 import time
 
+from _jsrun import run_node
+
 import pytest
 
 
@@ -1509,7 +1511,7 @@ const cases=["$1,200.50","$980.00","$210.10","$3,400.75","120","43","7","88","20
 const out=cases.map(s=>_rrCellVal({textContent:s}));
 console.log(JSON.stringify(out));
 """
-    r = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=60)
+    r = run_node(js, timeout=60)
     assert r.returncode == 0, r.stderr[:300]
     v = json.loads(r.stdout)
     money = v[0:4]

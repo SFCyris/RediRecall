@@ -24,6 +24,8 @@ import re
 import shutil
 import subprocess
 
+from _jsrun import run_node
+
 import pytest
 
 _INDEX = pathlib.Path(__file__).resolve().parents[1] / "redirecall" / "index.html"
@@ -78,7 +80,7 @@ const _loadCss=u=>{asked.push(u);return Promise.resolve();};
 def _node(js: str) -> dict:
     if not shutil.which("node"):
         pytest.skip("node not available")
-    r = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=90)
+    r = run_node(js, timeout=90)
     assert r.returncode == 0, f"node exited {r.returncode}:\n{r.stderr[:1500]}"
     return json.loads(r.stdout.strip().splitlines()[-1])
 

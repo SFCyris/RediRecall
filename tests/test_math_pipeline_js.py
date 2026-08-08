@@ -20,6 +20,8 @@ import json
 import pathlib
 import shutil
 import subprocess
+
+from _jsrun import run_node
 import time
 
 import pytest
@@ -90,7 +92,7 @@ def _render(md, opts=None, timeout: int = 60) -> str:
     tail = (f"const __o = renderMarkdown({json.dumps(md)}, {json.dumps(opts if opts is not None else {'math': True})});\n"
             "process.stdout.write(String(__o));\n")
     js = stubs + _assemble(_html()) + "\n" + tail
-    r = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=timeout)
+    r = run_node(js, timeout=timeout)
     assert r.returncode == 0, f"node exited {r.returncode}:\n{r.stderr[:1600]}"
     return r.stdout
 
