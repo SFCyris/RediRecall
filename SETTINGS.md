@@ -1,6 +1,6 @@
 # RediRecall — Settings Reference
 
-This document explains the main settings in the application: what each controls, its default value, acceptable range, and what changing it implies. A few advanced options (reranker, HyDE, scheduled re-crawl, session persistence) are configured in the UI but not covered in depth here.
+This document explains the main settings in the application: what each controls, its default value, acceptable range, and what changing it implies. A few advanced options (reranker, HyDE, scheduled re-crawl, session persistence) have **no UI control** — they are set by hand-editing `config.json`; see the notes where each is mentioned.
 
 ---
 
@@ -56,6 +56,8 @@ Multiple Redis servers can be registered under custom names. Each RAG instance c
 
 Found in **Settings → RAG**.
 
+![RAG settings — chunk size, top-K, similarity threshold, the token-cost estimate, and the chat-history budget](screenshots/features/settings-rag.png)
+
 ### Chunk Size
 - **Default:** `180` words
 - **Range:** 64 – 2048 words (practical) — but see the model limit below
@@ -93,6 +95,7 @@ Found in **Settings → RAG**.
   - Longer prompts → higher latency and API cost
   - Beyond 10, you risk filling the context window with marginally relevant content, potentially confusing the model
 - **Rule of thumb:** 5 is a good default. Increase to 8–10 for research-style questions. Drop to 3 for fast, factual lookups.
+- **Token cost:** roughly `Top-K × Chunk Size` words of retrieved text reach the model per grounded answer — the default 5 × 180 ≈ 1,300 tokens each reply, billed on paid providers. The RAG settings panel shows this estimate beneath the sliders; lower either knob to spend fewer tokens (at some cost to recall).
 
 ### Similarity Threshold
 - **Default:** `0.35`
@@ -125,6 +128,13 @@ Found in **Settings → RAG**.
   - Exact keywords in the query may fail to retrieve chunks that use those keywords verbatim, if the cosine score is below threshold
   - Slightly faster
 - **When to disable:** Almost never. Disable only if you are debugging or benchmarking vector-only retrieval.
+
+### Chat History Budget
+- **Config key:** `history_max_tokens`
+- **Default:** `3000` (approximate tokens)
+- **What it does:** Caps how much of the recent conversation is resent to the model on each turn. Older turns beyond the budget are dropped (newest kept first); a hard cap of the last **20 messages** always applies as a backstop. Retrieved RAG chunks are *not* part of this — only the prior questions and answers.
+- **Why it matters:** Without a size cap, a few verbose earlier answers (a large table, a chart's JSON) get re-billed as input tokens on every subsequent turn. The budget bounds that on paid providers, at the cost of shorter recalled context.
+- **`0`** disables the token cap (the 20-message backstop still applies). Raise it for long, detail-heavy conversations; lower it to trim tokens.
 
 ---
 
@@ -265,6 +275,23 @@ Found in **Settings → Providers** (accordion). Each provider card is expanded 
 
 ---
 
+### Mistral
+
+#### API Key
+- **What it does:** Your Mistral API key.
+- **Security:** Prefer the `MISTRAL_API_KEY` environment variable.
+
+#### Model
+- **Default:** `mistral-small-latest`
+- **Options:** `mistral-large-latest`, `mistral-small-latest`, and other Mistral chat models.
+- **Notes:** OpenAI-compatible and EU-hosted, with a free "Experiment" tier. Get a key at [console.mistral.ai](https://console.mistral.ai).
+
+#### Base URL
+- **Default:** `https://api.mistral.ai/v1`
+- **Notes:** An OpenAI-compatible endpoint. Only change if Mistral updates their API.
+
+---
+
 ### Gemini (Google AI)
 
 #### API Key
@@ -314,7 +341,7 @@ Found in **Settings → General**.
 
 ### Show RAG Matches in Answers
 - **Default:** Off
-- **What it does:** When on, the RAG chunk inspector expands automatically below every response that used RAG. When off, the inspector is collapsed — but still accessible by clicking the **📚 N chunks matched** badge.
+- **What it does:** When on, the RAG chunk inspector expands automatically below every response that used RAG. When off, the inspector is collapsed — but still accessible by clicking the **📚 N matched chunks** badge.
 - **When to enable:** During development or tuning, when you want to see retrieval quality on every response without manually clicking.
 - **When to leave off:** Normal use — the badge is always visible; you can open it on demand.
 
@@ -352,6 +379,28 @@ Found in **Settings → Web Sources** when configuring a URL crawl.
 - **What it does:** Restricts the crawler to only follow links within the same domain (e.g. if you start at `docs.example.com`, it won't follow links to `github.com`).
 - **Note:** links listed in an `llms.txt` manifest are always followed regardless of this setting (manifests intentionally point across domains).
 
+### Smart Mode
+- **Config key:** `crawl.smart_mode`
+- **Default:** On
+- **What it does:** Fetches each page with fast `httpx` first and only escalates to a full browser render (Playwright) when the page looks JavaScript-dependent — the best balance of speed and coverage for most sites. This is the default crawl strategy.
+- **When to turn off:** Rarely — only to force one specific strategy (see Force JS below).
+
+### Force JS (JS Rendering)
+- **Config key:** `crawl.js_render`
+- **Default:** Off
+- **What it does:** Renders **every** page in a headless browser (Playwright), for single-page apps and sites that build their content with JavaScript. Slower and heavier than Smart Mode.
+- **Requires** the crawl extras: `pip install '.[crawl]'` and `playwright install chromium`. Without them this mode is unavailable.
+
+### Concurrency
+- **Config key:** `crawl.concurrency`
+- **Default:** `10`
+- **What it does:** Maximum number of pages fetched in parallel over `httpx`. Higher is faster but heavier on the target site and your machine; lower is gentler.
+
+### JS Concurrency
+- **Config key:** `crawl.js_concurrency`
+- **Default:** `3`
+- **What it does:** Maximum number of simultaneous headless-browser tabs when JS rendering is used. Kept lower than `concurrency` because each browser tab is far more resource-intensive than an `httpx` fetch.
+
 ---
 
 ## Prompt Templates & Base Instruction
@@ -365,7 +414,17 @@ Found in **Settings → 💬 Templates**.
 - **What it does:** prepended to the system prompt of **every** chat turn, before any selected template. It is where global rules live — how answers should be formatted, and how to emit the fenced blocks that the app renders (see [DOCS.md](DOCS.md#rich-content-rendering)).
 - **Leave it blank** to disable it entirely; the model then gets only the selected template (or a plain default).
 - **↺ Reset to shipped default** replaces the box with the instruction that ships with the installed version. Use it after upgrading: once you have saved settings, your stored copy takes precedence over the shipped one, so newly supported block types would otherwise never be advertised to the model. You still have to click **Save Settings** afterwards.
-- **Cost:** it is sent on every request, so its length counts toward input tokens on paid providers. Trim it if you do not need the visual blocks.
+- **Cost:** it is sent on every request, so its length counts toward input tokens on paid providers. Most of that length is the chart/diagram authoring section — use the toggle below to drop it wholesale rather than editing the text.
+
+### Include Chart / Diagram Authoring Rules
+
+- **Config key:** `visual_instructions`
+- **Default:** On
+- **What it does:** The shipped Base Instruction ends with a large (~2,000-token) section that teaches the model how to emit the app's chart / plot / diagram / map / molecule / music blocks. Turn this **off** on text-only deployments to stop sending that section on every message — the model still answers in Markdown, tables and LaTeX, but no longer produces rendered figures.
+- **Cost:** ~2,000 input tokens saved per message when off, on paid providers. No effect on a blank Base Instruction, or on the text answers themselves.
+- **Note:** it drops the section from the *shipped* instruction (a trailing block). A heavily customised Base Instruction that appends its own text *after* that section would lose it when this is off.
+
+![Base Instruction editor with the chart/diagram authoring-rules toggle](screenshots/features/settings-visual.png)
 
 ### Prompt Templates
 

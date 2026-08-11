@@ -1,8 +1,35 @@
 # RediRecall — Getting Started Tutorial
 
-This tutorial walks you through the complete experience: installing the app, connecting a language model, building a knowledge base, and chatting with your data. It takes about 15–20 minutes from scratch.
+This tutorial walks you through the complete experience: installing the app, connecting a language model, building a knowledge base, and chatting with your data. Budget about 20–30 minutes on a first run — the ~90 MB embedding model, and optionally a headless-browser download, happen along the way.
 
-Commands are shown for **macOS** and **Linux** side-by-side where they differ.
+Commands are shown for **macOS** and **Linux** side-by-side where they differ. Prefer containers? Skip to the [README's Docker section](readme.md#docker-simplest) for a two-command setup instead.
+
+---
+
+## Prerequisites
+
+- **Python 3.11 or newer** — check with `python3 --version`.
+- **git** *or* **unzip** — to obtain the code.
+- **curl** — the start script uses it for a health check.
+- **macOS only:** [Homebrew](https://brew.sh) and the Xcode Command Line Tools (`xcode-select --install`).
+- **~500 MB free disk** — the virtualenv, the vendored Redis, and the embedding model (downloaded on first ingest).
+
+No running Redis is required — `install.sh` provisions its own on port 6389.
+
+---
+
+## Step 0 — Get the code
+
+Download the latest release and unzip it, **or** clone the repo, then open a terminal **inside that folder** — every command below is run from there:
+
+```bash
+# Option A — download the release zip from
+#   https://github.com/SFCyris/RediRecall/releases/latest
+unzip redirecall-latest.zip && cd RediRecall
+
+# Option B — clone with git
+git clone https://github.com/SFCyris/RediRecall.git && cd RediRecall
+```
 
 ---
 
@@ -19,6 +46,9 @@ One script sets up everything — a Python virtual environment, the app's depend
 - On **Linux**, if you already run a Redis with the search module it is reused; otherwise Redis 8 is installed for you.
 
 The dedicated Redis runs on a loopback port (6389 by default), so it never conflicts with any Redis you already have. The default sentence-transformer embedding model (~90 MB) is downloaded and cached the first time you ingest content — not during install.
+
+> **If it fails:** `python3 not found` or `Homebrew is required` → install those (see [Prerequisites](#prerequisites)) and re-run. If it reports the Redis **search module** did not load, re-run `./install.sh` — it re-locates the module.
+> **Verify:** the script ends with a success banner and a `./.redis/` folder now exists.
 
 > Prefer containers? Skip Steps 1–3 and run `docker compose pull && docker compose up -d` instead (pulls the prebuilt app image from GitHub + Redis). Stop with `docker compose stop`. See the README's Docker section for details.
 
@@ -71,6 +101,9 @@ This starts the dedicated Redis, then the app. Open **http://localhost:8420** in
 - Restart: `./restart.sh`
 - Use a different port: `./start.sh 9000`
 
+> **If the page doesn't load or the port is busy** (`Port 8420 is already in use`), start on another port: `./start.sh 9000`, then open `http://localhost:9000`. Check the app log path printed in the start banner for errors.
+> **Verify:** `curl -fsS http://localhost:8420/api/health` returns an `ok` status.
+
 The app binds to `127.0.0.1` (localhost) by default. There is no built-in authentication, so put a reverse proxy with auth in front before exposing it on a network (see `deploy/docker-compose.https.yml`).
 
 ---
@@ -89,9 +122,9 @@ If it shows red, go to the **Redis** tab and update the host/port to match your 
 
 ## Step 5 — Configure a language model
 
-Open **Settings → Providers**. Six providers are available — pick one to start.
+Open **Settings → Providers**. Seven providers are available — pick one to start.
 
-![Settings → Providers tab listing Ollama, Claude, OpenAI, Qwen, Groq, and Gemini](screenshots/tutorial/05-providers.png)
+![Settings → Providers tab listing Ollama, Claude, OpenAI, Qwen, Mistral, Groq, and Gemini](screenshots/tutorial/05-providers.png)
 
 ### Option A — Ollama (local, free, no API key)
 
@@ -109,17 +142,24 @@ ollama pull llama3.2
 ollama serve   # or: sudo systemctl enable --now ollama
 ```
 
+> **`ollama serve` blocks its terminal** — run it in a *separate* terminal from `./start.sh`. On macOS the Ollama app usually already runs the server, so `ollama serve` may say *"address already in use"* — that's fine, skip it.
+
 In the Providers accordion, expand the **Ollama** card. Click **Test Connection** — it should show green. Click **Refresh Models**, select your model, and click **Use**.
+
+> **If Test Connection is red:** confirm `ollama serve` is running (or the Ollama app is open) and the host in the card is `http://localhost:11434`.
 
 ### Option B — Cloud provider (API key required)
 
-Expand any provider card (Claude, OpenAI, Groq, Qwen, or Gemini), paste your API key, select a model, and click **Use**.
+Expand any provider card (Claude, OpenAI, Groq, Qwen, Mistral, or Gemini), paste your API key, select a model, and click **Use**.
 
 > **Tip:** Set API keys as environment variables before starting the server — they are never written to `config.json`:
 > ```bash
 > export ANTHROPIC_API_KEY=sk-ant-...
 > export OPENAI_API_KEY=sk-...
 > export GROQ_API_KEY=gsk_...
+> export MISTRAL_API_KEY=...
+> export GEMINI_API_KEY=AIza...
+> export DASHSCOPE_API_KEY=sk-...   # Qwen
 > ```
 > On Linux, add these to `~/.bashrc` or `/etc/environment` to make them permanent.
 
@@ -138,6 +178,8 @@ Close Settings and type a message in the input box. Press Enter or click ➤.
 The response streams token-by-token. Notice the badge showing latency and a **🔍 Live** indicator (cache miss on the first query).
 
 Ask the same question again — this time you should see a **⚡ Cached XX%** badge. The response returns instantly from the semantic cache.
+
+Hover an earlier question to reveal its **📋 Copy · ↻ Rerun · ↺ Force rerun** bar — *Rerun* may reuse the cache, *Force rerun* always asks the model again. The topbar dropdown selects which knowledge base to consult (that's **RAG** — you'll create one in Step 7); with none created yet it sits on **✦ All RAGs**, and you can pick **⊘ No RAG** any time to answer purely from the model with no retrieval.
 
 ---
 
@@ -160,7 +202,7 @@ RAG (Retrieval-Augmented Generation) lets the model answer questions using your 
 ### From a file
 
 1. Still in **Settings → RAG**, scroll to **Ingest Documents**
-2. Select `my-docs` from the instance dropdown
+2. Select `my-docs` from the **Target Instance** dropdown
 3. Drag a `.txt`, `.pdf`, or `.csv` file onto the upload zone (or click to browse)
 4. Watch the progress bar — it shows per-file chunk counts in real time
 
@@ -183,6 +225,9 @@ The `llms.txt` manifest lists the Redis documentation pages so the crawler can f
 | **Force JS** | Fully client-rendered SPAs where httpx returns empty shells |
 | Neither | Pure static HTML — maximum speed, no browser overhead |
 
+> **Force JS requires the crawl extras from [Step 2](#step-2--optional-enable-js-rendering-for-web-crawling)** (`pip install '.[crawl]'` + `playwright install chromium`). If you skipped Step 2, use **Smart mode**, or install the extras first.
+> **If a crawl returns 0 pages:** the site is likely JavaScript-rendered — retry with Force JS (after installing the extras), or lower the depth/check the URL.
+
 ---
 
 ## Step 9 — Chat with your data
@@ -193,7 +238,7 @@ Ask a question about something in your documents, e.g.:
 - *"What is Redis Sorted Set?"* (after the Redis preset crawl)
 - *"Summarise the key points from the document"*
 
-After the response, look for the **📚 N chunks matched** badge. Click it to see exactly which passages were retrieved, their similarity scores, and their sources.
+After the response, look for the **📚 N matched chunks** badge. Click it to see exactly which passages were retrieved, their similarity scores, and their sources.
 
 ---
 
@@ -226,7 +271,7 @@ The **Settings → Cache** tab shows cache analytics and lets you tune the simil
 If you have multiple knowledge bases and want to query all of them at once:
 
 1. Create a second RAG instance (e.g. `support-kb`) and ingest different documents into it
-2. Make sure both instances are enabled (green dot in Settings → RAG)
+2. Make sure both instances are enabled (the **● On** toggle is lit in Settings → RAG)
 3. Click the **🔀** button in the topbar
 4. Ask a question — both instances are queried simultaneously and results are merged by relevance score
 
@@ -258,6 +303,20 @@ To save a knowledge base:
 3. To restore: click **⬆** on the same (or different) instance and upload the zip
 
 No re-embedding needed — the vectors are stored in the export.
+
+---
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `install.sh`: *python3 not found* / *Homebrew is required* | Install the missing tool (see [Prerequisites](#prerequisites)) and re-run. |
+| Redis is up but **search unavailable** (Status tab) | Re-run `./install.sh` — it re-locates the Redis search module. |
+| **Port 8420 already in use** / page won't load | `./start.sh 9000`, then open `http://localhost:9000`. |
+| Ollama **Test Connection** red | Start `ollama serve` (or open the Ollama app); confirm host `http://localhost:11434`. |
+| Cloud provider errors | Check the API key / its environment variable (see Step 5), and the model is selected + **Use** clicked. |
+| Crawl returns **0 pages** | The site is likely JS-rendered — use **Force JS** (needs the Step 2 extras), or check the URL/depth. |
+| Chat says a knowledge base was searched but found nothing (**📭 No KB match**) | Lower **Similarity Threshold** or raise **Top-K** in Settings → RAG; confirm the document ingested. |
 
 ---
 

@@ -73,6 +73,47 @@ def _turn_meta(chunks: list | None = None, latency: dict | None = None,
     return meta
 
 
+def _approx_tokens(content) -> int:
+    """Cheap token estimate (chars/4) for a stored message. Multimodal list
+    content (a vision turn) is measured by its text parts only — image data URIs
+    are huge but are never re-sent from history, so counting them would evict real
+    conversation. Never loads a tokenizer (this runs on every turn)."""
+    if isinstance(content, str):
+        return len(content) // 4
+    if isinstance(content, list):
+        return sum(len(p.get("text", "")) for p in content if isinstance(p, dict)) // 4
+    return len(str(content)) // 4
+
+
+def history_window(msgs: list, max_tokens: int = 3000, hard_cap: int = 20) -> list:
+    """The most recent messages that fit an approximate token budget, in
+    chronological order. A flat message-count window let a few verbose turns
+    (tables, chart JSON) re-bill an unbounded prefix on every subsequent turn;
+    this bounds the resent history by size. Always keeps at least the most recent
+    message; `hard_cap` bounds the count as a secondary backstop."""
+    if max_tokens <= 0:
+        return msgs[-hard_cap:] if hard_cap else list(msgs)
+    out: list = []
+    used = 0
+    window = msgs[-hard_cap:] if hard_cap else msgs
+    for m in reversed(window):
+        t = _approx_tokens(m.get("content", ""))
+        if out and used + t > max_tokens:
+            break
+        out.append(m)
+        used += t
+    out.reverse()
+    # The budget can truncate on an odd boundary, leaving an assistant turn first.
+    # Anthropic and Gemini reject a message list whose first non-system turn is the
+    # assistant/model role ("first message must use the user role"), so drop any
+    # leading assistant turns — the window then starts on a user turn or is empty
+    # (messages become [system, user], which is valid). The old flat [-10:] window
+    # never hit this because sessions always end on an assistant turn at an even index.
+    while out and out[0].get("role") == "assistant":
+        out.pop(0)
+    return out
+
+
 def save_session(sid: str, messages: list):
     """Persist a session to Redis with the configured TTL."""
     if not state._config.get("sessions", {}).get("persist", True):

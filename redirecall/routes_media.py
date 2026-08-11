@@ -56,5 +56,8 @@ async def api_serve_image(path: str):
 
     mime, _ = mimetypes.guess_type(str(p))
     mime = mime or "application/octet-stream"
-    return FileResponse(str(p), media_type=mime)
+    # identity => GZipMiddleware forwards untouched. Images are already compressed
+    # (PNG/JPEG/WebP), so a max-effort gzip pass costs CPU for ~0 byte gain.
+    return FileResponse(str(p), media_type=mime,
+                        headers={"Content-Encoding": "identity"})
 

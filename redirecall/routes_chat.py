@@ -242,13 +242,18 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
 
     t_rag = round(time.time() - t_rag_start, 3)
 
-    # Inject uploaded file text into the system prompt (before RAG context)
+    # Per-turn context (uploaded files + retrieved RAG) rides on the FINAL user
+    # turn, NOT the system prompt. Keeping the system prefix byte-stable across a
+    # conversation is what lets Claude cache it (cache_control) and OpenAI-compatible
+    # providers auto-cache it; it also keeps this volatile, per-query content out of
+    # the resent history. The turn is still STORED as the raw query (below), so
+    # nothing here bloats history or the semantic cache.
+    context_parts: list[str] = []
     if file_context:
         file_parts = [f"[File: {f['name']}]\n{f['text']}" for f in file_context if f.get("text")]
         if file_parts:
-            system_prompt += "\n\nThe user has attached the following document(s) — use them to answer:\n\n" \
-                             + "\n\n---\n\n".join(file_parts)
-
+            context_parts.append("The user has attached the following document(s) — use them to answer:\n\n"
+                                 + "\n\n---\n\n".join(file_parts))
     # Numbered context + citation instruction, or an explicit abstention notice
     # when a real search came back empty. Gated on rag_used rather than
     # rag_instances: the latter is never empty (an empty list falls back to
@@ -256,19 +261,23 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     # answer — including plain general-knowledge questions and sessions where the
     # user has disabled all instances.
     if rag_used:
-        system_prompt += rag.build_context_prompt(chunks)
+        context_parts.append(rag.build_context_prompt(chunks).lstrip())
+    context_block = "\n\n".join(context_parts)
 
     # ── 3. Build message list ───────────────────────────────────────────────
-    history  = state._sessions[sid][-10:]   # last 10 turns for context window management
+    history  = sessions.history_window(state._sessions[sid],
+                                       state._config.get("history_max_tokens", 3000))
     messages = [{"role": "system", "content": system_prompt}]
     for h in history:
         messages.append({"role": h["role"], "content": h["content"]})
 
-    # Vision: wrap user content as a multi-modal list when images are attached
-    user_content: Any = query
+    # Current turn's context precedes the question in the user turn. Vision: wrap
+    # as a multi-modal list when images are attached.
+    user_text: str = f"{context_block}\n\n{query}" if context_block else query
+    user_content: Any = user_text
     if images:
         user_content = (
-            [{"type": "text", "text": query}]
+            [{"type": "text", "text": user_text}]
             + [{"type": "image_url", "image_url": {"url": img}} for img in images]
         )
     messages.append({"role": "user", "content": user_content})
@@ -562,27 +571,42 @@ async def api_chat(payload: dict):
     if len(chunks) > top_k:
         chunks = chunks[:top_k]
 
+    # Per-turn context rides on the final user turn, not the system prompt — keeps
+    # the system prefix stable for provider prompt-caching and out of resent history.
+    # See handle_chat for the full rationale. Turn is stored as the raw query below.
+    context_parts: list[str] = []
     if file_context:
         file_parts = [f"[File: {f['name']}]\n{f['text']}" for f in file_context if f.get("text")]
         if file_parts:
-            system_prompt += "\n\nThe user has attached the following document(s) — use them to answer:\n\n" \
-                             + "\n\n---\n\n".join(file_parts)
-
-    # Numbered context + citation instruction, or an explicit abstention
-    # instruction when retrieval found nothing. Only applied when RAG was
-    # actually requested — a plain no-RAG chat gets neither.
+            context_parts.append("The user has attached the following document(s) — use them to answer:\n\n"
+                                 + "\n\n---\n\n".join(file_parts))
     # Only when RAG actually ran. `rag_instances` is never empty (an empty list
     # falls back to active_rag), so gating on it alone attached the abstention
     # notice to every ungrounded answer — including plain general-knowledge
     # questions and sessions where the user had disabled all instances.
     if rag_used:
-        system_prompt += rag.build_context_prompt(chunks)
+        context_parts.append(rag.build_context_prompt(chunks).lstrip())
+    context_block = "\n\n".join(context_parts)
 
-    history  = state._sessions[sid][-10:]
+    history  = sessions.history_window(state._sessions[sid],
+                                       state._config.get("history_max_tokens", 3000))
     messages = [{"role": "system", "content": system_prompt}]
     for h in history:
         messages.append({"role": h["role"], "content": h["content"]})
-    messages.append({"role": "user", "content": query})
+
+    # Current turn's context precedes the question in the user turn. Vision: wrap
+    # as a multi-modal list when images are attached (mirrors handle_chat) so the
+    # provider adapters (_to_ollama_messages / _to_claude_content / the OpenAI-style
+    # handlers) forward the image. A plain-text turn silently drops the image and
+    # returns a non-vision answer with no error.
+    user_text: str = f"{context_block}\n\n{query}" if context_block else query
+    user_content: Any = user_text
+    if images:
+        user_content = (
+            [{"type": "text", "text": user_text}]
+            + [{"type": "image_url", "image_url": {"url": img}} for img in images]
+        )
+    messages.append({"role": "user", "content": user_content})
 
     full_response = ""
     stream_error  = False

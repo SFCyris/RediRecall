@@ -5,6 +5,36 @@ All notable changes to RediRecall are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-08-10
+
+### Added
+- The RAG selector has a **No RAG** option: the model answers from its own
+  knowledge with no retrieval and no grounding instructions, distinct from
+  querying one instance or all of them.
+- Settings → Templates has an **"Include chart/diagram authoring rules"** toggle.
+  Turn it off on text-only deployments to stop sending the ~2,000-token chart/plot/
+  diagram/map/music authoring section to the model on every message.
+- Settings → RAG has a **Chat History Budget** control that caps how much recent
+  conversation is resent to the model each turn, and a note showing how Top-K and
+  Chunk Size translate into tokens per grounded answer.
+- The top-bar token estimate is split into **input** (your prompts), **output**
+  (the model's replies) and **total**, each a colour-coded pill.
+
+### Changed
+- Retrieved context and uploaded-file text now ride on the question turn instead of
+  the system prompt, so the system prefix stays stable across a conversation. This
+  lets the provider cache it (billed input tokens re-read far cheaper on repeat
+  turns for Claude and the OpenAI-compatible providers) — no behaviour change to
+  answers. Responses (the app UI and JSON API) are now gzip-compressed.
+
+### Fixed
+- `` ```geometry `` blocks render many more constructions: rectangles, circles from
+  a centre and radius, arcs and sectors from a centre/radius/angle, and dashed lines.
+  An element the renderer cannot build is now skipped with a note at the foot of the
+  card, instead of the whole figure failing to render.
+- `` ```mermaid `` flowcharts no longer fail to render when a node or edge label
+  contains parentheses, quotes, a `<`, or other special characters.
+
 ## [1.5.1] — 2026-08-08
 
 ### Added
@@ -95,6 +125,7 @@ keep working with the model they were built with.
 See the [GitHub releases](https://github.com/SFCyris/RediRecall/releases) for
 1.3.x and 1.2.0.
 
+[1.6.0]: https://github.com/SFCyris/RediRecall/releases/tag/v1.6.0
 [1.5.1]: https://github.com/SFCyris/RediRecall/releases/tag/v1.5.1
 [1.5.0]: https://github.com/SFCyris/RediRecall/releases/tag/v1.5.0
 [1.4.1]: https://github.com/SFCyris/RediRecall/releases/tag/v1.4.1

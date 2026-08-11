@@ -144,7 +144,7 @@ Every fenced block below is BLOCK-LEVEL: put it on its own lines with a blank li
 - ```geojson — geographic features with attributes. Body: a GeoJSON FeatureCollection, e.g. {"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"Berlin"},"geometry":{"type":"Point","coordinates":[13.405,52.52]}}]}. Coordinates are [lng,lat] (NOT lat,lng). Each feature's properties become a click popup. Use ```map for simple pins, ```geojson for shapes/regions or per-feature data.
 - ```mermaid — flowchart, sequence, class, state or ER diagram (for Gantt prefer the dedicated ```gantt fence). Body: mermaid syntax, e.g. `graph TD` then `A[Start] --> B{Choice}`.
 - ```dot — a graph best drawn by automatic layout (dependencies, call graphs). Body: Graphviz DOT, e.g. `digraph G { A -> B }`.
-- ```geometry — an exact geometric construction. Body: JSON {"boundingbox":[xmin,ymax,xmax,ymin],"axis":true,"elements":[…]}. Each element is {"type":…,"args":[…],"attrs":{…}}. Coordinates must be NUMBERS. A text element takes its content as the LAST arg: {"type":"text","args":[1.5,-1.5,"a²=9"]}. Colours use fillColor/strokeColor/strokeWidth (plain fill/stroke are also accepted). Allowed types: point, line, segment, circle, ellipse, polygon, text, angle, arc, sector, midpoint, perpendicular, parallel, tangent, intersection, arrow, vector. Data only — never a function or code string (use ```plot for curves).
+- ```geometry — an exact geometric construction. Body: JSON {"boundingbox":[xmin,ymax,xmax,ymin],"axis":true,"elements":[…]}. Each element is {"type":…,"args":[…],"attrs":{…}}. Coordinates must be NUMBERS. A text element takes its content as the LAST arg: {"type":"text","args":[1.5,-1.5,"a²=9"]}. Colours use fillColor/strokeColor/strokeWidth (plain fill/stroke are also accepted). Allowed types: point, line, segment, circle (centre+radius, e.g. args [[0,0],2]), ellipse (centre+radii, e.g. args [[0,0],[3,1]]), polygon, text, angle, arc, sector (arc/sector as three points, or centre+radius+start/end angle in DEGREES, e.g. args [[0,0],2,0,90]), midpoint, arrow, vector, bisector, rect (a rectangle from two opposite corners, e.g. args [[0,-0.5],[2,0.5]]). Data only — never a function or code string (use ```plot for curves).
 - ```map — a map. Body: JSON {"center":[lat,lng],"zoom":11,"markers":[{"lat":..,"lng":..,"label":".."}]} (optional "geojson").
 - ```plot3d — a 3-D surface/scatter. For a formula, let the app compute it: {"zfunction":"x*y","x":[-5,5],"y":[-5,5],"layout":{"title":{"text":"…"}}}. For explicit data use Plotly JSON {"data":[{"type":"surface","z":[[1,2],[3,4]]}]} — z must be NUMBERS; never write an expression such as [[x*y]] inside JSON.
 - ```molecule — a chemical structure. Body: one SMILES string, e.g. CC(=O)Oc1ccccc1C(=O)O
@@ -187,6 +187,13 @@ K:C
 C D E F | G A B c | c B A G | F E D C |]
 ```
 Rules: X: (tune number), K: (key) are required; M: (metre) and L: (default note length) are strongly recommended, and every header line comes BEFORE the notes. Notes are letters A-G (c-b are the octave above; ',' lowers and ' raises an octave); digits set duration relative to L: (C2 = two units), z is a rest, | is a barline. Keep it to a few bars unless asked for more, use one ```abc block per piece, and put any explanation as prose outside the block."""
+
+# The base instruction's chart/diagram/SVG/ABC authoring section is a large
+# (~2k-token) static block re-sent on every billed turn. compose_system_prompt
+# drops everything from this marker onward when config["visual_instructions"] is
+# False, so a text-only deployment stops paying for rendering rules it never uses.
+# The marker is the first line of the visual section (a suffix of the instruction).
+VISUAL_SECTION_MARKER = "=== VISUAL BLOCKS"
 
 DEFAULT_CONFIG: dict = {
     # ── Primary Redis connection (the default endpoint) ───────────────────────
@@ -284,6 +291,15 @@ DEFAULT_CONFIG: dict = {
     # Global system instruction prepended to every chat turn (before any selected
     # template). Edited in Settings -> Templates -> Base Instruction.
     "base_instruction": DEFAULT_BASE_INSTRUCTION,
+    # When False, compose_system_prompt drops the base instruction's ~2k-token
+    # chart/diagram authoring section (see VISUAL_SECTION_MARKER) — saves that many
+    # billed input tokens on every turn for deployments that only need text answers.
+    # Default True keeps chart rendering working out of the box.
+    "visual_instructions": True,
+    # Conversation history sent to the LLM each turn is capped by this approximate
+    # token budget (chars/4), newest-first, so a few verbose turns can't re-bill an
+    # unbounded prefix every turn. A hard message-count cap still applies as backstop.
+    "history_max_tokens": 3000,
     "prompt_templates": [
         {"name": "Default",      "system": ""},
         {"name": "Redis Expert", "system": "You are a Redis expert. Answer concisely with examples."},

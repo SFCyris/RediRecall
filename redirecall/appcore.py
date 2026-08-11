@@ -8,6 +8,7 @@ import logging
 import os
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 
 log = logging.getLogger(__name__)
 
@@ -76,4 +77,16 @@ async def _security_headers(request, call_next):
     resp.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     return resp
+
+
+# Compress the ~400 KB single-file UI and all JSON API responses. Added last so it
+# is the outermost layer (compresses the fully-headered response). Real-time SSE
+# progress streams (text/event-stream) opt OUT by declaring Content-Encoding:
+# identity, because gzip's internal buffering would hold their trickled events
+# until the stream closes — GZipMiddleware forwards any response that already sets
+# a content-encoding untouched.
+# compresslevel 6 (zlib default): ~same ratio as 9 on text/JSON for markedly less
+# CPU per response. Already-compressed payloads (PNG/JPEG via the image proxy) opt
+# out with Content-Encoding: identity to avoid a wasted pass for ~0 byte gain.
+app.add_middleware(GZipMiddleware, minimum_size=500, compresslevel=6)
 

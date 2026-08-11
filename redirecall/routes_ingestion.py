@@ -88,7 +88,10 @@ async def api_ingest_files_stream(instance: str, files: list[UploadFile] = File(
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        # identity => GZipMiddleware forwards this SSE stream untouched (gzip buffering
+        # would hold trickled progress events until the stream closes).
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Content-Encoding": "identity"},
     )
 
 
@@ -369,7 +372,10 @@ async def api_ingest_url_stream(
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        # identity => GZipMiddleware forwards this SSE stream untouched (gzip buffering
+        # would hold trickled progress events until the stream closes).
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+                 "Content-Encoding": "identity"},
     )
 
 

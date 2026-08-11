@@ -42,8 +42,10 @@
     "model": "gemini-3-flash-preview"
   },
   "provider": "ollama",
+  "visual_instructions": true,
+  "history_max_tokens": 3000,
   "embedding": {
-    "model": "all-MiniLM-L6-v2",
+    "model": "intfloat/multilingual-e5-small",
     "max_image_dim": 1024
   },
   "rag": {

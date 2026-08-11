@@ -138,7 +138,11 @@ def build_harness(html: str) -> str:
         "    return {text:(t.textContent||'').trim(), fill:cs.fill, ink,\n"
         "            contrast: ink? +_contrast(ink,bg).toFixed(3):null};}).filter(l=>l.text.length&&l.ink);\n"
         "  const cs=labels.map(l=>l.contrast).filter(x=>x!=null);\n"
-        "  return {built:!!texts.length, bg, nLabels:labels.length,\n"
+        "  const noteEl=out.querySelector('.rich-note');\n"
+        "  const nShapes=out.querySelectorAll('svg path, svg ellipse, svg line, svg circle, svg polygon').length;\n"
+        "  return {built:!!texts.length, bg, nLabels:labels.length, nShapes,\n"
+        "          note: noteEl?noteEl.textContent:null,\n"
+        "          noteH: noteEl?Math.round(noteEl.getBoundingClientRect().height):0,\n"
         "          minContrast: cs.length?Math.min(...cs):null, labels:labels.slice(0,40)};\n"
         "};\n"
         "window.__abc=async function(src){\n"
@@ -191,6 +195,19 @@ GEO_SPEC = json.dumps({"boundingbox": [-4, 4, 4, -4], "axis": True, "elements": 
     {"type": "circle", "args": [[0, 0], 2]},
     {"type": "text", "args": [-3, -3, "note"]}]})
 ABC_TUNE = "X:1\nT:Scale\nM:4/4\nL:1/4\nK:C\nC D E F | G A B c |"
+# 3 buildable elements (one uses the SVG circle flat form) + 2 unbuildable: an
+# unsupported relational type and a non-numeric arg. Expect 3 drawn, 2 noted.
+GEO_RESILIENCE = json.dumps({"boundingbox": [-4, 4, 4, -4], "axis": False, "elements": [
+    {"type": "text", "args": [0, 3, "ok"]},
+    {"type": "segment", "args": [[-3, 0], [3, 0]], "attrs": {"strokeColor": "green"}},
+    {"type": "circle", "args": [0, 0, 2]},                    # flat3 -> reshaped, draws
+    {"type": "perpendicular", "args": [[0, 0], [3, 0]]},      # unsupported -> skip
+    {"type": "ellipse", "args": ["bad"]}]})                   # non-number -> skip
+# A QUOTED-number boundingbox (a common model quirk) must be coerced, not thrown on —
+# the elements are all fine, so the figure must render rather than blank.
+GEO_BADBOX = json.dumps({"boundingbox": ["-4", "4", "4", "-4"], "axis": False, "elements": [
+    {"type": "circle", "args": [0, 0, 2]},
+    {"type": "text", "args": [0, 3, "ok"]}]})
 
 _CT = {"application/javascript", "text/css"}
 
@@ -242,6 +259,12 @@ def run(index_html: pathlib.Path) -> dict:
         out["geometry_dark"] = page.evaluate("s=>window.__geo(s)", GEO_SPEC)
         page.evaluate("()=>document.documentElement.removeAttribute('data-theme')")
         out["geometry_light"] = page.evaluate("s=>window.__geo(s)", GEO_SPEC)
+
+        # Resilience — a spec with good elements + a couple that can't be built. The
+        # good ones must still draw; the bad ones must be skipped and named in a footnote
+        # rather than throwing and blanking the whole card.
+        out["geometry_resilience"] = page.evaluate("s=>window.__geo(s)", GEO_RESILIENCE)
+        out["geometry_badbox"] = page.evaluate("s=>window.__geo(s)", GEO_BADBOX)
 
         # B8 — abc reset duration source
         out["abc"] = page.evaluate("s=>window.__abc(s)", ABC_TUNE)

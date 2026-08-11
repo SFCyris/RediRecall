@@ -163,6 +163,15 @@ def _cache_scope(rag_instances: list[str] | None = None, provider: str = "",
     return hashlib.sha256(payload.encode()).hexdigest()[:32]
 
 
+def _normalize_query(q: str) -> str:
+    """Canonical cache key for a query: collapse runs of whitespace and casefold,
+    so trivial variants ("Enable X?" / "enable  x ?") map to the same entry and hit
+    even at a high similarity threshold. Applied IDENTICALLY on lookup and store.
+    It only folds case and whitespace — different words ("enable" vs "disable")
+    stay distinct, so it never merges semantically different questions."""
+    return " ".join((q or "").split()).casefold()
+
+
 def cache_lookup(query: str, threshold: float = 0.92, scope: str = "") -> dict | None:
     """
     Look up the nearest cached response via redisvl SemanticCache.
@@ -180,7 +189,7 @@ def cache_lookup(query: str, threshold: float = 0.92, scope: str = "") -> dict |
     if cache is None:
         return None
     try:
-        hits = cache.check(prompt=query, num_results=1,
+        hits = cache.check(prompt=_normalize_query(query), num_results=1,
                            filter_expression=Tag("scope") == (scope or "_none"))
         if hits:
             h = hits[0]
@@ -212,7 +221,7 @@ def cache_store(query: str, response: str, chunks: list | None = None, scope: st
         return
     try:
         metadata = {"chunks_json": json.dumps(chunks)} if chunks else None
-        cache.store(prompt=query, response=response, metadata=metadata,
+        cache.store(prompt=_normalize_query(query), response=response, metadata=metadata,
                     filters={"scope": scope or "_none"})
     except Exception as e:
         log.error(f"Cache store error: {e}")

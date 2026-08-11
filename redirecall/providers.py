@@ -253,7 +253,12 @@ async def claude_stream(messages: list, model: str):
         client = config._cached_client("anthropic", api_key, base_url)
         kwargs: dict = {"model": model, "messages": claude_msgs, "max_tokens": 4096}
         if system_msg:
-            kwargs["system"] = system_msg
+            # Cache the system prefix: RAG/file context now rides on the user turn
+            # (see handle_chat), so this base-instruction prefix is byte-stable across
+            # a conversation and re-reads at ~0.1x input price on later turns. Below
+            # the model's ~1024-token minimum it simply isn't cached (no error).
+            kwargs["system"] = [{"type": "text", "text": system_msg,
+                                 "cache_control": {"type": "ephemeral"}}]
         async with client.messages.stream(**kwargs) as stream:
             async for text in stream.text_stream:
                 yield text, False

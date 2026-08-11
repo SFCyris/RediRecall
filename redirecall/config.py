@@ -166,6 +166,16 @@ def compose_system_prompt(client_system: str | None) -> str:
     plain default so the model still gets a system message.
     """
     base   = (state._config.get("base_instruction") or "").strip()
+    # Drop the large chart/diagram authoring section on text-only deployments
+    # (config visual_instructions=False) to save ~2k billed tokens per turn. The
+    # SHIPPED instruction's visual section is a trailing block beginning at
+    # VISUAL_SECTION_MARKER, so cutting there keeps the core answer-style guidance.
+    # Limitation: a customised base instruction that appends its own text AFTER that
+    # marker loses it when gated off — the marker is treated as the start of a suffix.
+    if not state._config.get("visual_instructions", True):
+        cut = base.find(constants.VISUAL_SECTION_MARKER)
+        if cut != -1:
+            base = base[:cut].rstrip()
     client = (client_system or "").strip()
     parts  = [p for p in (base, client) if p]
     return "\n\n".join(parts) if parts else "You are a helpful assistant."

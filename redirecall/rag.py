@@ -780,6 +780,14 @@ async def search_rag_parallel(
     if not enabled:
         return []
 
+    # Embed the query ONCE and reuse the vector across every instance. Without this,
+    # each instance's search_rag independently re-embeds the identical query string
+    # (N redundant local encodes + executor contention). HyDE already supplies
+    # query_vec; this covers the common HyDE-off path. Local model — saves CPU, not tokens.
+    if query_vec is None:
+        query_vec = await loop.run_in_executor(
+            None, lambda: _ns_embeddings.embed(query, is_query=True).astype(np.float32))
+
     async def _search_one(inst: str) -> list[dict]:
         """Run a single synchronous search in a thread-pool so searches are parallel."""
         rc = rag_admin.rc_for_instance(inst)

@@ -128,6 +128,34 @@ def test_issue_b5_light_mode_after_dark_does_not_leak(probe):
         f"{min(g['labels'], key=lambda l: l['contrast'])}"
 
 
+# ── Resilience: one bad element must not blank the whole figure ───────────────
+def test_geometry_bad_element_is_skipped_and_footnoted(probe):
+    """A geometry spec with 3 buildable elements + 2 that cannot be built (an
+    unsupported relational type and a non-numeric arg). Before the per-element guard,
+    the first bad element threw out of draw() and the lane replaced the entire card
+    with a red error. Now: the 3 good elements draw, and the 2 bad ones are named in a
+    footnote pinned to the card — measured, not asserted from source.
+    """
+    g = probe["geometry_resilience"]
+    assert g.get("built"), f"the good elements never rendered: {g}"
+    assert g["nShapes"] >= 2, \
+        f"the buildable segment+circle did not draw (nShapes={g['nShapes']}): {g}"
+    assert g["note"], "no resilience footnote was rendered for the skipped elements"
+    assert "2 element" in g["note"], f"footnote should count 2 skips: {g['note']!r}"
+    assert "perpendicular" in g["note"], f"footnote should name the skipped type: {g['note']!r}"
+    assert g["noteH"] > 0, f"the footnote has no rendered height: {g}"
+
+
+def test_geometry_quoted_boundingbox_does_not_blank_the_figure(probe):
+    """A model quoting the boundingbox numbers (["-4","4",...]) used to throw out of
+    draw() — outside the per-element guard — and blank the whole card even though every
+    element was valid. The lenient _geoBox coercion must let the figure render.
+    """
+    g = probe["geometry_badbox"]
+    assert g.get("built"), f"a quoted-number boundingbox blanked the figure: {g}"
+    assert g["nShapes"] >= 1, f"the circle did not draw (nShapes={g['nShapes']}): {g}"
+
+
 # ── B8: abc reset duration ───────────────────────────────────────────────────
 def test_issue_b8_abc_reset_timer_gets_a_positive_duration(probe):
     """`visualObj.getTotalTime()` returns null for the synth-only play path, so the

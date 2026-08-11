@@ -109,7 +109,15 @@ body{background:radial-gradient(ellipse 120% 80% at 20% 0%,rgba(99,102,241,0.07)
 #topbar-actions{display:flex;gap:6px}
 .icon-btn{background:var(--glass2);border:1px solid var(--border);color:var(--text1);width:34px;height:34px;border-radius:var(--r3);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;transition:var(--transition)}
 .icon-btn:hover{border-color:var(--border2);color:var(--text0)}
-.token-counter{font-size:11px;color:var(--text2);padding:4px 10px;background:var(--glass);border:1px solid var(--border);border-radius:10px;white-space:nowrap}
+/* Token meter — a rough conversation-size estimate, split into input (your prompts),
+   output (the model's replies) and total, each a light colour-coded pill. */
+.token-counter{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.tok-pill{font-size:11px;padding:3px 8px;border-radius:10px;border:1px solid var(--border);
+  white-space:nowrap;font-variant-numeric:tabular-nums;line-height:1.4}
+.tok-in{background:rgba(96,165,250,.15);border-color:rgba(96,165,250,.32);color:var(--blue)}
+.tok-out{background:rgba(74,222,128,.16);border-color:rgba(74,222,128,.34);color:var(--green)}
+.tok-total{background:var(--glass);color:var(--text2)}
+@media (max-width:640px){.tok-total{display:none}}   /* keep the topbar tidy on phones */
 /* Welcome */
 .welcome-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:20px;padding:40px;text-align:center;min-height:300px}
 .welcome-logo{width:72px;height:72px;background:linear-gradient(135deg,var(--accent),var(--blue));border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:36px;box-shadow:0 8px 32px rgba(124,111,247,.4)}
@@ -577,6 +585,12 @@ table.data-table tr:last-child td{border-bottom:none}
    must not stay white underneath them. */
 [data-theme="dark"] .rich-output{background:rgba(255,255,255,.07)}
 .rich-output .rich-err{padding:14px;color:var(--red);font-size:12px;text-align:left}
+/* Non-fatal footnote for skipped geometry elements — pinned to the bottom of the card
+   so the (degraded) drawing above stays visible. Amber, legible in light and dark. */
+.rich-note{position:absolute;left:0;right:0;bottom:0;z-index:5;padding:6px 10px;font-size:11px;
+  line-height:1.35;text-align:left;color:#8a5b00;background:rgba(255,244,214,.95);
+  border-top:1px solid rgba(180,120,0,.35);max-height:46%;overflow:auto}
+[data-theme="dark"] .rich-note{color:#ffd479;background:rgba(58,44,12,.94);border-top-color:rgba(255,180,60,.4)}
 /* Plotly/Mermaid are multi-MB on first use; show progress instead of a blank box. */
 .rich-output.rich-loading::after{content:'Loading renderer…';display:block;width:100%;
   text-align:center;color:var(--text2);font-size:12px;animation:pulse 1.2s ease-in-out infinite}
@@ -601,6 +615,7 @@ table.data-table tr:last-child td{border-bottom:none}
 .rich-wrap[data-kind="map"] .rich-output,.rich-wrap[data-kind="geometry"] .rich-output,
 .rich-wrap[data-kind="plot3d"] .rich-output,.rich-wrap[data-kind="chart"] .rich-output{padding:0;display:block}
 .rich-wrap[data-kind="map"] .rich-output{padding:0}
+.rich-wrap[data-kind="geometry"] .rich-output{position:relative}  /* anchor for .rich-note */
 .leaflet-container{font:inherit}
 .rich-src-pre{margin:0;border-top:1px solid var(--border);background:rgba(0,0,0,.04);padding:10px 12px;display:none}
 [data-theme="dark"] .rich-src-pre{background:rgba(0,0,0,.25)}
@@ -762,7 +777,11 @@ table.data-table tr:last-child td{border-bottom:none}
         <button id="rag-all-btn" class="icon-btn" onclick="toggleRagAll()" title="Query all enabled RAG instances in parallel (multi-server)">🔀</button>
         <select id="model-select" class="topbar-select" onchange="selectModel(this.value)"><option>Loading…</option></select>
         <span id="vision-badge" class="vision-badge" style="display:none">👁 Vision</span>
-        <span id="token-counter" class="token-counter">~0 tokens</span>
+        <span id="token-counter" class="token-counter" title="Rough size estimate (≈ characters ÷ 4)">
+          <span id="tok-in" class="tok-pill tok-in" title="Input — your prompts (estimated)">↑ ~0</span>
+          <span id="tok-out" class="tok-pill tok-out" title="Output — the model's replies (estimated)">↓ ~0</span>
+          <span id="tok-total" class="tok-pill tok-total" title="Total (estimated)">Σ ~0</span>
+        </span>
       </div>
     </div>
   </div>
@@ -1159,6 +1178,8 @@ table.data-table tr:last-child td{border-bottom:none}
           <div class="form-group"><label>Top-K Chunks</label><div class="range-row"><input type="range" id="s-top-k" min="1" max="20" oninput="this.nextElementSibling.textContent=this.value"/><span class="range-val">5</span></div></div>
           <div class="form-group"><label>Similarity Threshold</label><div class="range-row"><input type="range" id="s-rag-threshold" min="0" max="1" step="0.01" oninput="this.nextElementSibling.textContent=parseFloat(this.value).toFixed(2)"/><span class="range-val">0.35</span></div></div>
         </div>
+        <div class="form-hint" style="margin:-4px 0 6px">Top-K × Chunk Size sets how much retrieved text is sent to the model per grounded answer — e.g. 5 × 180 words ≈ 1,300 tokens each reply. Lower either to spend fewer tokens (at some cost to recall).</div>
+        <div class="form-group"><label>Chat History Budget (approx. tokens)</label><input type="number" id="s-history-budget" value="3000" min="0" step="500"/><div class="form-hint">Caps how much recent conversation is resent to the model each turn (0 = no token limit; a 20-message cap still applies).</div></div>
         <div class="toggle-row"><span class="toggle-label">⚡ Hybrid Search (Vector + BM25)</span><label class="toggle"><input type="checkbox" id="s-hybrid" checked/><span class="toggle-slider"></span></label></div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-top:16px">
@@ -1313,6 +1334,8 @@ table.data-table tr:last-child td{border-bottom:none}
       <div style="display:flex;justify-content:flex-end;margin-top:6px">
         <button class="btn btn-secondary btn-sm" onclick="resetBaseInstruction()" title="Replace the box with the instruction shipped with this version (adds any newly supported visual blocks)">↺ Reset to shipped default</button>
       </div>
+      <div class="toggle-row" style="margin-top:12px"><span class="toggle-label">🎨 Include chart/diagram authoring rules</span><label class="toggle"><input type="checkbox" id="s-visual-instructions" checked/><span class="toggle-slider"></span></label></div>
+      <p style="font-size:12px;color:var(--text2);margin:4px 0 0">On: the assistant can render charts, plots, diagrams, maps, molecules and music (adds ~2,000 tokens to every message). Off: text-only answers with no visual blocks — saves those tokens on every message.</p>
       <div class="section-title" style="margin-top:20px">Prompt Templates</div>
       <p style="font-size:12px;color:var(--text2);margin:-4px 0 8px">Each template is <b>added on top of</b> the Base Instruction when selected from the 💬 menu next to the message box.</p>
       <div id="templates-list"></div>
@@ -1392,7 +1415,7 @@ const S={
   config:{},templates:[],pendingImages:[],pendingFiles:[],pinnedMsgs:[],sourceFilter:'',
   streaming:false,recognition:null,
   chatMetrics:{hits:0,misses:0,latencies:[]},msgIdCounter:0,
-  provider:'ollama',ragAllMode:true,
+  provider:'ollama',ragAllMode:true,noRag:false,
   ragExportFormat: localStorage.getItem('ragExportFormat')||'zip',
   providerModels:{ollama:'',claude:'',openai:'',qwen:'',mistral:'',groq:'',gemini:''}
 };
@@ -2047,10 +2070,19 @@ function _ragKey(r){return r.name+'§'+(r.redis_endpoint||'default');}
 function _parseRagKey(key){const i=key.indexOf('§');return i<0?{name:key,ep:'default'}:{name:key.slice(0,i),ep:key.slice(i+1)};}
 function _isActiveRag(r){return S.activeRag&&r.name===S.activeRag.name&&(r.redis_endpoint||'default')===(S.activeRag.ep||'default');}
 function _activeRagKey(){return S.activeRag?S.activeRag.name+'§'+(S.activeRag.ep||'default'):'';}
+// The RAG selection for a chat request. No RAG -> an explicit empty rag_instances
+// list, which the server reads as "answer without retrieval"; All -> every enabled,
+// reachable instance; otherwise the single active instance.
+function _ragPayload(){
+  if(S.noRag)return {rag_instances:[]};
+  return S.ragAllMode
+    ? {rag_instances:S.ragInstances.filter(r=>r.enabled!==false&&r.reachable!==false).map(r=>r.name)}
+    : {rag_instance:S.activeRag?.name||'default'};
+}
 
 function renderRagSidebar(){
   document.getElementById('rag-sidebar-list').innerHTML=S.ragInstances.map((r,i)=>`
-    <button class="sidebar-btn ${_isActiveRag(r)&&!S.ragAllMode?'active':''}" onclick="setActiveRag(${i})" ${r.reachable===false?'title="Endpoint unreachable — offline"':''}>
+    <button class="sidebar-btn ${_isActiveRag(r)&&!S.ragAllMode&&!S.noRag?'active':''}" onclick="setActiveRag(${i})" ${r.reachable===false?'title="Endpoint unreachable — offline"':''}>
       <span style="width:8px;height:8px;border-radius:50%;background:${r.reachable===false?'var(--red)':r.enabled===false?'#888':r.color};flex-shrink:0;display:inline-block"></span>
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;${r.reachable===false?'color:var(--text2)':''}">${escHtml(r.name)}</span>
       ${r.redis_endpoint&&r.redis_endpoint!=='default'?`<span class="ep-badge" title="${escHtml(r.redis_endpoint)}">🗄</span>`:''}
@@ -2106,8 +2138,8 @@ function populateRagSelects(){
     if(!el)return;
     const prev=el.value;
     if(id==='rag-select'){
-      el.innerHTML=`<option value="__all__">✦ All RAGs</option>`+instanceOpts;
-      el.value=S.ragAllMode?'__all__':_activeRagKey();
+      el.innerHTML=`<option value="__all__">✦ All RAGs</option><option value="__none__">⊘ No RAG</option>`+instanceOpts;
+      el.value=S.noRag?'__none__':(S.ragAllMode?'__all__':_activeRagKey());
     } else {
       el.innerHTML=instanceOpts;
       if(prev&&S.ragInstances.find(r=>_ragKey(r)===prev)){el.value=prev;}
@@ -2117,8 +2149,13 @@ function populateRagSelects(){
 
 // Handle change from the rag-select dropdown (accepts composite key or '__all__')
 function onRagSelectChange(val){
+  if(val==='__none__'){
+    S.noRag=true;S.ragAllMode=false;_applyRagAllUI();
+    toast('No RAG — answering without retrieval','info');
+    return;
+  }
   if(val==='__all__'){
-    if(!S.ragAllMode){S.ragAllMode=true;_applyRagAllUI();}
+    S.noRag=false;S.ragAllMode=true;_applyRagAllUI();
     const enabled=S.ragInstances.filter(r=>r.enabled!==false);
     toast(`Querying all ${enabled.length} RAG instance${enabled.length!==1?'s':''}`, 'info');
     return;
@@ -2131,7 +2168,7 @@ function setActiveRag(i){
   const r=S.ragInstances[i];
   if(!r)return;
   S.activeRag={name:r.name,ep:r.redis_endpoint||'default'};
-  if(S.ragAllMode){S.ragAllMode=false;_applyRagAllUI();}
+  if(S.ragAllMode||S.noRag){S.ragAllMode=false;S.noRag=false;_applyRagAllUI();}
   const sel=document.getElementById('rag-select');
   if(sel)sel.value=_activeRagKey();
   renderRagSidebar();renderRagInstances();
@@ -2146,6 +2183,7 @@ function _ragSetProcessing(i, on){
 }
 
 function toggleRagAll(){
+  S.noRag=false;
   S.ragAllMode=!S.ragAllMode;
   _applyRagAllUI();
   const enabled=S.ragInstances.filter(r=>r.enabled!==false);
@@ -2159,7 +2197,10 @@ function toggleRagAll(){
 function _applyRagAllUI(){
   const btn=document.getElementById('rag-all-btn');
   const sel=document.getElementById('rag-select');
-  if(S.ragAllMode){
+  if(S.noRag){
+    if(btn){btn.classList.remove('all-active');btn.title='Query all enabled RAG instances in parallel (multi-server)';}
+    if(sel){sel.value='__none__';sel.style.opacity='1';}
+  } else if(S.ragAllMode){
     if(btn){btn.classList.add('all-active');btn.title='Parallel mode ON — querying all enabled RAG instances';}
     if(sel){sel.value='__all__';sel.style.opacity='1';}
   } else {
@@ -2990,9 +3031,7 @@ async function sendMessage(){
   _setStreamingUI(true); // show spinner immediately
   showTyping();scrollToBottom();
   // In parallel mode send all enabled+reachable instances; otherwise send the active single instance
-  const ragPayload = S.ragAllMode
-    ? {rag_instances: S.ragInstances.filter(r=>r.enabled!==false&&r.reachable!==false).map(r=>r.name)}
-    : {rag_instance: S.activeRag?.name||'default'};
+  const ragPayload = _ragPayload();
   S.currentQuery = content;
   const fileCtx=S.pendingFiles.map(f=>({name:f.name,text:f.text}));
   S.ws.send(JSON.stringify({content,model:S.currentModel,provider:S.provider,...ragPayload,images:S.pendingImages,file_context:fileCtx,system_prompt:systemPrompt,source_filter:S.sourceFilter||''}));
@@ -3261,7 +3300,8 @@ async function thumbs(id,val,btn){
     query:    question?.content?.slice(0,2000)||'',
     answer:   answer?.content?.slice(0,4000)||'',
     provider: S.provider, model: S.currentModel,
-    rag_instances: S.ragAllMode
+    rag_instances: S.noRag ? []
+      : S.ragAllMode
       ? (S.ragInstances||[]).filter(r=>r.enabled!==false).map(r=>r.name)
       : [S.activeRag?.name||'default'],
     sources: (answer?.meta?.chunks||[]).map(c=>({source:c.source,score:c.score})),
@@ -3347,9 +3387,7 @@ async function regenerate(msgId){
       }
       const prev=sess.messages[ai];
       const versions=prev.meta?.versions||[{content:prev.content,provider:prev.meta?.provider,model:prev.meta?.model}];
-      const ragPayload=S.ragAllMode
-        ? {rag_instances:(S.ragInstances||[]).filter(r=>r.enabled!==false&&r.reachable!==false).map(r=>r.name)}
-        : {rag_instance:S.activeRag?.name||'default'};
+      const ragPayload=_ragPayload();
       try{
         S.ws.send(JSON.stringify({content:query,model:S.currentModel,provider:S.provider,...ragPayload,
           bypass_cache:true,system_prompt:_currentSystemPrompt(),source_filter:S.sourceFilter||'',
@@ -3594,6 +3632,8 @@ function populateSettingsForm(){
   setCheck('s-cache-enabled',c.cache?.enabled??true);
   setRange('s-cache-threshold',c.cache?.similarity_threshold||0.92);
   setVal('s-cache-ttl',c.cache?.ttl||3600);
+  setCheck('s-visual-instructions',c.visual_instructions??true);
+  setVal('s-history-budget',c.history_max_tokens??3000);
   // ── Crawl settings ──
   setVal('crawl-concurrency',c.crawl?.concurrency||10);
   setVal('crawl-js-concurrency',c.crawl?.js_concurrency||3);
@@ -3770,6 +3810,8 @@ async function saveSettings(){
     gemini:{api_key:S.config.gemini_key_from_env?'':getVal('s-gemini-key')||'',model:getVal('s-gemini-model')||'gemini-3-flash-preview'},
     provider:S.provider,
     base_instruction:getVal('base-instruction'),
+    visual_instructions:getCheck('s-visual-instructions'),
+    history_max_tokens:parseInt(getVal('s-history-budget'))||0,
     prompt_templates:S.templates,
     web_sources:S.config.web_sources||[],
     active_rag:S.activeRag?.name||'default',
@@ -4104,9 +4146,7 @@ function rerunSkipCache(msgId){
   if(!S.currentModel){toast('Select a model first','error');return;}
   const tplIdx=document.getElementById('template-select').value;
   const systemPrompt=tplIdx!==''?S.templates[parseInt(tplIdx)]?.system:undefined; // base_instruction is prepended server-side
-  const ragPayload=S.ragAllMode
-    ?{rag_instances:S.ragInstances.filter(r=>r.enabled!==false&&r.reachable!==false).map(r=>r.name)}
-    :{rag_instance:S.activeRag?.name||'default'};
+  const ragPayload=_ragPayload();
   S.currentQuery=query;
   _setStreamingUI(true);showTyping();scrollToBottom();
   S.ws.send(JSON.stringify({content:query,model:S.currentModel,provider:S.provider,...ragPayload,bypass_cache:true,system_prompt:systemPrompt}));
@@ -4142,9 +4182,7 @@ function rerunQuery(id,bypassCache){
   if(S.sessionId)_rememberSessionId(S.sessionId);
   updateTokenCounter();
   _setStreamingUI(true);showTyping();scrollToBottom();
-  const ragPayload=S.ragAllMode
-    ?{rag_instances:S.ragInstances.filter(r=>r.enabled!==false&&r.reachable!==false).map(r=>r.name)}
-    :{rag_instance:S.activeRag?.name||'default'};
+  const ragPayload=_ragPayload();
   S.currentQuery=query;
   const payload={content:query,model:S.currentModel,provider:S.provider,...ragPayload,system_prompt:systemPrompt,source_filter:S.sourceFilter||''};
   if(bypassCache)payload.bypass_cache=true;
@@ -4321,8 +4359,18 @@ function exportChat(fmt='md'){
 
 function updateTokenCounter(){
   const msgs=S.sessions[S.sessionId]?.messages||[];
-  const chars=msgs.reduce((a,m)=>a+m.content.length,0);
-  document.getElementById('token-counter').textContent=`~${Math.round(chars/4).toLocaleString()} tokens`;
+  // Same rough ~chars/4 estimate as before, now split by role: assistant turns are
+  // output, everything else (your prompts, tool/system turns) counts as input.
+  let inChars=0,outChars=0;
+  for(const m of msgs){
+    const len=(m.content||'').length;
+    if(m.role==='assistant') outChars+=len; else inChars+=len;
+  }
+  const est=c=>Math.round(c/4).toLocaleString();
+  const set=(id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
+  set('tok-in',   `↑ ~${est(inChars)}`);
+  set('tok-out',  `↓ ~${est(outChars)}`);
+  set('tok-total',`Σ ~${est(inChars+outChars)}`);
 }
 
 // ── Markdown + Math ───────────────────────────────────────────────────────────
@@ -4376,9 +4424,18 @@ function _isDark(){ return document.documentElement.getAttribute('data-theme')==
 // JSXGraph element types accepted from model output. Deliberately excludes
 // anything that evaluates an expression/function string (functiongraph, curve,
 // riemannsum, …) — geometry specs are pure data, never code. Use ```plot for
-// function curves.
+// function curves. Also excludes the relational constructions (perpendicular,
+// parallel, tangent, intersection, glider): each REQUIRES a reference to another
+// already-built element, which this coordinate-only element schema cannot express,
+// so they could only ever throw. One that slips through anyway is caught per-element
+// in the draw loop and reported in a footnote rather than blanking the whole figure.
 const _GEO_TYPES=new Set(['point','line','segment','circle','ellipse','polygon','text','angle','arc',
-  'sector','midpoint','perpendicular','parallel','tangent','intersection','glider','arrow','bisector','vector']);
+  'sector','midpoint','arrow','vector','bisector','rect','rectangle']);
+// JSXGraph 1.12 has no 'vector' or 'rect'/'rectangle' element — a vector is just an
+// arrow between two points, and a rectangle is a 4-point polygon (its corners are
+// expanded from two opposite corners in _geoArgs). Translate the types a model
+// naturally reaches for onto the real ones.
+const _GEO_TYPE_ALIAS={vector:'arrow',rect:'polygon',rectangle:'polygon'};
 // Attributes a model may set. Anything else (and anything that could carry markup
 // or an expression) is dropped.
 const _GEO_ATTRS=new Set(['name','size','strokeColor','strokeWidth','strokeOpacity','fillColor',
@@ -4412,7 +4469,7 @@ const _GEO_ANCHOR={middle:'middle',center:'middle',start:'left',left:'left',end:
 // ("Can't create line with parent types 'number' and 'number'"). Reshape rather than
 // erroring: the point of this lane is that the browser draws what was clearly meant,
 // not that the model has to get the exact nesting right.
-const _GEO_POINT_LIST_TYPES=new Set(['line','segment','arrow','vector','polygon','angle','arc','sector']);
+const _GEO_POINT_LIST_TYPES=new Set(['line','segment','arrow','vector','polygon','angle','arc','sector','midpoint','bisector']);
 function _geoArgs(type,args,attrs){
   const a=Array.isArray(args)?args:[args];
   if(type==='text'){                       // JSXGraph needs [x, y, content]
@@ -4423,6 +4480,66 @@ function _geoArgs(type,args,attrs){
     return a.map(_geoNum).concat([_geoText(c==null?'':c)]);
   }
   const nums=a.map(_geoNum);
+  if(type==='point'&&nums.length===1&&Array.isArray(nums[0])&&nums[0].length===2)
+    return nums[0];                        // a point handed as a single nested [[x,y]]
+  if(type==='rect'||type==='rectangle'){
+    // No rectangle element in JSXGraph — a rect is a 4-point polygon. Models give two
+    // OPPOSITE corners, nested [[x1,y1],[x2,y2]] or flat [x1,y1,x2,y2]; expand to the
+    // four corners in order so the box closes. Four corners already given fall through
+    // to the polygon (via the vector/rect type alias) untouched.
+    let x1,y1,x2,y2;
+    if(nums.length===2&&Array.isArray(nums[0])&&Array.isArray(nums[1])
+       &&nums[0].length===2&&nums[1].length===2){ [x1,y1]=nums[0]; [x2,y2]=nums[1]; }
+    else if(nums.length===4&&nums.every(n=>typeof n==='number')) [x1,y1,x2,y2]=nums;
+    if(x1!==undefined) return [[x1,y1],[x2,y1],[x2,y2],[x1,y2]];
+  }
+  if(type==='circle'){
+    // SVG-style circle(centre, radius). [[cx,cy],r] and the two-point [[cx,cy],[px,py]]
+    // are already native; rescue the flat [cx,cy,r] and the centre-only-with-radius-in-
+    // attrs forms, both of which JSXGraph rejects. It wants [point, number].
+    if(nums.length===3&&nums.every(n=>typeof n==='number')) return [[nums[0],nums[1]],nums[2]];
+    if(nums.length===1&&Array.isArray(nums[0])&&nums[0].length===2){
+      const r=attrs&&(typeof attrs.radius==='number'?attrs.radius:parseFloat(attrs.radius));
+      if(isFinite(r)) return [nums[0],r];
+    }
+  }
+  if(type==='arc'||type==='sector'){
+    // Models describe an arc as centre + radius + start/end angle in DEGREES —
+    // arc([cx,cy],r,0,90) or the flat [cx,cy,r,0,90] — but JSXGraph's arc/sector are
+    // three POINTS (centre, start, end). Put the start/end points on the circle of
+    // radius r at those angles. The native three-point form (three points, or six flat
+    // numbers reshaped just below) is left untouched.
+    let cx,cy,r,a0,a1;
+    if(nums.length===5&&nums.every(n=>typeof n==='number')) [cx,cy,r,a0,a1]=nums;
+    else if(nums.length===4&&Array.isArray(nums[0])&&nums[0].length===2
+            &&typeof nums[1]==='number'&&typeof nums[2]==='number'&&typeof nums[3]==='number')
+      { [cx,cy]=nums[0]; r=nums[1]; a0=nums[2]; a1=nums[3]; }
+    if(cx!==undefined){
+      const rad=d=>d*Math.PI/180;
+      return [[cx,cy],[cx+r*Math.cos(rad(a0)),cy+r*Math.sin(rad(a0))],
+                       [cx+r*Math.cos(rad(a1)),cy+r*Math.sin(rad(a1))]];
+    }
+  }
+  if(type==='ellipse'){
+    // Models write ellipses the SVG way — a centre and x/y radii, as ellipse([cx,cy],
+    // [rx,ry]) or the flat [cx,cy,rx,ry]. JSXGraph's ellipse is instead a conic defined
+    // by TWO FOCI plus a third constraint (a point on it, or the major-axis length), so
+    // the SVG form arrives with too few parents and JSXGraph dereferences an undefined
+    // third one — "Cannot read properties of undefined (reading 'length')". Convert
+    // centre+radii to the equivalent foci form: for a >= b the foci sit on the major
+    // (x) axis at (cx ± c, cy) with c = √(a²−b²) and the point-sum is 2a; taller-than-
+    // wide flips to the y axis. A genuine 3-parent foci call falls straight through.
+    let cx,cy,rx,ry;
+    if(nums.length===4&&nums.every(n=>typeof n==='number')) [cx,cy,rx,ry]=nums;
+    else if(nums.length===2&&Array.isArray(nums[0])&&Array.isArray(nums[1])
+            &&nums[0].length===2&&nums[1].length===2){ [cx,cy]=nums[0]; [rx,ry]=nums[1]; }
+    if(cx!==undefined){
+      rx=Math.abs(rx); ry=Math.abs(ry);
+      const major=Math.max(rx,ry), c=Math.sqrt(Math.max(0,major*major-Math.min(rx,ry)**2));
+      return rx>=ry ? [[cx-c,cy],[cx+c,cy],2*major]
+                    : [[cx,cy-c],[cx,cy+c],2*major];
+    }
+  }
   if(_GEO_POINT_LIST_TYPES.has(type)&&nums.length>=4&&nums.length%2===0&&nums.every(n=>typeof n==='number')){
     const pts=[];
     for(let i=0;i<nums.length;i+=2)pts.push([nums[i],nums[i+1]]);
@@ -4439,11 +4556,47 @@ function _geoAttrs(type,attrs){
     let val=(typeof v==='string')?_geoText(v):v;
     if(k==='fontSize'||k==='strokeWidth'||k==='size')val=parseFloat(val)||val;
     if(k==='anchorX')val=_GEO_ANCHOR[String(val).toLowerCase()]||'middle';
+    if(k==='dash')                           // JSXGraph's dash is a style index 0–6, NOT
+      // an SVG stroke-dasharray. A model naturally emits dash:[5,5] (renders SOLID — the
+      // array is ignored) or dash:"5,5" / dash:9 (both THROW inside the renderer, blanking
+      // the figure). Map every form onto a valid index so a dashed line stays dashed.
+      val = Array.isArray(v)     ? (v.length?2:0)
+          : typeof v==='boolean' ? (v?2:0)
+          : typeof v==='number'  ? Math.max(0,Math.min(6,Math.round(v)))
+          :                        (String(v).trim()?2:0);
     out[k]=val;
   });
   out.display='internal';                  // SVG <text>, never innerHTML
   out.label=Object.assign({},out.label,{display:'internal'});
+  // Auto-created corner/parent points are drag-handles for an INTERACTIVE construction;
+  // in a rendered diagram they are just dots of noise on a filled box or an arc. Hide
+  // them so a rect/polygon reads as a clean shape and an arc as a clean curve. (Explicit
+  // `point`/`midpoint` elements the model asks for are untouched.)
+  if(type==='polygon'||type==='rect'||type==='rectangle') out.vertices={visible:false,fixed:true};
+  if(type==='arc'||type==='sector'){ const h={visible:false}; out.center=h; out.radiuspoint=h; out.anglepoint=h; }
   return out;
+}
+// A non-fatal footnote pinned to the bottom of the geometry card listing elements
+// the lane had to skip. textContent only — never innerHTML — the lines carry
+// model-supplied type names and JSXGraph error text.
+function _geoNote(out,lines){
+  const n=document.createElement('div');
+  n.className='rich-note';
+  n.textContent='⚠ '+lines.length+' element'+(lines.length>1?'s':'')
+    +' skipped (see source): '+lines.join('   ·   ');
+  out.appendChild(n);
+}
+// A lenient bounding box, so a bad box does not blank a figure whose elements are all
+// fine. Coerce each of the four numbers — quoted numbers ["-6","6",…] included, a common
+// model quirk; this is board config, NOT JessieCode-evaluated element args, so Number()
+// is safe here — and fall back to a sane default when the box is missing or malformed.
+function _geoBox(v){
+  const d=[-6,6,6,-6];
+  if(!Array.isArray(v)||v.length<4)return d;
+  const n=v.slice(0,4).map(Number);              // box is [xmin, ymax, xmax, ymin]
+  if(!n.every(x=>isFinite(x)))return d;
+  if(n[0]===n[2]||n[1]===n[3])return d;          // zero-area box -> initBoard scales to NaN,
+  return n;                                       // silently blanking a card whose elements are fine
 }
 
 
@@ -4536,6 +4689,55 @@ function _sizeFromViewBox(out){
   svg.style.flex='0 0 auto';
 }
 
+// Models routinely put (), ", %, and other specials inside an UNQUOTED flowchart node
+// label — A[Brain "draws" a line] or B[Light bends (down)] — which mermaid's parser
+// rejects, blanking the whole diagram. Wrap each rectangle label's content in quotes
+// (which makes the specials safe) and fold any inner ASCII double-quote into a curly one
+// so it can't close the wrapper. Only touch `graph`/`flowchart` diagrams (other diagram
+// types use [..] differently).
+function _mermaidSafeLabels(src){
+  // Sniff the diagram type AFTER stripping leading %%{init}%% directives and %% comment
+  // lines, so a leading comment can't hide a flowchart from the gate.
+  const head=String(src).replace(/^(?:\s|%%\{[\s\S]*?\}%%|%%[^\n]*\n)*/,'');
+  const kw=(head.match(/[A-Za-z]+/)||[''])[0].toLowerCase();
+  if(kw!=='graph'&&kw!=='flowchart')return src;
+  // Protect already-quoted labels/titles FIRST: a correctly-quoted label may legitimately
+  // contain [ ] or / (arr[0], the interval [0,1], a subgraph "title [x]"), and must NOT be
+  // re-split on those brackets — doing so would break a diagram that renders fine today.
+  const held=[]; const K=i=>'￿'+i+'￿';   // ￿ is a non-character: never in source
+  const push=v=>{ held.push(v); return K(held.length-1); };
+  let s=String(src);
+  // A literal '<' in a label is HTML-escaped by mermaid to &lt; and, with htmlLabels off,
+  // shown raw as "&lt;" (a real report: an edge label "No (< 50m)"). Handling splits by
+  // context: mermaid's #lt; entity renders a true '<' inside an EDGE/pipe label, but NOT
+  // inside a NODE label, where it stays &lt;. So node-shape labels get the fullwidth look-
+  // alike '＜' (renders literally everywhere), and edge/pipe labels get '#lt;'. A pre-escaped
+  // &lt; is handled the same way. Edge arrows like <--> are never quoted, so untouched; '>'
+  // is not escaped by mermaid, so it is left as-is.
+  const NL=x=>x.replace(/&lt;|</g,'＜');   // node-label rewrite (fullwidth look-alike)
+  // Protect already-quoted labels/titles FIRST: a correctly-quoted label may legitimately
+  // contain [ ] or / (arr[0], the interval [0,1], a subgraph "title [x]"), and must NOT be
+  // re-split on those brackets. Node-shape quoted labels + subgraph titles take '＜' here.
+  s=s.replace(/\["([^"\n]*)"\]/g,(m,i)=>push('["'+NL(i)+'"]'));
+  s=s.replace(/\("([^"\n]*)"\)/g,(m,i)=>push('("'+NL(i)+'")'));
+  s=s.replace(/\{"([^"\n]*)"\}/g,(m,i)=>push('{"'+NL(i)+'"}'));
+  s=s.replace(/(\bsubgraph\s+)"([^"\n]*)"/gi,(m,p,i)=>push(p+'"'+NL(i)+'"'));
+  // Every "..." left now is an edge or pipe label: rewrite '<' to the #lt; entity there.
+  s=s.replace(/"[^"\n]*"/g,q=>q.replace(/&lt;|</g,'#lt;'));
+  s=s.replace(/\|"[^"\n]*"\|/g,m=>push(m));   // protect pipe labels from the [..] wrap below
+  // Now wrap the remaining UNQUOTED [text] rectangle labels; fold content double-quotes to
+  // curly and rewrite '<' to '＜'. Leave compound shapes alone: [(cylinder)] and
+  // [/parallelogram/], [\trapezoid\], whose delimiter slashes would else become label text.
+  s=s.replace(/\[([^\[\]\n]+)\]/g,(m,inner)=>{
+    const t=inner.trim();
+    if(!t.length)return m;
+    if(t[0]==='('&&t[t.length-1]===')')return m;
+    if(/^[/\\][\s\S]*[/\\]$/.test(t))return m;
+    return '["'+NL(inner.replace(/"([^"]*)"/g,'“$1”').replace(/"/g,'”'))+'"]';
+  });
+  return s.replace(/￿(\d+)￿/g,(m,i)=>held[+i]);   // restore the protected labels
+}
+
 const RICH_LANES={
   mermaid:{
     label:'⬗ Diagram',
@@ -4547,6 +4749,7 @@ const RICH_LANES={
       mermaid.initialize({startOnLoad:false,securityLevel:'strict',
         theme:_isDark()?'dark':'default',htmlLabels:false,
         flowchart:{htmlLabels:false},class:{htmlLabels:false},...(extra||{})});
+      src=_mermaidSafeLabels(src);   // rescue special chars in unquoted flowchart labels
       try{
         const {svg}=await mermaid.render('mmd-'+uid,src);
         out.innerHTML=window.DOMPurify?DOMPurify.sanitize(svg,{USE_PROFILES:{svg:true,svgFilters:true}}):svg;
@@ -4765,14 +4968,22 @@ const RICH_LANES={
         JXG.Options.axis.ticks.strokeColor = _dark?'#8a8a9a':_d.atick;
       }catch(e){}
       const board=JXG.JSXGraph.initBoard(host.id,{
-        boundingbox:_geoNum(spec.boundingbox||[-6,6,6,-6]), axis:spec.axis!==false,
+        boundingbox:_geoBox(spec.boundingbox), axis:spec.axis!==false,
         showCopyright:false, showNavigation:false, keepaspectratio:spec.keepaspectratio!==false});
       out._richInst={kind:'geometry',obj:board};
-      (spec.elements||[]).forEach(e=>{
+      // Draw each element independently. One bad element — an unsupported type, or a
+      // shape JSXGraph rejects despite the reshapes above — must not blank the whole
+      // figure: skip it, keep drawing the rest, and collect what was dropped so a
+      // footnote can flag it for investigation instead of throwing the card away.
+      const _skipped=[];
+      (Array.isArray(spec.elements)?spec.elements:[]).forEach((e,i)=>{
         const t=String(e.type||'').toLowerCase();
-        if(!_GEO_TYPES.has(t))throw new Error('unsupported geometry type: '+t);
-        board.create(t, _geoArgs(t, e.args, e.attrs), _geoAttrs(t, e.attrs));
+        try{
+          if(!_GEO_TYPES.has(t))throw new Error('unsupported type "'+t+'"');
+          board.create(_GEO_TYPE_ALIAS[t]||t, _geoArgs(t,e.args,e.attrs), _geoAttrs(t,e.attrs));
+        }catch(err){ _skipped.push('#'+(i+1)+' '+(t||'?')+' — '+((err&&err.message)||err)); }
       });
+      if(_skipped.length) _geoNote(out,_skipped);
     }},
   map:{
     label:'🗺 Map', fixed:'400px',

@@ -1,6 +1,6 @@
 # RediRecall — Documentation
 
-> A self-hosted AI chat application with Retrieval-Augmented Generation (RAG) powered by Redis vector search, supporting Ollama, Claude, OpenAI, Qwen, Groq, and Gemini as LLM providers.
+> A self-hosted AI chat application with Retrieval-Augmented Generation (RAG) powered by Redis vector search, supporting Ollama, Claude, OpenAI, Qwen, Mistral, Groq, and Gemini as LLM providers.
 
 ---
 
@@ -22,7 +22,9 @@
 14. [API Reference](#api-reference)
 15. [Architecture](#architecture)
 16. [Configuration File](#configuration-file)
-17. [Optional Dependencies](#optional-dependencies)
+17. [Backup and Restore](#backup-and-restore)
+18. [Optional Dependencies](#optional-dependencies)
+19. [Acknowledgments & License](#acknowledgments--license)
 
 ---
 
@@ -30,7 +32,7 @@
 
 RediRecall is a single-server, self-hosted application that lets you:
 
-- Chat with Ollama, Claude, OpenAI, Qwen, Groq, or Gemini
+- Chat with Ollama, Claude, OpenAI, Qwen, Mistral, Groq, or Gemini
 - Build named **RAG knowledge bases** from files, PDFs, web pages, and `llms.txt` manifests
 - Store embeddings in **Redis** with HNSW vector indexing for fast semantic search
 - Query **multiple RAG instances in parallel** across different Redis servers
@@ -130,6 +132,10 @@ Click the 📎 button or drag an image directly onto the input box. Images are s
 
 Click the 🎤 microphone button to toggle speech-to-text. Transcribed text is inserted into the input field.
 
+### Token estimate
+
+The top bar shows a rough size estimate for the current conversation, split into three colour-coded pills: **input** (↑, your prompts), **output** (↓, the model's replies) and **total** (Σ). It is an approximation (≈ characters ÷ 4), not a billed token count.
+
 ### Prompt templates
 
 Select a system-prompt template from the dropdown left of the input box to change how the model answers (e.g. "Redis Expert", "ELI5", or any custom template you've created).
@@ -140,6 +146,13 @@ Hover any AI message to reveal action buttons:
 - 👍 / 👎 — Like or dislike (stored as feedback)
 - 📌 — Pin the message to the pinned panel
 - ↻ — Regenerate the response
+
+### Question actions
+
+Hover any of **your** earlier questions to reveal its action bar:
+- 📋 **Copy** — copies the question text to the clipboard
+- ↻ **Rerun** — asks it again (a close-enough answer may be served from the semantic cache)
+- ↺ **Force rerun** — asks it again while bypassing the cache, for a fresh answer from the model
 
 ### Cached message actions
 
@@ -223,7 +236,7 @@ can check the numbers a chart was drawn from.
 
 ### RAG context inspector
 
-After each AI response that used RAG, a **📚 N chunks matched** badge appears in the message metadata row.
+After each AI response that used RAG, a **📚 N matched chunks** badge appears in the message metadata row.
 
 - By default the inspector is **collapsed** — click the badge to expand it
 - To open it automatically after every answer, enable **Show RAG Matches in Answers** in **Settings → General**
@@ -328,6 +341,7 @@ All providers are configured in **Settings → Providers** — a unified accordi
 | ◆ OpenAI | API | OpenAI native SDK; GPT-4o, o-series |
 | 🟣 Qwen | API | Alibaba DashScope (OpenAI-compatible), `qwen-max`, `qwen-plus`, etc. |
 | ⚡ Groq | API | Ultra-fast inference (OpenAI-compatible), Llama / Mixtral / Gemma |
+| ◐ Mistral | API | EU-hosted (OpenAI-compatible), free "Experiment" tier; `mistral-large-latest`, `mistral-small-latest` |
 | ✦ Gemini | API | Google AI native SDK; `gemini-2.0-flash`, `gemini-1.5-pro`, etc. |
 
 ### Switching providers
@@ -342,6 +356,7 @@ API keys can be supplied via environment variables — they are never written to
 export ANTHROPIC_API_KEY="sk-ant-..."
 export OPENAI_API_KEY="sk-..."
 export DASHSCOPE_API_KEY="sk-..."
+export MISTRAL_API_KEY="..."
 export GROQ_API_KEY="gsk_..."
 export GEMINI_API_KEY="AIza..."
 ```
@@ -354,6 +369,7 @@ Any provider using the OpenAI-compatible API (OpenAI, Qwen, Groq, and many other
 |---|---|
 | OpenAI | `https://api.openai.com` |
 | Qwen (DashScope) | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
+| Mistral | `https://api.mistral.ai/v1` |
 | Groq | `https://api.groq.com/openai` |
 | LM Studio | `http://localhost:1234` |
 | Together AI | `https://api.together.xyz` |
@@ -367,6 +383,7 @@ Each provider uses its official Python SDK for streaming:
 | Claude | `anthropic` | `AsyncAnthropic.messages.stream()` |
 | OpenAI | `openai` | `AsyncOpenAI.chat.completions.create(stream=True)` |
 | Qwen | `openai` (DashScope) | Same as OpenAI with custom `base_url` |
+| Mistral | `openai` (Mistral endpoint) | Same as OpenAI with custom `base_url` |
 | Groq | `openai` (Groq endpoint) | Same as OpenAI with custom `base_url` |
 | Gemini | `google-genai` | `client.aio.models.generate_content_stream()` |
 
@@ -435,6 +452,10 @@ In parallel mode:
 - Each chunk in the RAG inspector shows which instance it came from (🗄 instance-name)
 
 To return to single-instance mode, click 🔀 again or select a specific instance from the dropdown.
+
+### No retrieval (No RAG)
+
+Select **⊘ No RAG** from the top-bar dropdown to answer the next messages with **no** retrieval at all — the model replies from its own knowledge, with no knowledge-base search and no grounding or citation instructions. This is distinct from querying a single instance or **✦ All RAGs** in parallel; pick a specific instance (or All RAGs) again to resume retrieval.
 
 ---
 
@@ -519,7 +540,7 @@ Enable/disable semantic cache, threshold, TTL, analytics, and clear button.
 ### Group 3 — Providers
 
 #### 🤖 Providers
-All six providers in a single accordion tab. Each provider has a collapsible card showing its configuration fields, connection test button, and a **Use** button to set it as the active provider.
+All seven providers in a single accordion tab. Each provider has a collapsible card showing its configuration fields, connection test button, and a **Use** button to set it as the active provider.
 
 The card header shows:
 - A status dot (green = connected, red = error, grey = not configured)
@@ -595,7 +616,7 @@ What counts as "strict" depends on the embedding model, and the useful range is 
 
 #### Reranking
 
-With **Settings → RAG → Reranker** enabled, a cross-encoder re-scores the retrieved candidates before they reach the model. Because a reranker can only improve on the original ordering if it is given more candidates than you intend to keep, RediRecall widens retrieval to `rerank_candidates` (default 40) whenever reranking is on, then cuts back to `top_k` afterwards. With the reranker off, retrieval fetches only `top_k` and no extra work is done.
+With reranking enabled (set `reranker.enabled: true` in `config.json` — there is no UI toggle), a cross-encoder re-scores the retrieved candidates before they reach the model. Because a reranker can only improve on the original ordering if it is given more candidates than you intend to keep, RediRecall widens retrieval to `rerank_candidates` (default 40) whenever reranking is on, then cuts back to `top_k` afterwards. With the reranker off, retrieval fetches only `top_k` and no extra work is done.
 
 A **⚠ threshold?** warning pill appears automatically on any instance where raw score ≥ 0.60 but hit rate < 50%.
 
@@ -624,6 +645,7 @@ All endpoints are served at `http://localhost:8420`.
 | `GET` | `/api/status/claude` | Verify Claude API key |
 | `GET` | `/api/status/openai` | Verify OpenAI API key |
 | `GET` | `/api/status/qwen` | Verify Qwen API key |
+| `GET` | `/api/status/mistral` | Verify Mistral API key |
 | `GET` | `/api/status/groq` | Verify Groq API key |
 | `GET` | `/api/status/gemini` | Verify Gemini API key |
 
@@ -635,6 +657,7 @@ All endpoints are served at `http://localhost:8420`.
 | `GET` | `/api/claude/models` | List Claude models |
 | `GET` | `/api/openai/models` | List OpenAI models (live + static fallback) |
 | `GET` | `/api/qwen/models` | List Qwen models |
+| `GET` | `/api/mistral/models` | List Mistral models |
 | `GET` | `/api/groq/models` | List Groq models (live + static fallback) |
 | `GET` | `/api/gemini/models` | List Gemini models |
 
@@ -743,7 +766,7 @@ WS /ws/chat/{session_id}
 // Start a chat turn
 {
   "content": "What is Redis?",
-  "provider": "ollama",             // "ollama" | "claude" | "openai" | "qwen" | "groq" | "gemini"
+  "provider": "ollama",             // "ollama" | "claude" | "openai" | "qwen" | "mistral" | "groq" | "gemini"
   "model": "llama3.2",
   "system_prompt": "You are a helpful assistant.",
   "rag_instance": "product-docs",   // single instance
@@ -760,15 +783,17 @@ WS /ws/chat/{session_id}
 **Server → Client messages:**
 
 ```jsonc
+{ "type": "status", "phase": "cache" }   // progress phase: "cache" | "rag" | "hyde"
 { "type": "stream_start" }
-{ "type": "rag_context", "chunks": [...], "latency": { "rag": 0.12 } }
+{ "type": "rag_context", "chunks": [...], "rag_used": true, "latency": { "rag": 0.12 } }
 { "type": "token", "content": "Hello", "done": false }
-{ "type": "stream_end", "latency": { "cache": 0, "rag": 0.12, "llm": 1.4, "total": 1.52 }, "title": "Redis Overview" }
+{ "type": "stream_end", "latency": { "cache": 0, "rag": 0.12, "llm": 1.4, "total": 1.52 }, "title": null }
+{ "type": "session_title", "title": "Redis Overview" }   // deferred auto-title (first turn only)
 {
   "type": "cache_hit",
   "content": "...",
   "score": 0.97,
-  "entry_id": "semcache:abc123",    // used for targeted deletion
+  "entry_id": "abc123",             // BARE id; pass as-is to DELETE /api/cache/entry
   "latency": { "cache": 0.03, "total": 0.03 }
 }
 { "type": "error", "content": "Connection refused" }
@@ -776,6 +801,8 @@ WS /ws/chat/{session_id}
 ```
 
 `rag_context` is sent after `cache_hit` when the cache entry contains stored RAG chunks, allowing the client to attach them to the cached message's inspector panel.
+
+`stream_end` always carries `"title": null`; the auto-generated session title is delivered afterwards as a separate `session_title` message (only on a session's first turn). This lets the UI unlock the composer immediately instead of waiting for the extra title-generation call.
 
 `bypass_cache: true` causes the server to skip the cache lookup for that single query. The resulting response is still written to the cache at the end.
 
@@ -791,7 +818,7 @@ Browser (index.html)
   │     │     └── cache_hit → re-emit stored RAG chunks
   │     ├── RAG retrieval           (Redis HNSW index, KNN + BM25 → RRF merge)
   │     │     └── search_rag_parallel() — asyncio.gather across endpoints
-  │     └── LLM streaming           (Ollama / Claude / OpenAI / Qwen / Groq / Gemini)
+  │     └── LLM streaming           (Ollama / Claude / OpenAI / Qwen / Mistral / Groq / Gemini)
   │
   └── REST /api/*  ←→  FastAPI routes
         ├── Config CRUD
@@ -878,7 +905,7 @@ The container also needs GPU access (`--gpus all`, or a `deploy.resources` reser
 
 ## Configuration File
 
-`config.json` (in the platform data directory — see the README) is created on first run and updated via the Settings UI or the `/api/config` endpoint.
+`config.json` (in the platform data directory — see the README) is created on first run and updated via the Settings UI or the `/api/config` endpoint. The complete, always-current annotated template is [`config.example.json`](config.example.json); the abbreviated example below shows the common keys, and the keys with **no UI control** are listed under [Advanced options](#advanced-options-config-only) beneath it.
 
 ```jsonc
 {
@@ -891,7 +918,7 @@ The container also needs GPU access (`--gpus all`, or a `deploy.resources` reser
   },
   "redis_endpoints": [],
   "provider": "ollama",
-  "ollama": { "host": "http://localhost", "port": 11434, "model": "llama3.2" },
+  "ollama": { "host": "http://localhost", "port": 11434, "model": "" },
   "claude": {
     "api_key": "",
     "model": "claude-sonnet-4-6",
@@ -906,6 +933,11 @@ The container also needs GPU access (`--gpus all`, or a `deploy.resources` reser
     "api_key": "",
     "model": "qwen-plus",
     "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
+  },
+  "mistral": {
+    "api_key": "",
+    "model": "mistral-small-latest",
+    "base_url": "https://api.mistral.ai/v1"
   },
   "groq": {
     "api_key": "",
@@ -940,6 +972,22 @@ The container also needs GPU access (`--gpus all`, or a `deploy.resources` reser
   "security": { "enabled": false, "password": "" }
 }
 ```
+
+### Advanced options (config-only)
+
+These keys have **no Settings-UI control** — edit `config.json` directly and restart. All are present in [`config.example.json`](config.example.json).
+
+| Key | Default | What it does |
+|---|---|---|
+| `visual_instructions` | `true` | When `false`, drops the ~2,000-token chart/diagram authoring section from the base instruction — text-only, token-lean answers. (Also exposed as the Settings → Templates toggle.) |
+| `history_max_tokens` | `3000` | Approximate token budget for the conversation history resent to the model each turn. A 20-message hard cap always applies; `0` disables the token cap. |
+| `reranker` | `{ "enabled": false, "model": "cross-encoder/ms-marco-MiniLM-L-6-v2", "top_n": 5 }` | Optional cross-encoder reranking: when enabled, retrieval widens to `rag.rerank_candidates`, the cross-encoder re-scores, then results are trimmed to `top_k`. |
+| `hyde` | `{ "enabled": false }` | HyDE (Hypothetical Document Embeddings): the model drafts a hypothetical answer and search uses *its* embedding, improving recall for sparse or keyword-poor queries. Costs one extra LLM call per query. |
+| `sessions` | `{ "persist": true, "ttl": 86400 }` | Whether conversations persist to Redis, and their TTL in seconds. |
+| `recrawl` | `{ "enabled": false, "interval_minutes": 60 }` | Scheduled automatic re-crawl of registered web sources, every `interval_minutes`. |
+| `scheduled_sources` | `[]` | The web sources registered for scheduled re-crawl. |
+| `crawl` | `{ "concurrency": 10, "js_render": false, "js_concurrency": 3, "smart_mode": true, "min_words": 100 }` | Web-crawler tuning — see [SETTINGS.md → Web Crawler Settings](SETTINGS.md#web-crawler-settings). |
+| `rag.rerank_candidates` | `40` | How many candidates retrieval fetches for the reranker to choose from (only relevant when reranking is on). |
 
 ---
 

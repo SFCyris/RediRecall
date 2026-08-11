@@ -25,7 +25,7 @@
 RediRecall is a self-hosted chat application that answers from **your** knowledge base. Point it at documents (PDF, DOCX, XLSX, TXT, CSV, Markdown) and websites, and it ingests them into a Redis vector index; when you chat, it retrieves the most relevant passages and grounds the model's answer in them (retrieval-augmented generation). 
 Redis is also used for semantic caching, so similar queries are answered from the cache and don't waste tokens.
 
-It runs entirely on your own machine — you bring your own LLM (a local **Ollama** model, or an API key for **Claude, OpenAI, Qwen, Groq, or Gemini**), and your data never leaves your control.
+It runs entirely on your own machine — you bring your own LLM (a local **Ollama** model, or an API key for **Claude, OpenAI, Qwen, Mistral, Groq, or Gemini**), and your data never leaves your control.
 
 **Runs on macOS and Linux.** Redis 8 (with the search/query engine) is set up for you automatically — no separate Redis install needed.
 
@@ -125,6 +125,8 @@ Each knowledge base is browsable: see what's indexed, scope a question to one do
 
 RediRecall runs as two containers: the **app** (a prebuilt multi-arch image — `linux/amd64` + `linux/arm64` — published to GitHub's Container Registry) and **Redis 8** with the query engine (from Docker Hub). Both are defined in [`docker-compose.yml`](docker-compose.yml).
 
+**Requires** Docker Engine with the Compose v2 plugin — verify with `docker compose version`.
+
 **1. Pull the images** (app from GitHub, Redis from Docker Hub):
 
 ```bash
@@ -148,7 +150,7 @@ docker compose stop     # stop the containers, keep them and your data
 docker compose down     # stop and remove the containers (the data volume persists)
 ```
 
-Your data (config, uploads, ingestion history) lives in the `redirecall-data` Docker volume and survives restarts and re-pulls. To upgrade, `docker compose pull && docker compose up -d`.
+Your state lives in **two** named Docker volumes, both of which survive restarts and re-pulls: **`redirecall-data`** (config, uploads, logs, ingestion history) and **`redirecall-redis`** (the ingested, embedded knowledge base and its vector index — the AOF/RDB persistence). To upgrade, `docker compose pull && docker compose up -d`. **A full backup must capture both volumes** — saving only `redirecall-data` loses the entire index, forcing a full re-ingest.
 
 > **Building from source instead:** comment the `image:` line and uncomment `build:` in `docker-compose.yml`, then `docker compose up -d --build`.
 
@@ -196,6 +198,7 @@ export OPENAI_API_KEY=...       # OpenAI
 export GEMINI_API_KEY=...       # Gemini
 export GROQ_API_KEY=...         # Groq
 export DASHSCOPE_API_KEY=...    # Qwen
+export MISTRAL_API_KEY=...      # Mistral
 ```
 
 **Ports:** the web UI is **8420**; the dedicated Redis is **6389** (loopback only). Override the app port with `REDIRECALL_PORT`, or `./start.sh 9000`.
@@ -204,17 +207,25 @@ export DASHSCOPE_API_KEY=...    # Qwen
 
 ## Features
 
-**💬 Chat** — token-by-token streaming over WebSocket; [rich inline rendering](#what-answers-can-render) (diagrams, charts, graphs, maps, molecules, music, math); image attachments for vision models (drag/drop, paste); voice input; regenerate in place with a version switcher to compare attempts; conversations persisted in Redis and restored on reload; pin messages; rate answers (👍/👎); auto-generated session titles; export as text.
+**💬 Chat** — token-by-token streaming over WebSocket; [rich inline rendering](#what-answers-can-render) (diagrams, charts, graphs, maps, molecules, music, math); image attachments for vision models (drag/drop, paste); voice input; regenerate in place with a version switcher to compare attempts; **Copy, Rerun, or Force rerun** (cache-bypassing) any earlier question from its hover action bar; conversations persisted in Redis and restored on reload; pin messages; rate answers (👍/👎); auto-generated session titles; a top-bar token estimate split into input/output/total; export as text.
 
-**🧠 RAG** — multiple named knowledge bases (RAG instances); ingest PDF, DOCX, XLSX, TXT, CSV, and Markdown files; a parallel BFS web crawler with a smart httpx-first mode and optional JS rendering (crawl4ai + Playwright) for SPAs; `llms.txt` auto-detection; a RAG inspector showing retrieved chunks and scores; **inline citations** linking each claim to the passage that supports it; **per-document management** — browse what's indexed, scope a question to one document, or delete one without rebuilding the instance; an explicit *No KB match* badge when retrieval finds nothing; export/import a knowledge base as a zip; duplicate detection.
+**🧠 RAG** — multiple named knowledge bases (RAG instances); ingest PDF, DOCX, XLSX, TXT, CSV, and Markdown files; a parallel BFS web crawler with a smart httpx-first mode and optional JS rendering (crawl4ai + Playwright) for SPAs; scheduled auto re-crawl of web sources; `llms.txt` auto-detection; **hybrid retrieval** — vector KNN + BM25 keyword search fused by RRF (on by default), with optional cross-encoder reranking and HyDE; a RAG inspector showing retrieved chunks and scores; **inline citations** linking each claim to the passage that supports it; **per-document management** — browse what's indexed, scope a question to one document, or delete one without rebuilding the instance; an explicit *No KB match* badge when retrieval finds nothing; a top-bar selector to query one instance, **all** of them in parallel, or **No RAG** (answer with no retrieval); export/import a knowledge base as a zip; duplicate detection.
 
 **⚡ Semantic cache** — cosine-similarity response caching in Redis with a configurable threshold and TTL; per-message hit/miss badge; delete or re-run cached answers.
 
-**🤖 LLM providers** — Ollama (local, no key), Claude, OpenAI, Qwen, Groq, Gemini. Switch providers and models from the UI; vision auto-detected for capable models.
+**🤖 LLM providers** — Ollama (local, no key), Claude, OpenAI, Qwen, Mistral, Groq, Gemini. Switch providers and models from the UI; vision auto-detected for capable models.
 
-**⚙️ Settings** — Redis connection (incl. multiple endpoints), embedding-model selector, chunk-size/overlap/top-K/threshold controls, reusable prompt templates, dark/light/auto theme, export/import config.
+**⚙️ Settings** — Redis connection (incl. multiple endpoints), embedding-model selector, chunk-size/overlap/top-K/threshold controls, a **chat-history token budget**, a **chart-authoring toggle** (drop ~2k tokens/message on text-only deployments), reusable prompt templates, dark/light/auto theme, export/import config.
 
 **📊 Observability** — per-response latency breakdown (cache / RAG / LLM / total), Redis memory monitor, cache analytics, ingestion logs, and a system-status panel.
+
+<p align="center">
+  <img src="screenshots/features/no-rag.png" alt="The top-bar selector set to No RAG — answer with no retrieval" width="72%">
+</p>
+<p align="center">
+  <img src="screenshots/features/query-actions.png" alt="Copy / Rerun / Force rerun action bar under an earlier question" width="72%">
+</p>
+<p align="center"><sub>Query one knowledge base, all of them in parallel, or <b>No RAG</b> per message &nbsp;&bull;&nbsp; <b>Copy</b>, <b>Rerun</b>, or <b>Force rerun</b> any earlier question from its hover bar.</sub></p>
 
 ---
 
@@ -224,7 +235,7 @@ RediRecall has **no built-in authentication**. The **local runtime** (`start.sh`
 
 **Untrusted content.** Model and RAG output is treated as untrusted: rendered Markdown and every SVG/diagram is sanitised (DOMPurify) before it reaches the DOM, the `geometry` block accepts data only — never expressions — and a Content-Security-Policy restricts scripts to the app itself plus the two CDNs the renderers come from. Ingested pages can carry prompt injections, so this matters in normal use, not just under attack.
 
-One deliberate trade-off: `img-src` permits any `https:` source, because answers legitimately show images from the pages and documents you ingest, plus map tiles. In principle that is an exfiltration channel if script execution were ever achieved. `connect-src` is far narrower — `'self'` plus one fixed host, `https://paulrosen.github.io`, which abcjs fetches General-MIDI soundfont samples from for the `abc` Play button — so `img-src` remains the broad channel and `connect-src` is limited to that single static-asset host. If your deployment does not need remote images, tighten `img-src` in `_CSP` (`redirecall/main.py`) to `'self' data: blob:`; if you do not need `abc` audio playback, drop `https://paulrosen.github.io` from `connect-src` to bring it back to `'self'`.
+One deliberate trade-off: `img-src` permits any `https:` source, because answers legitimately show images from the pages and documents you ingest, plus map tiles. In principle that is an exfiltration channel if script execution were ever achieved. `connect-src` is far narrower — `'self'` plus one fixed host, `https://paulrosen.github.io`, which abcjs fetches General-MIDI soundfont samples from for the `abc` Play button — so `img-src` remains the broad channel and `connect-src` is limited to that single static-asset host. If your deployment does not need remote images, tighten `img-src` in `_CSP` (`redirecall/appcore.py`) to `'self' data: blob:`; if you do not need `abc` audio playback, drop `https://paulrosen.github.io` from `connect-src` to bring it back to `'self'`.
 
 ---
 
@@ -246,7 +257,7 @@ RediRecall is built on excellent open-source projects:
 - **LLM providers** — [Ollama](https://ollama.com) for local models, and the [Anthropic](https://github.com/anthropics/anthropic-sdk-python) *(MIT)*, [OpenAI](https://github.com/openai/openai-python), [Groq](https://github.com/groq/groq-python), and [Google GenAI](https://github.com/googleapis/python-genai) *(Apache-2.0)* SDKs
 - **Deployment** — [Caddy](https://caddyserver.com) *(Apache-2.0)* for automatic HTTPS
 
-**Browser rendering** — the libraries that turn an answer into a figure. Each is fetched from a public CDN ([cdnjs](https://cdnjs.com), or [jsDelivr](https://www.jsdelivr.com) for smiles-drawer) the first time its block type appears:
+**Browser rendering** — the libraries that turn an answer into a figure. Each is fetched from a public CDN ([cdnjs](https://cdnjs.com), or [jsDelivr](https://www.jsdelivr.com) for smiles-drawer and viz.js) the first time its block type appears:
 
 | Library | Used for | License |
 |---|---|---|
@@ -261,6 +272,7 @@ RediRecall is built on excellent open-source projects:
 | [Leaflet](https://leafletjs.com) | ` ```map ` maps | BSD-2-Clause |
 | [Plotly.js](https://plotly.com/javascript/) | ` ```plot3d ` 3-D plots | MIT |
 | [SmilesDrawer](https://github.com/reymond-group/smilesDrawer) | ` ```molecule ` structures | MIT |
+| [3Dmol.js](https://3dmol.csb.pitt.edu) | ` ```molecule3d ` rotatable 3-D structures | BSD-3-Clause |
 | [abcjs](https://www.abcjs.net) | ` ```abc ` sheet music | MIT |
 | [highlight.js](https://highlightjs.org) | code syntax highlighting | BSD-3-Clause |
 
