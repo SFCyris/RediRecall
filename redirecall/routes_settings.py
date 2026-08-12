@@ -534,6 +534,57 @@ async def api_gemini_status(key: str | None = None, probe: bool = False):
 async def api_ollama_models():
     return await providers.ollama_models()
 
+
+@appcore.app.post("/api/ollama/pull")
+async def api_ollama_pull(payload: dict):
+    """Pull a model onto the local Ollama server, proxying its progress stream.
+
+    NDJSON lines pass through as-is ({"status", "total", "completed", ...});
+    Content-Encoding: identity bypasses the gzip middleware, which would buffer
+    the stream and turn live progress into one burst at the end."""
+    name = str(payload.get("model", "")).strip()
+    if not name:
+        raise HTTPException(400, "model is required")
+
+    async def gen():
+        # finally, not trailing code: a client that disconnects mid-pull closes
+        # this generator with GeneratorExit, which `except Exception` never sees
+        # — the invalidation must survive that path too (the pull continues
+        # server-side inside Ollama either way).
+        try:
+            try:
+                async with httpx.AsyncClient(timeout=None) as client:
+                    async with client.stream("POST", f"{providers.ollama_base()}/api/pull",
+                                             json={"model": name, "stream": True}) as resp:
+                        async for line in resp.aiter_lines():
+                            if line.strip():
+                                yield line + "\n"
+            except Exception as e:
+                yield json.dumps({"error": str(e)}) + "\n"
+        finally:
+            state._ollama_models_ts = 0.0
+
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(gen(), media_type="application/x-ndjson",
+                             headers={"Content-Encoding": "identity"})
+
+
+@appcore.app.delete("/api/ollama/models/{name:path}")
+async def api_ollama_delete(name: str):
+    """Remove a model from the local Ollama server ({name:path} — model names
+    contain '/' and ':'). Sends both key spellings; Ollama accepted "name"
+    historically and "model" on newer versions."""
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            res = await client.request("DELETE", f"{providers.ollama_base()}/api/delete",
+                                       json={"model": name, "name": name})
+        state._ollama_models_ts = 0.0   # invalidate the cached list
+        if res.status_code == 200:
+            return {"ok": True}
+        return {"ok": False, "error": f"Ollama returned {res.status_code}: {res.text[:200]}"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @appcore.app.get("/api/claude/models")
 def api_claude_models():
     return providers.CLAUDE_MODELS

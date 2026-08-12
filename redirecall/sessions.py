@@ -42,7 +42,7 @@ _SESSION_CHUNK_TEXT_MAX = 1200
 
 
 def _turn_meta(chunks: list | None = None, latency: dict | None = None,
-               provider: str = "", model: str = "") -> dict:
+               provider: str = "", model: str = "", usage: dict | None = None) -> dict:
     """Metadata persisted with a stored turn.
 
     Sessions used to hold only {role, content}, so everything that makes an answer
@@ -55,6 +55,8 @@ def _turn_meta(chunks: list | None = None, latency: dict | None = None,
     is never sent to a provider.
     """
     meta: dict = {"ts": int(time.time())}
+    if usage and "prompt" in usage:
+        meta["usage"] = usage   # provider-reported token counts (real, not estimated)
     if provider:
         meta["provider"] = provider
     if model:
@@ -170,3 +172,40 @@ def list_sessions_from_redis() -> list[dict]:
         pass
     return result
 
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# TOKEN USAGE — cumulative tally
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Per-turn usage lives in each turn's meta (above). This is the all-time counter
+# across every session, so the user can see what a provider/model has consumed
+# overall. One Redis hash, fields "<provider>:<model>:in|out|cached".
+
+_USAGE_KEY = "usage:cumulative"
+
+
+def record_usage(provider: str, model: str, usage: dict) -> None:
+    """Add one turn's provider-reported counts to the all-time tally."""
+    try:
+        pfx = f"{provider}:{model}"
+        pipe = redis_store.r().pipeline(transaction=False)
+        pipe.hincrby(_USAGE_KEY, f"{pfx}:in",  int(usage.get("prompt", 0)))
+        pipe.hincrby(_USAGE_KEY, f"{pfx}:out", int(usage.get("completion", 0)))
+        if usage.get("cached"):
+            pipe.hincrby(_USAGE_KEY, f"{pfx}:cached", int(usage["cached"]))
+        pipe.execute()
+    except Exception as e:
+        log.debug(f"usage tally skipped: {e}")
+
+
+def usage_totals() -> dict:
+    """The all-time tally as {"provider:model": {"in": n, "out": n, "cached": n}}."""
+    out: dict = {}
+    try:
+        for k, v in redis_store.r().hgetall(_USAGE_KEY).items():
+            k = k.decode() if isinstance(k, bytes) else k
+            pfx, _, kind = k.rpartition(":")
+            out.setdefault(pfx, {})[kind] = int(v)
+    except Exception:
+        pass
+    return out

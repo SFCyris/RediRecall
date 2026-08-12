@@ -117,12 +117,23 @@ body{background:radial-gradient(ellipse 120% 80% at 20% 0%,rgba(99,102,241,0.07)
 .tok-in{background:rgba(96,165,250,.15);border-color:rgba(96,165,250,.32);color:var(--blue)}
 .tok-out{background:rgba(74,222,128,.16);border-color:rgba(74,222,128,.34);color:var(--green)}
 .tok-total{background:var(--glass);color:var(--text2)}
-@media (max-width:640px){.tok-total{display:none}}   /* keep the topbar tidy on phones */
+.tok-cost{background:rgba(251,191,36,.16);border-color:rgba(251,191,36,.35);color:var(--yellow)}
+@media (max-width:640px){.tok-total,.tok-cost{display:none!important}}   /* keep the topbar tidy on phones */
 /* Welcome */
 .welcome-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;gap:20px;padding:40px;text-align:center;min-height:300px}
 .welcome-logo{width:72px;height:72px;background:linear-gradient(135deg,var(--accent),var(--blue));border-radius:20px;display:flex;align-items:center;justify-content:center;font-size:36px;box-shadow:0 8px 32px rgba(124,111,247,.4)}
 .welcome-title{font-size:28px;font-weight:700;background:linear-gradient(135deg,var(--accent3),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .welcome-sub{font-size:15px;color:var(--text2);max-width:440px;line-height:1.6}
+/* Version line under the welcome card: what am I running, under what license,
+   where is the code. Filled from /api/health — hidden (JS removes the attribute)
+   until the running build identifies itself. Plain inline-flex chips in normal
+   flow; no :empty/negative-margin tricks (a :empty→flex flip left the wrapper
+   measuring 0px tall in Chromium, letting the suggestion chips crowd it). */
+.welcome-version{text-align:center}
+.welcome-version[hidden]{display:none}
+.wv-chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;padding:3px 10px;margin:0 4px;border-radius:12px;background:var(--glass);border:1px solid var(--border);color:var(--text2);text-decoration:none;white-space:nowrap;transition:var(--transition)}
+a.wv-chip:hover{border-color:var(--accent2);color:var(--text0)}
+.wv-ver{font-weight:600;color:var(--accent);background:rgba(124,111,247,.08);border-color:rgba(124,111,247,.25)}
 .suggestion-chips{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
 .chip{background:var(--glass2);border:1px solid var(--border);color:var(--text1);padding:8px 16px;border-radius:20px;font-size:13px;cursor:pointer;transition:var(--transition)}
 .chip:hover{border-color:var(--accent);color:var(--accent3)}
@@ -618,6 +629,13 @@ table.data-table tr:last-child td{border-bottom:none}
 .rich-wrap[data-kind="geometry"] .rich-output{position:relative}  /* anchor for .rich-note */
 .leaflet-container{font:inherit}
 .rich-src-pre{margin:0;border-top:1px solid var(--border);background:rgba(0,0,0,.04);padding:10px 12px;display:none}
+/* Editable rich-lane source: the Apply bar sits above the (contenteditable) code.
+   Left-aligned — the generic per-<pre> Copy overlay owns the top-RIGHT corner
+   (absolute, top:6px right:6px), and flex-end put Apply underneath it. */
+.rich-apply-bar{display:flex;gap:6px;justify-content:flex-start;margin-bottom:6px}
+.rich-src-pre code[contenteditable]{outline:none;border-radius:4px}
+.rich-src-pre code[contenteditable]:focus{background:rgba(124,111,247,.06);box-shadow:inset 0 0 0 1px rgba(124,111,247,.35)}
+.svg-act-btn.svg-act-active{background:rgba(124,111,247,.18);border-color:rgba(124,111,247,.5);color:var(--accent)}
 [data-theme="dark"] .rich-src-pre{background:rgba(0,0,0,.25)}
 .rich-src-pre code{font-family:'SF Mono','Fira Code',monospace;font-size:12px;white-space:pre;color:var(--text1);display:block;overflow-x:auto}
 .svg-src-pre{margin:0;border-radius:0;border-top:1px solid var(--border);background:rgba(0,0,0,.04);padding:12px;display:none}
@@ -777,10 +795,12 @@ table.data-table tr:last-child td{border-bottom:none}
         <button id="rag-all-btn" class="icon-btn" onclick="toggleRagAll()" title="Query all enabled RAG instances in parallel (multi-server)">🔀</button>
         <select id="model-select" class="topbar-select" onchange="selectModel(this.value)"><option>Loading…</option></select>
         <span id="vision-badge" class="vision-badge" style="display:none">👁 Vision</span>
-        <span id="token-counter" class="token-counter" title="Rough size estimate (≈ characters ÷ 4)">
-          <span id="tok-in" class="tok-pill tok-in" title="Input — your prompts (estimated)">↑ ~0</span>
-          <span id="tok-out" class="tok-pill tok-out" title="Output — the model's replies (estimated)">↓ ~0</span>
-          <span id="tok-total" class="tok-pill tok-total" title="Total (estimated)">Σ ~0</span>
+        <span id="token-counter" class="token-counter" title="Session token meter. Exact numbers are the provider's reported billed tokens; a ~ means at least one turn had to be estimated (≈ characters ÷ 4).">
+          <span id="tok-in" class="tok-pill tok-in" title="Input tokens billed this session. Measured turns count the full prompt the provider processed (system + re-sent history + context + question), so this grows with conversation length. ~ = includes estimated turns.">↑ ~0</span>
+          <span id="tok-out" class="tok-pill tok-out" title="Output tokens generated this session (the model's replies). ~ = includes estimated turns.">↓ ~0</span>
+          <span id="tok-total" class="tok-pill tok-total" title="Input + output for this session. ~ = includes estimated turns.">Σ ~0</span>
+          <span id="tok-cost" class="tok-pill tok-cost" style="display:none"
+                title="Estimated cost from provider-reported usage × the pricing table (Settings/config.json). Approximate — check your provider's bill."></span>
         </span>
       </div>
     </div>
@@ -971,6 +991,14 @@ table.data-table tr:last-child td{border-bottom:none}
             <div id="ollama-test-result" style="font-size:12px"></div>
           </div>
           <div style="margin-top:12px"><h4>Available Models</h4><div id="models-table">Loading…</div></div>
+          <div style="margin-top:10px">
+            <h4>Pull a model</h4>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="text" id="ollama-pull-name" placeholder="e.g. llama3.2 · qwen2.5:7b · gemma3:4b" style="flex:1"/>
+              <button class="btn btn-secondary btn-sm" id="ollama-pull-btn" onclick="pullOllamaModel()">⬇ Pull</button>
+            </div>
+            <div id="ollama-pull-progress" class="form-hint" style="margin-top:4px"></div>
+          </div>
         </div>
       </div>
 
@@ -1310,6 +1338,24 @@ table.data-table tr:last-child td{border-bottom:none}
       <div class="glass-card"><h4>Saved Web Sources</h4><div id="web-sources-table"></div>
         <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="addWebSource()">＋ Save Current URL</button>
       </div>
+      <div class="glass-card"><h4>Watched Folders</h4>
+        <div class="form-hint" style="margin-bottom:8px">The local-disk twin of scheduled re-crawl: new and changed files (.txt .md .csv .pdf .docx .xlsx) in these folders are ingested into their RAG instance automatically. An edited file replaces its previous version. Files deleted from disk stay indexed — remove them via Documents.</div>
+        <div style="display:flex;gap:16px;align-items:center;margin-bottom:10px">
+          <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-size:13px;font-weight:500;color:var(--text1);cursor:pointer;margin:0">
+            <input type="checkbox" id="s-watch-enabled" style="width:auto;margin:0;accent-color:var(--accent)"/>
+            Enable folder watching
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-size:13px;font-weight:500;color:var(--text1);margin:0">
+            Scan every <input type="number" id="s-watch-interval" value="5" min="1" max="1440" style="width:64px"/> min
+          </label>
+        </div>
+        <div id="watch-folders-table"></div>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <input type="text" id="watch-add-path" placeholder="/absolute/path/to/folder" style="flex:1"/>
+          <select id="watch-add-instance" style="width:160px"></select>
+          <button class="btn btn-secondary btn-sm" onclick="addWatchFolder()">＋ Add</button>
+        </div>
+      </div>
     </div>
     <!-- Cache -->
     <div class="tab-pane" id="tab-cache">
@@ -1436,11 +1482,36 @@ const themes=['light','dark','auto'];
 let themeIdx=0;
 
 // ── Welcome ───────────────────────────────────────────────────────────────────
+// The version line under the welcome card. Everything in it comes from /api/health
+// (S.appInfo) so it always reflects the RUNNING build — never a value baked into
+// this file. The version links to its release notes when the source lives on
+// GitHub; the source link honours REDIRECALL_SOURCE_URL (AGPL §13 offer).
+function _welcomeVersionHTML(){
+  const i=S.appInfo;
+  if(!i||!i.version)return '';
+  const src=i.source||'', gh=/^https:\/\/github\.com\//.test(src);
+  const ver=escHtml(String(i.version)), lic=escHtml(i.license||'AGPL-3.0-or-later');
+  const verChip=gh
+    ? `<a class="wv-chip wv-ver" href="${escHtml(src)}/releases/tag/v${ver}" target="_blank" rel="noopener" title="What's new in ${ver}">⚡ v${ver}</a>`
+    : `<span class="wv-chip wv-ver">⚡ v${ver}</span>`;
+  const srcChip=src
+    ? `<a class="wv-chip" href="${escHtml(src)}" target="_blank" rel="noopener" title="This is ${lic} software — view or download the source">⚖️ Source</a>`
+    : '';
+  return `${verChip}<span class="wv-chip wv-lic" title="Free software — you may use, study, share and improve it">${lic}</span>${srcChip}`;
+}
+function _fillWelcomeVersion(){
+  const el=document.getElementById('welcome-version');
+  if(!el)return;
+  const html=_welcomeVersionHTML();
+  el.innerHTML=html;
+  el.hidden=!html;
+}
 function getWelcomeHTML(){
   return `<div class="welcome-screen">
     <div class="welcome-logo">⚡</div>
     <div class="welcome-title">RediRecall</div>
     <p class="welcome-sub">Powered by Ollama or Claude + Redis semantic search. Ask anything — I'll search your knowledge base and tell you when RAG or cache is used.</p>
+    <div class="welcome-version" id="welcome-version"${S.appInfo?.version?'':' hidden'}>${_welcomeVersionHTML()}</div>
     <div class="suggestion-chips">
       <div class="chip" onclick="sendSuggestion('Explain semantic caching')">Semantic caching</div>
       <div class="chip" onclick="sendSuggestion('Sugar molecule in 2d and 3d')">Sugar molecule in 2d and 3d</div>
@@ -1485,11 +1556,15 @@ async function loadConfig(){
   // override it with REDIRECALL_SOURCE_URL when they run a modified build).
   try{
     const h=await fetch('/api/health').then(r=>r.json());
+    S.appInfo=h||{};
     const a=document.getElementById('source-link');
     if(a&&h&&h.source){
       a.href=h.source;
       if(h.version)a.title=`RediRecall ${h.version} — ${h.license||'AGPL-3.0-or-later'}. View or download the source.`;
     }
+    // The welcome screen usually renders before this fetch returns — fill its
+    // version line in place now that the running build has identified itself.
+    _fillWelcomeVersion();
   }catch(e){}
 }
 
@@ -1632,6 +1707,39 @@ async function switchSession(id){
   });
   renderSessionList();
   document.getElementById('session-title').textContent=S.sessions[id].title;
+  updateTokenCounter();   // pills reflect the session being viewed, not the last one
+}
+
+async function forkSession(msgId){
+  // Fork the conversation at this answer: the server copies everything up to and
+  // including it into a new session, which becomes the active one. The original
+  // stays untouched — try a different direction without losing the first path.
+  const msgs=S.sessions[S.sessionId]?.messages||[];
+  const idx=msgs.findIndex(m=>m.meta?.id===msgId);
+  if(idx<0){toast('Could not locate this message in the session','error');return;}
+  // Anchor by content, not index: the client array can run ahead of the stored
+  // one (aborted/errored answers are kept here but never persisted), so an index
+  // would fork at the wrong message after any Stop.
+  const target=msgs[idx];
+  const content=typeof target.content==='string'?target.content:String(target.content);
+  const prefix=content.slice(0,300);
+  let occurrence=0;
+  for(let i=0;i<=idx;i++){
+    const c=typeof msgs[i].content==='string'?msgs[i].content:String(msgs[i].content);
+    if(msgs[i].role===target.role&&c.startsWith(prefix))occurrence++;
+  }
+  try{
+    const r=await fetch(`/api/sessions/${encodeURIComponent(S.sessionId)}/fork`,{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({role:target.role,content_prefix:prefix,occurrence})});
+    if(!r.ok)throw new Error((await r.json().catch(()=>({})))?.detail||`HTTP ${r.status}`);
+    const {id}=await r.json();
+    _rememberSessionId(id);
+    const baseTitle=S.sessions[S.sessionId]?.title||'Conversation';
+    S.sessions[id]={title:baseTitle.replace(/ \(fork\)$/,'')+' (fork)',messages:[],_stub:true};
+    await switchSession(id);
+    toast('Forked — you are now on the copy','success');
+  }catch(e){toast('Fork failed: '+e.message,'error');}
 }
 
 async function deleteSession(id){
@@ -1944,11 +2052,55 @@ function renderModelsTable(){
       // come from the Ollama server and must not be able to inject markup/JS.
       return `<tr${active?' style="background:rgba(124,111,247,.08)"':''}><td>${escHtml(m.name)}</td><td>${(m.size/1e9).toFixed(1)}GB</td>
       <td>${m.vision?'<span class="status-pill pill-ok">👁 Yes</span>':'—'}</td>
-      <td>${active
+      <td style="white-space:nowrap">${active
         ?'<span style="color:var(--accent);font-weight:600;font-size:12px">✓ Active</span>'
-        :`<button class="btn btn-secondary btn-sm" data-act="model-use" data-model="${escHtml(m.name)}">Use</button>`}</td></tr>`;
+        :`<button class="btn btn-secondary btn-sm" data-act="model-use" data-model="${escHtml(m.name)}">Use</button>`}
+        <button class="btn btn-secondary btn-sm" data-act="model-del" data-model="${escHtml(m.name)}" title="Remove this model from the Ollama server (frees its disk space)">🗑</button></td></tr>`;
     }).join('')}
   </tbody></table>`;
+}
+
+async function deleteOllamaModel(name){
+  if(!confirm(`Remove ${name} from the local Ollama server? This frees its disk space; pulling it again re-downloads it.`))return;
+  try{
+    const r=await fetch(`/api/ollama/models/${encodeURIComponent(name)}`,{method:'DELETE'}).then(x=>x.json());
+    if(!r.ok)throw new Error(r.error||'delete failed');
+    toast(`Removed ${name}`,'success');
+    await loadOllamaModelTable();
+  }catch(e){toast('Delete failed: '+e.message,'error');}
+}
+
+async function pullOllamaModel(){
+  const inp=document.getElementById('ollama-pull-name');
+  const bar=document.getElementById('ollama-pull-progress');
+  const btn=document.getElementById('ollama-pull-btn');
+  const name=(inp?.value||'').trim();
+  if(!name){toast('Enter a model name, e.g. llama3.2 or qwen2.5:7b','info');return;}
+  btn.disabled=true; bar.textContent='Starting…';
+  try{
+    const resp=await fetch('/api/ollama/pull',{method:'POST',
+      headers:{'Content-Type':'application/json'},body:JSON.stringify({model:name})});
+    if(!resp.ok)throw new Error(`HTTP ${resp.status}`);
+    const reader=resp.body.getReader(); const dec=new TextDecoder(); let buf='';
+    for(;;){
+      const {done,value}=await reader.read();
+      if(done)break;
+      buf+=dec.decode(value,{stream:true});
+      let nl;
+      while((nl=buf.indexOf('\n'))>=0){
+        const line=buf.slice(0,nl).trim(); buf=buf.slice(nl+1);
+        if(!line)continue;
+        let ev; try{ev=JSON.parse(line);}catch{continue;}
+        if(ev.error)throw new Error(ev.error);
+        const pct=(ev.total&&ev.completed!=null)?` ${Math.round(ev.completed/ev.total*100)}%`:'';
+        bar.textContent=`${ev.status||'…'}${pct}`;
+      }
+    }
+    bar.textContent='✓ Done';
+    toast(`Pulled ${name}`,'success');
+    await loadOllamaModelTable();
+  }catch(e){ bar.textContent='✗ '+e.message; toast('Pull failed: '+e.message,'error'); }
+  finally{ btn.disabled=false; }
 }
 
 function selectModelFromSettings(name){
@@ -2133,7 +2285,7 @@ function populateRagSelects(){
     const label=nameCounts[r.name]>1?`${r.name} (${r.redis_endpoint||'default'})`:r.name;
     return `<option value="${escHtml(key)}">${escHtml(label)}</option>`;
   }).join('');
-  ['rag-select','ingest-target-rag','crawl-target-rag'].forEach(id=>{
+  ['rag-select','ingest-target-rag','crawl-target-rag','watch-add-instance'].forEach(id=>{
     const el=document.getElementById(id);
     if(!el)return;
     const prev=el.value;
@@ -2681,6 +2833,40 @@ function renderWebSources(){
 
 function removeWebSource(i){S.config.web_sources.splice(i,1);renderWebSources();}
 
+// ── Watched folders ───────────────────────────────────────────────────────────
+function renderWatchFolders(){
+  const el=document.getElementById('watch-folders-table');
+  if(!el)return;
+  const rows=S.config.watch_folders?.folders||[];
+  if(!rows.length){el.innerHTML='<div style="color:var(--text2);font-size:13px">No folders watched yet.</div>';return;}
+  el.innerHTML=`<table class="data-table"><thead><tr><th>Folder</th><th>Instance</th><th></th></tr></thead><tbody>
+    ${rows.map((f,i)=>`<tr><td style="word-break:break-all">${escHtml(f.path||'')}</td>
+      <td>${escHtml(f.instance||'default')}</td>
+      <td><button class="btn btn-danger btn-sm" onclick="removeWatchFolder(${i})">Remove</button></td></tr>`).join('')}
+  </tbody></table>`;
+}
+function addWatchFolder(){
+  const path=document.getElementById('watch-add-path').value.trim();
+  if(!path){toast('Enter an absolute folder path','info');return;}
+  if(!/^([/~]|[A-Za-z]:[\\/])/.test(path)){toast('Use an absolute path (starting with / or ~)','error');return;}
+  // The dropdown carries a name§endpoint key (shared fill with the crawl target);
+  // keep BOTH — two same-named instances on different Redis endpoints are distinct.
+  const k=_parseRagKey(document.getElementById('watch-add-instance').value||'default');
+  const instance=k.name||'default', endpoint=(k.ep&&k.ep!=='default')?k.ep:null;
+  const wf=(S.config.watch_folders=S.config.watch_folders||{enabled:false,interval_minutes:5,folders:[]});
+  wf.folders=wf.folders||[];
+  if(wf.folders.some(f=>f.path===path&&f.instance===instance&&(f.endpoint||null)===endpoint)){toast('Already watched','info');return;}
+  wf.folders.push(endpoint?{path,instance,endpoint}:{path,instance});
+  document.getElementById('watch-add-path').value='';
+  renderWatchFolders();
+  toast('Added — Save Settings to apply','success');
+}
+function removeWatchFolder(i){
+  S.config.watch_folders?.folders?.splice(i,1);
+  renderWatchFolders();
+  toast('Removed — Save Settings to apply','info');
+}
+
 // ── Templates ─────────────────────────────────────────────────────────────────
 async function loadTemplates(){
   try{S.templates=await fetch('/api/templates').then(r=>r.json());renderTemplates();populateTemplateSelect();}
@@ -2733,6 +2919,15 @@ function handleWSMsg(msg){
       _setStreamingUI(false);
       finalizeStreamingMsg(currentAiMsgId);
       updateLatencyBadge(currentAiMsgId,msg.latency);
+      // Provider-reported token counts arrive here (after finalize pushed the
+      // turn), so graft them onto that turn's meta and refresh the pills.
+      if(msg.usage){
+        const ms=S.sessions[S.sessionId]?.messages||[];
+        for(let i=ms.length-1;i>=0;i--){
+          if(ms[i].role==='assistant'){ (ms[i].meta ||= {}).usage=msg.usage; break; }
+        }
+        updateTokenCounter();
+      }
       if(msg.title){S.sessions[S.sessionId].title=msg.title;document.getElementById('session-title').textContent=msg.title;renderSessionList();}
       if(!msg.aborted){S.chatMetrics.misses++;S.chatMetrics.latencies.push(msg.latency?.total||0);}
       break;
@@ -3075,6 +3270,7 @@ function appendMessage(role,content,meta={}){
         <button class="msg-action-btn" onclick="thumbs('${id}',-1,this)">👎</button>
         <button class="msg-action-btn" onclick="pinMsg('${id}',this)">📌</button>
         <button class="msg-action-btn" onclick="regenerate('${id}')" title="Re-run the question that produced this answer">↻</button>
+        <button class="msg-action-btn" onclick="forkSession('${id}')" title="Fork the conversation here — a new session containing everything up to this answer">⑂</button>
         ${meta.cacheHit?`<span style="width:1px;height:14px;background:var(--border);display:inline-block;margin:0 2px"></span>
         <button class="msg-action-btn" id="${id}-uncache" onclick="deleteCacheEntry('${id}',this)" title="Remove this response from the cache">🗑 Uncache</button>
         <button class="msg-action-btn" onclick="rerunSkipCache('${id}')" title="Re-generate bypassing the cache (overwrites cached response)">↺ Re-run fresh</button>`:''}
@@ -3633,6 +3829,9 @@ function populateSettingsForm(){
   setRange('s-cache-threshold',c.cache?.similarity_threshold||0.92);
   setVal('s-cache-ttl',c.cache?.ttl||3600);
   setCheck('s-visual-instructions',c.visual_instructions??true);
+  setCheck('s-watch-enabled',c.watch_folders?.enabled||false);
+  setVal('s-watch-interval',c.watch_folders?.interval_minutes??5);
+  renderWatchFolders();
   setVal('s-history-budget',c.history_max_tokens??3000);
   // ── Crawl settings ──
   setVal('crawl-concurrency',c.crawl?.concurrency||10);
@@ -3816,6 +4015,9 @@ async function saveSettings(){
     web_sources:S.config.web_sources||[],
     active_rag:S.activeRag?.name||'default',
     crawl:{concurrency:parseInt(getVal('crawl-concurrency'))||10,js_concurrency:parseInt(getVal('crawl-js-concurrency'))||3,js_render:getCheck('crawl-js-render'),smart_mode:getCheck('crawl-smart-mode'),min_words:100},
+    watch_folders:{enabled:getCheck('s-watch-enabled'),
+                   interval_minutes:parseInt(getVal('s-watch-interval'))||5,
+                   folders:S.config.watch_folders?.folders||[]},
   };
   await _postConfig(cfg);
 }
@@ -4359,18 +4561,49 @@ function exportChat(fmt='md'){
 
 function updateTokenCounter(){
   const msgs=S.sessions[S.sessionId]?.messages||[];
-  // Same rough ~chars/4 estimate as before, now split by role: assistant turns are
-  // output, everything else (your prompts, tool/system turns) counts as input.
-  let inChars=0,outChars=0;
-  for(const m of msgs){
-    const len=(m.content||'').length;
-    if(m.role==='assistant') outChars+=len; else inChars+=len;
+  // Prefer the provider-reported counts stored on each assistant turn's meta
+  // (real billed tokens). A measured turn's `prompt` covers its WHOLE exchange —
+  // system + history + context + the question — so the user turn that produced it
+  // must not also be estimated on top. Turns without usage (cache hits, aborted
+  // streams, providers that report nothing) fall back to the chars/4 estimate,
+  // and their presence keeps the "~" prefix honest.
+  let inTok=0,outTok=0,cost=0,estimated=false,unpriced=false;
+  const pricing=S.config?.pricing||{};
+  for(let i=0;i<msgs.length;i++){
+    const m=msgs[i];
+    if(m.role!=='assistant'){
+      const next=msgs[i+1];
+      if(next?.role==='assistant'&&next.meta?.usage)continue;   // covered by real usage
+      inTok+=Math.round((typeof m.content==='string'?m.content.length:String(m.content||'').length)/4);
+      estimated=true;
+      continue;
+    }
+    const u=m.meta?.usage;
+    if(u&&u.prompt!=null){
+      const cached=u.cached||0, cw=u.cache_write||0;
+      inTok+=u.prompt+cached+cw; outTok+=u.completion||0;
+      const p=pricing[m.meta?.model];
+      if(p)cost+=u.prompt/1e6*(p.in||0)+cached/1e6*(p.cached_in??p.in??0)
+                 +cw/1e6*(p.cache_write??(p.in??0)*1.25)+(u.completion||0)/1e6*(p.out||0);
+      else unpriced=true;   // measured but no pricing entry — the $ figure is partial
+    }else{
+      outTok+=Math.round((m.content||'').length/4);
+      estimated=true;
+    }
   }
-  const est=c=>Math.round(c/4).toLocaleString();
+  const tilde=estimated?'~':'';
+  const fmt=n=>n.toLocaleString();
   const set=(id,txt)=>{ const el=document.getElementById(id); if(el) el.textContent=txt; };
-  set('tok-in',   `↑ ~${est(inChars)}`);
-  set('tok-out',  `↓ ~${est(outChars)}`);
-  set('tok-total',`Σ ~${est(inChars+outChars)}`);
+  set('tok-in',   `↑ ${tilde}${fmt(inTok)}`);
+  set('tok-out',  `↓ ${tilde}${fmt(outTok)}`);
+  set('tok-total',`Σ ${tilde}${fmt(inTok+outTok)}`);
+  const cEl=document.getElementById('tok-cost');
+  if(cEl){
+    cEl.style.display=cost>0?'':'none';
+    // "+" marks a partial figure: some measured turn has no pricing entry, so the
+    // real spend is at least this much.
+    if(cost>0)cEl.textContent='$'+(cost<0.01?cost.toFixed(4):cost.toFixed(2))+(unpriced?'+':'');
+  }
 }
 
 // ── Markdown + Math ───────────────────────────────────────────────────────────
@@ -4571,11 +4804,18 @@ function _geoAttrs(type,attrs){
   // Auto-created corner/parent points are drag-handles for an INTERACTIVE construction;
   // in a rendered diagram they are just dots of noise on a filled box or an arc. Hide
   // them so a rect/polygon reads as a clean shape and an arc as a clean curve. (Explicit
-  // `point`/`midpoint` elements the model asks for are untouched.)
-  if(type==='polygon'||type==='rect'||type==='rectangle') out.vertices={visible:false,fixed:true};
-  if(type==='arc'||type==='sector'){ const h={visible:false}; out.center=h; out.radiuspoint=h; out.anglepoint=h; }
+  // `point`/`midpoint` elements the model asks for are untouched.) The card's
+  // ✋ Interact toggle re-renders with _GEO_LIVE set, which keeps them visible and
+  // draggable — the construction becomes a manipulable.
+  if(!_GEO_LIVE){
+    if(type==='polygon'||type==='rect'||type==='rectangle') out.vertices={visible:false,fixed:true};
+    if(type==='arc'||type==='sector'){ const h={visible:false}; out.center=h; out.radiuspoint=h; out.anglepoint=h; }
+  }
   return out;
 }
+// Set for the duration of one geometry draw() when the card's Interact toggle is
+// on (the element loop is synchronous, so a module flag cannot interleave).
+let _GEO_LIVE=false;
 // A non-fatal footnote pinned to the bottom of the geometry card listing elements
 // the lane had to skip. textContent only — never innerHTML — the lines carry
 // model-supplied type names and JSXGraph error text.
@@ -4736,6 +4976,250 @@ function _mermaidSafeLabels(src){
     return '["'+NL(inner.replace(/"([^"]*)"/g,'“$1”').replace(/"/g,'”'))+'"]';
   });
   return s.replace(/￿(\d+)￿/g,(m,i)=>held[+i]);   // restore the protected labels
+}
+
+// ── ```fractal helpers ──────────────────────────────────────────────────────
+// Iterative visuals (Mandelbrot/Julia escape-time, IFS chaos game, L-system
+// turtle) on a plain <canvas> — the one lane with no CDN library at all. Specs
+// are DATA ONLY like ```geometry: numbers, plus L-system strings that a turtle
+// walks character-by-character (never evaluated as code). Hard caps keep a
+// hallucinated spec from spinning the tab.
+const _FRAC_MAX_ITER=1000, _FRAC_MAX_POINTS=200000, _FRAC_MAX_LSYS=120000;
+// Named presets so `{"type":"fern"}` alone renders — the model cannot fumble
+// Barnsley's coefficients if it never has to write them.
+const _FRAC_PRESETS={
+  fern:      {type:'ifs',maps:[[0,0,0,0.16,0,0,0.01],[0.85,0.04,-0.04,0.85,0,1.6,0.85],
+                               [0.2,-0.26,0.23,0.22,0,1.6,0.07],[-0.15,0.28,0.26,0.24,0,0.44,0.07]]},
+  sierpinski:{type:'ifs',maps:[[0.5,0,0,0.5,0,0,0.34],[0.5,0,0,0.5,0.5,0,0.33],[0.5,0,0,0.5,0.25,0.5,0.33]]},
+  dragon:    {type:'lsystem',axiom:'FX',rules:{X:'X+YF+',Y:'-FX-Y'},angle:90,depth:12},
+  koch:      {type:'lsystem',axiom:'F--F--F',rules:{F:'F+F--F+F'},angle:60,depth:4},
+  plant:     {type:'lsystem',axiom:'X',rules:{X:'F+[[X]-X]-F[-FX]+X',F:'FF'},angle:25,depth:5},
+  mandelbrot:{type:'mandelbrot'},
+  julia:     {type:'julia',c:[-0.8,0.156]},
+};
+function _fracNum(v,d,lo,hi){const n=Number(v);return isFinite(n)?Math.min(hi,Math.max(lo,n)):d;}
+function _fracLExpand(axiom,rules,depth,cap){
+  let s=axiom;
+  for(let d=0;d<depth;d++){
+    let out='';
+    for(const ch of s){
+      out+=rules[ch]??ch;
+      if(out.length>cap)throw new Error('L-system exceeds '+cap+' symbols — reduce depth');
+    }
+    s=out;
+  }
+  return s;
+}
+function _fracPalette(name,dark){
+  const stops={
+    fire:   [[0,0,0],[120,20,0],[255,120,0],[255,230,120],[255,255,255]],
+    ocean:  [[0,10,40],[0,60,120],[0,150,200],[120,230,255],[255,255,255]],
+    mono:   dark?[[10,10,14],[235,235,240]]:[[250,250,252],[18,18,24]],
+    viridis:[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]],
+  };
+  const s=stops[name]||stops.viridis;
+  return {inSet:dark?[8,8,12]:[12,12,16],at(t){
+    t=Math.max(0,Math.min(1,t));
+    const x=t*(s.length-1),k=Math.min(s.length-2,Math.floor(x)),f=x-k;
+    return [s[k][0]+(s[k+1][0]-s[k][0])*f|0,s[k][1]+(s[k+1][1]-s[k][1])*f|0,s[k][2]+(s[k+1][2]-s[k][2])*f|0];
+  }};
+}
+// Normalise + clamp a raw spec. Every number is bounded and every string is
+// charset-checked here, so the renderers can trust what they get.
+// Models write IFS map probabilities as a fraction — 1/3 — which is valid maths
+// and invalid JSON (a real report: JSON.parse failed on it, blanking the card).
+// Rewrite bare NUMBER/NUMBER to its decimal value BEFORE parsing. This is pure
+// arithmetic on regex-captured digit strings via parseFloat — never eval/Function
+// — so it cannot execute anything; quoted strings are protected first so a stray
+// "/" inside one (there are none in this schema today, but future-proof) is never
+// touched. Division by a literal 0 is left alone; JSON.parse still reports it clearly.
+function _fracFixFractions(src){
+  const held=[]; const K=i=>'\uFFFF'+i+'\uFFFF';
+  let s=String(src).replace(/"(?:\\.|[^"\\])*"/g, m=>{held.push(m); return K(held.length-1);});
+  s=s.replace(/(-?\d+(?:\.\d+)?)\s*\/\s*(-?\d+(?:\.\d+)?)(?!\d)/g,(m,a,b)=>{
+    const bn=parseFloat(b);
+    return bn?String(parseFloat(a)/bn):m;
+  });
+  return s.replace(/\uFFFF(\d+)\uFFFF/g,(m,i)=>held[+i]);
+}
+function _fracSpec(raw){
+  let s;
+  try{s=typeof raw==='string'?JSON.parse(_fracFixFractions(raw)):raw;}
+  catch(e){throw new Error('fractal body must be JSON: '+e.message);}
+  if(!s||typeof s!=='object'||Array.isArray(s))throw new Error('fractal spec must be a JSON object');
+  let t=String(s.type||'').toLowerCase();
+  const p=_FRAC_PRESETS[t];
+  if(p){s={...p,...s};t=p.type;}
+  if(!['mandelbrot','julia','ifs','lsystem'].includes(t))
+    throw new Error('unknown fractal type "'+t+'" — use mandelbrot, julia, ifs, lsystem, '+
+                    'or a preset (fern, sierpinski, dragon, koch, plant)');
+  const out={type:t,palette:/^(fire|ocean|mono|viridis)$/.test(s.palette)?s.palette:'viridis'};
+  if(t==='mandelbrot'||t==='julia'){
+    out.iter=Math.round(_fracNum(s.iter,256,16,_FRAC_MAX_ITER));
+    out.center=[_fracNum(s.center?.[0],t==='mandelbrot'?-0.5:0,-4,4),
+                _fracNum(s.center?.[1],0,-4,4)];
+    out.zoom=_fracNum(s.zoom,1,1e-3,1e12);
+    if(t==='julia')out.c=[_fracNum(s.c?.[0],-0.8,-2,2),_fracNum(s.c?.[1],0.156,-2,2)];
+  }else if(t==='ifs'){
+    if(!Array.isArray(s.maps)||!s.maps.length||s.maps.length>12)
+      throw new Error('ifs needs 1–12 affine maps [a,b,c,d,e,f,p]');
+    out.maps=s.maps.map(m=>{
+      if(!Array.isArray(m)||m.length<6)throw new Error('each ifs map is [a,b,c,d,e,f,p?]');
+      const r=m.slice(0,7).map(Number);
+      if(!r.every(isFinite))throw new Error('ifs maps accept numbers only');
+      return r;
+    });
+    out.points=Math.round(_fracNum(s.points,60000,1000,_FRAC_MAX_POINTS));
+  }else{
+    const ok=/^[A-Za-z+\-\[\]]*$/;
+    out.axiom=String(s.axiom||'F');
+    if(out.axiom.length>64||!ok.test(out.axiom))
+      throw new Error('lsystem axiom: letters and + - [ ] only (max 64)');
+    out.rules={};
+    for(const[k,v]of Object.entries(s.rules||{})){
+      if(!/^[A-Za-z]$/.test(k)||typeof v!=='string'||v.length>200||!ok.test(v))
+        throw new Error('lsystem rules map single letters to strings of letters and + - [ ] (max 200)');
+      out.rules[k]=v;
+    }
+    out.angle=_fracNum(s.angle,60,-360,360);
+    out.depth=Math.round(_fracNum(s.depth,4,1,14));
+  }
+  return out;
+}
+function _fracDraw(inst,canvas){
+  const ctx=canvas.getContext('2d');
+  ctx.fillStyle=_isDark()?'#0b0b10':'#f7f7fa';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+  if(inst.spec.type==='ifs')_fracRenderIFS(inst,canvas);
+  else if(inst.spec.type==='lsystem')_fracRenderL(inst,canvas);
+  else _fracRenderEscape(inst,canvas);
+}
+// Escape-time, painted in row batches under a ~12 ms/frame budget so a deep
+// zoom never janks the chat. `gen` supersedes an in-flight render when a new
+// one starts (click-zoom, Apply, resize).
+function _fracRenderEscape(inst,canvas){
+  const {spec,view}=inst, ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height,iter=spec.iter;
+  const span=3.2/view.zoom, sy=span*H/W;
+  const x0=view.cx-span/2, y0=view.cy+sy/2;
+  const jx=spec.type==='julia'?spec.c[0]:0, jy=spec.type==='julia'?spec.c[1]:0;
+  const pal=_fracPalette(spec.palette,_isDark());
+  const gen=++inst.gen;
+  const img=ctx.createImageData(W,1), d=img.data;
+  let row=0,lastTick=0;
+  function rows(){
+    if(gen!==inst.gen)return;
+    const t0=performance.now();
+    // Adaptive slice: a fronted tab gets small 14 ms slices (no jank); a
+    // throttled one (background/embedded — timers clamped to ~1 s) gets big
+    // slices, so completion never depends on a steady tick supply.
+    const budget=(lastTick&&t0-lastTick>200)?250:14;
+    lastTick=t0;
+    while(row<H&&performance.now()-t0<budget){
+      const cy=y0-row/H*sy;
+      for(let px=0;px<W;px++){
+        const cx=x0+px/W*span;
+        let zx,zy,ax,ay;
+        if(spec.type==='julia'){zx=cx;zy=cy;ax=jx;ay=jy;}
+        else{zx=0;zy=0;ax=cx;ay=cy;}
+        let i=0,zx2=zx*zx,zy2=zy*zy;
+        while(i<iter&&zx2+zy2<=4){zy=2*zx*zy+ay;zx=zx2-zy2+ax;zx2=zx*zx;zy2=zy*zy;i++;}
+        const o=px*4;
+        if(i>=iter){d[o]=pal.inSet[0];d[o+1]=pal.inSet[1];d[o+2]=pal.inSet[2];}
+        else{
+          // smooth colouring: fractional escape count kills the hard banding
+          const mu=i+1-Math.log2(Math.max(1,Math.log2(zx2+zy2)/2));
+          const c=pal.at(mu/iter);d[o]=c[0];d[o+1]=c[1];d[o+2]=c[2];
+        }
+        d[o+3]=255;
+      }
+      ctx.putImageData(img,0,row);row++;
+    }
+    // setTimeout, not requestAnimationFrame: rAF suspends when the page is not
+    // actively painting (background tab, embedded preview) and the render never
+    // finishes — the same trap documented at openMaximize and the plot slider.
+    if(row<H)inst.raf=setTimeout(rows,0);else inst.raf=null;
+  }
+  rows();
+}
+// Chaos game. Seeded LCG, not Math.random — the same spec always draws the
+// same cloud (and tests can assert pixels). A short throwaway pass finds the
+// attractor's bounds so the drawing pass can fill the canvas.
+function _fracRenderIFS(inst,canvas){
+  const {spec}=inst, ctx=canvas.getContext('2d');
+  const W=canvas.width,H=canvas.height,maps=spec.maps;
+  const psum=maps.reduce((a,m)=>a+(m[6]||1/maps.length),0)||1;
+  const cum=[];let acc=0;
+  for(const m of maps){acc+=(m[6]||1/maps.length)/psum;cum.push(acc);}
+  const mk=()=>{let seed=1234;return()=>{seed=(seed*1664525+1013904223)>>>0;return seed/4294967296;};};
+  const pick=(r)=>{let k=0;while(r>cum[k]&&k<maps.length-1)k++;return maps[k];};
+  let rnd=mk(),x=0,y=0,minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  for(let i=0;i<3000;i++){
+    const m=pick(rnd());
+    const nx=m[0]*x+m[1]*y+m[4], ny=m[2]*x+m[3]*y+m[5];x=nx;y=ny;
+    if(i>20){if(x<minx)minx=x;if(x>maxx)maxx=x;if(y<miny)miny=y;if(y>maxy)maxy=y;}
+  }
+  if(minx>maxx){minx=-1;maxx=1;miny=-1;maxy=1;}
+  const pad=0.04*Math.max(maxx-minx,maxy-miny)||1;
+  minx-=pad;maxx+=pad;miny-=pad;maxy+=pad;
+  const sc=Math.min(W/(maxx-minx),H/(maxy-miny));
+  const ox=(W-sc*(maxx-minx))/2, oy=(H-sc*(maxy-miny))/2;
+  const tint=_fracPalette(inst.spec.palette,_isDark()).at(0.65);
+  ctx.fillStyle=`rgba(${tint[0]},${tint[1]},${tint[2]},${_isDark()?0.5:0.38})`;
+  const gen=++inst.gen;
+  rnd=mk();x=0;y=0;let done=0,lastTick=0;
+  function batch(){
+    if(gen!==inst.gen)return;
+    const t0=performance.now();
+    const n=Math.min((lastTick&&t0-lastTick>200)?60000:6000,spec.points-done);
+    lastTick=t0;
+    for(let i=0;i<n;i++){
+      const m=pick(rnd());
+      const nx=m[0]*x+m[1]*y+m[4], ny=m[2]*x+m[3]*y+m[5];x=nx;y=ny;
+      ctx.fillRect(ox+(x-minx)*sc, H-(oy+(y-miny)*sc), 1, 1);
+    }
+    done+=n;
+    if(done<spec.points)inst.raf=setTimeout(batch,0);else inst.raf=null;
+  }
+  batch();
+}
+// L-system turtle. F/G draw a step, f moves, +/- turn, [ ] branch; any other
+// letter is a no-op placeholder (the standard convention — X/Y carry structure).
+// Two walks: one for bounds, one to draw centred and scaled to fit.
+function _fracRenderL(inst,canvas){
+  const {spec}=inst, ctx=canvas.getContext('2d');
+  const s=_fracLExpand(spec.axiom,spec.rules,spec.depth,_FRAC_MAX_LSYS);
+  const ang=spec.angle*Math.PI/180;
+  function walk(cb){
+    let x=0,y=0,a=-Math.PI/2;const st=[];
+    for(const ch of s){
+      if(ch==='F'||ch==='G'){const nx=x+Math.cos(a),ny=y+Math.sin(a);cb(x,y,nx,ny);x=nx;y=ny;}
+      else if(ch==='f'){x+=Math.cos(a);y+=Math.sin(a);}
+      else if(ch==='+')a+=ang;
+      else if(ch==='-')a-=ang;
+      else if(ch==='[')st.push([x,y,a]);
+      else if(ch===']'){const p=st.pop();if(p){x=p[0];y=p[1];a=p[2];}}
+    }
+  }
+  let minx=1e9,maxx=-1e9,miny=1e9,maxy=-1e9;
+  walk((x1,y1,x2,y2)=>{
+    if(x1<minx)minx=x1;if(x1>maxx)maxx=x1;if(y1<miny)miny=y1;if(y1>maxy)maxy=y1;
+    if(x2<minx)minx=x2;if(x2>maxx)maxx=x2;if(y2<miny)miny=y2;if(y2>maxy)maxy=y2;
+  });
+  if(minx>maxx){minx=-1;maxx=1;miny=-1;maxy=1;}
+  const dpr=Math.min(2,window.devicePixelRatio||1), pad=10*dpr;
+  const W=canvas.width,H=canvas.height;
+  const sc=Math.min((W-2*pad)/Math.max(1e-9,maxx-minx),(H-2*pad)/Math.max(1e-9,maxy-miny));
+  const ox=(W-sc*(maxx-minx))/2, oy=(H-sc*(maxy-miny))/2;
+  const tint=_fracPalette(spec.palette,_isDark()).at(_isDark()?0.8:0.25);
+  ctx.strokeStyle=`rgb(${tint[0]},${tint[1]},${tint[2]})`;
+  ctx.lineWidth=Math.max(1,0.8*dpr);
+  ctx.beginPath();
+  walk((x1,y1,x2,y2)=>{
+    ctx.moveTo(ox+(x1-minx)*sc,oy+(y1-miny)*sc);
+    ctx.lineTo(ox+(x2-minx)*sc,oy+(y2-miny)*sc);
+  });
+  ctx.stroke();
 }
 
 const RICH_LANES={
@@ -4976,14 +5460,65 @@ const RICH_LANES={
       // figure: skip it, keep drawing the rest, and collect what was dropped so a
       // footnote can flag it for investigation instead of throwing the card away.
       const _skipped=[];
-      (Array.isArray(spec.elements)?spec.elements:[]).forEach((e,i)=>{
-        const t=String(e.type||'').toLowerCase();
-        try{
-          if(!_GEO_TYPES.has(t))throw new Error('unsupported type "'+t+'"');
-          board.create(_GEO_TYPE_ALIAS[t]||t, _geoArgs(t,e.args,e.attrs), _geoAttrs(t,e.attrs));
-        }catch(err){ _skipped.push('#'+(i+1)+' '+(t||'?')+' — '+((err&&err.message)||err)); }
-      });
+      _GEO_LIVE=!!(out.closest&&out.closest('.rich-wrap')?.dataset.geoLive==='1');
+      try{
+        (Array.isArray(spec.elements)?spec.elements:[]).forEach((e,i)=>{
+          const t=String(e.type||'').toLowerCase();
+          try{
+            if(!_GEO_TYPES.has(t))throw new Error('unsupported type "'+t+'"');
+            board.create(_GEO_TYPE_ALIAS[t]||t, _geoArgs(t,e.args,e.attrs), _geoAttrs(t,e.attrs));
+          }catch(err){ _skipped.push('#'+(i+1)+' '+(t||'?')+' — '+((err&&err.message)||err)); }
+        });
+      }finally{ _GEO_LIVE=false; }
       if(_skipped.length) _geoNote(out,_skipped);
+    }},
+  fractal:{
+    label:'❄ Fractal', fixed:'380px',
+    load:()=>Promise.resolve(),   // pure canvas — the one lane with no library
+    async draw(out,src,uid){
+      const spec=_fracSpec(src);
+      const host=document.createElement('div');
+      host.style.cssText='width:100%;height:100%;position:relative';
+      out.appendChild(host);
+      const dpr=Math.min(2,window.devicePixelRatio||1);
+      const w=Math.max(50,host.clientWidth||out.clientWidth||560);
+      const h=Math.max(50,host.clientHeight||out.clientHeight||380);
+      const canvas=document.createElement('canvas');
+      canvas.width=Math.round(w*dpr); canvas.height=Math.round(h*dpr);
+      canvas.style.cssText='width:100%;height:100%;display:block';
+      host.appendChild(canvas);
+      const origView={cx:spec.center?spec.center[0]:0, cy:spec.center?spec.center[1]:0,
+                      zoom:spec.zoom||1};
+      const inst={kind:'fractal',spec,canvas,gen:0,raf:null,
+        view:{...origView},
+        redraw(){_fracDraw(inst,canvas);},
+        // Click-zoom mutates `view` away from the spec's own center/zoom — this
+        // is the fractal card's "Reset zoom" (the escape-time twin of the
+        // rich-src "↺ Reset", which undoes an edited SOURCE rather than a
+        // navigated VIEW).
+        resetView(){ inst.view={...origView}; inst.redraw(); }};
+      out._richInst=inst;
+      if(spec.type==='mandelbrot'||spec.type==='julia'){
+        // Captured now, not read from the DOM inside the click handler:
+        // openMaximize() moves `out` into the overlay, so at that point it has
+        // no .rich-wrap ancestor and a zoom made while maximized would leave
+        // the reset button hidden after restoring (same fix as chart's showReset).
+        const card=out.closest?.('.rich-wrap');
+        canvas.title='Click to zoom in · shift-click to zoom out';
+        canvas.style.cursor='zoom-in';
+        canvas.addEventListener('click',e=>{
+          const r=canvas.getBoundingClientRect();
+          const span=3.2/inst.view.zoom, sy=span*canvas.height/canvas.width;
+          inst.view.cx+=((e.clientX-r.left)/r.width-0.5)*span;
+          inst.view.cy-=((e.clientY-r.top)/r.height-0.5)*sy;
+          inst.view.zoom=e.shiftKey?Math.max(1e-3,inst.view.zoom/2)
+                                   :Math.min(1e12,inst.view.zoom*2);
+          inst.redraw();
+          const b=card?.querySelector('[data-act="fractal-reset"]');
+          if(b)b.style.display='';
+        });
+      }
+      inst.redraw();
     }},
   map:{
     label:'🗺 Map', fixed:'400px',
@@ -5421,6 +5956,13 @@ function destroyRichBlocks(root){
       // 3Dmol has no explicit dispose/destroy call — clear() drops the scene's
       // objects; the WebGL context itself is released when the canvas node is GC'd.
       else if(inst.kind==='molecule3d')inst.obj.clear();
+      // vis-network keeps listeners/canvas alive across an innerHTML wipe; it was
+      // the one instanced lane with no teardown branch (reachable more often now
+      // that the editable-source Apply re-renders cards in place).
+      else if(inst.kind==='network'&&inst.obj?.destroy)inst.obj.destroy();
+      // fractal renders progressively over rAF frames — supersede the chain and
+      // cancel the pending frame, or a torn-down card keeps painting off-DOM.
+      else if(inst.kind==='fractal'){inst.gen++;if(inst.raf)clearTimeout(inst.raf);}
     }catch(e){}
     out._richInst=null;
   });
@@ -5611,8 +6153,10 @@ let _rrMathFinalize=true;
           // solve, stats, truth, regex) — not meaningfully an "image" without adding
           // a DOM-to-canvas dependency just for this.
           const svgPngLanes=new Set(['mermaid','dot','geometry','molecule']);
-          const pngBtn = svgPngLanes.has(laneKey) ? `<button class="svg-act-btn" data-act="rich-png">⬇ PNG</button>`
+          const pngBtn = laneKey==='geometry' ? `<button class="svg-act-btn" data-act="geo-interact" title="Toggle interactive mode — show the construction's control points and drag them">✋ Interact</button><button class="svg-act-btn" data-act="rich-png">⬇ PNG</button>`
+                       : svgPngLanes.has(laneKey) ? `<button class="svg-act-btn" data-act="rich-png">⬇ PNG</button>`
                        : laneKey==='chart' ? `<button class="svg-act-btn" data-act="chart-data">▦ Data</button><button class="svg-act-btn" data-act="chart-reset" style="display:none">⟲ Reset zoom</button><button class="svg-act-btn" data-act="chart-png">⬇ PNG</button>`
+                       : laneKey==='fractal' ? `<button class="svg-act-btn" data-act="fractal-reset" style="display:none">⟲ Reset zoom</button><button class="svg-act-btn" data-act="fractal-png">⬇ PNG</button>`
                        : laneKey==='plot3d' ? `<button class="svg-act-btn" data-act="plot3d-png">⬇ PNG</button>`
                        : laneKey==='molecule3d' ? `<button class="svg-act-btn" data-act="molecule3d-png">⬇ PNG</button>`
                        : '';
@@ -5666,6 +6210,30 @@ let _rrMathFinalize=true;
   });
 })();
 
+// Tear down and re-draw ONE rich card from whatever its source <code> now holds.
+// Used by the editable-source Apply and the geometry Interact toggle. The lane
+// reads its source from '.rich-src-pre code' textContent, so editing that element
+// and clearing the rendered flag is the whole contract.
+function _rerenderRichCard(wrap){
+  const out=wrap?.querySelector('.rich-output');
+  if(!wrap||!out)return false;                       // maximized elsewhere → no-op
+  // Canonicalise the edited source first: browsers represent Enter inside a
+  // contenteditable as <br>/<div>, which .textContent silently DROPS — a
+  // multi-line mermaid/JSON spec would collapse onto one line on Apply.
+  // innerText (on a rendered element) folds those back into real newlines.
+  const code=wrap.querySelector('.rich-src-pre code');
+  if(code&&code.isContentEditable&&code.offsetParent!==null)code.textContent=code.innerText;
+  try{ destroyRichBlocks(wrap); }catch(e){}
+  out.innerHTML=''; delete out.dataset.rendered;
+  // A fresh render starts at the spec's own view (fractal zoom, chart zoom) —
+  // a "Reset zoom" left over from the PREVIOUS instance would be a harmless but
+  // confusing no-op click on the new one, so it goes back to hidden here too.
+  wrap.querySelector('[data-act="fractal-reset"],[data-act="chart-reset"]')
+    ?.setAttribute('style','display:none');
+  renderRichBlocks(wrap.parentElement||wrap);        // parent scope so the selector matches wrap itself
+  return true;
+}
+
 // Delegated click handling for the controls inside rendered messages (SVG /
 // LaTeX / generated-image cards). Inline onclick can't be used there because
 // rendered messages pass through DOMPurify, which strips handler attributes.
@@ -5681,6 +6249,49 @@ document.addEventListener('click',function(e){
     const shown=pre.style.display!=='none'&&pre.style.display!=='';
     pre.style.display=shown?'none':'block';
     btn.textContent=shown?'Source':'Hide source';
+    // Rich-lane source is EDITABLE: change the spec and Apply re-renders the card
+    // in place (a local playground — the stored message is not modified, so a
+    // reload shows the original again).
+    if(act==='rich-src'&&!shown){
+      const code=pre.querySelector('code');
+      if(code&&!pre.querySelector('.rich-apply-bar')){
+        // Snapshot the pristine, model-authored text BEFORE turning the block
+        // editable — this is the only moment it is guaranteed unedited — so
+        // Reset always has the original to go back to, however much later.
+        code._originalSrc=code.textContent;
+        code.setAttribute('contenteditable','plaintext-only');
+        code.setAttribute('spellcheck','false');
+        const bar=document.createElement('div');
+        bar.className='rich-apply-bar';
+        const apply=document.createElement('button');
+        apply.className='svg-act-btn'; apply.dataset.act='rich-apply';
+        apply.textContent='▶ Apply';
+        apply.title='Re-render this card from the edited source (local only — not saved to the conversation)';
+        const reset=document.createElement('button');
+        reset.className='svg-act-btn'; reset.dataset.act='rich-reset';
+        reset.textContent='↺ Reset';
+        reset.title='Discard your edits, restore the original source, and re-render';
+        bar.appendChild(apply); bar.appendChild(reset);
+        pre.insertBefore(bar,pre.firstChild);
+      }
+    }
+  }else if(act==='rich-apply'){
+    const wrap=btn.closest('.rich-wrap');
+    if(_rerenderRichCard(wrap)){ btn.textContent='✓ Applied'; setTimeout(()=>{btn.textContent='▶ Apply';},1400); }
+  }else if(act==='rich-reset'){
+    const wrap=btn.closest('.rich-wrap');
+    const code=wrap?.querySelector('.rich-src-pre code');
+    if(!code||code._originalSrc===undefined)return;   // never edited — nothing to undo
+    if(code.textContent===code._originalSrc){toast('Already the original','info');return;}
+    code.textContent=code._originalSrc;
+    if(_rerenderRichCard(wrap)){ btn.textContent='✓ Reset'; setTimeout(()=>{btn.textContent='↺ Reset';},1400); }
+  }else if(act==='geo-interact'){
+    const wrap=btn.closest('.rich-wrap');
+    if(!wrap||!wrap.querySelector('.rich-output'))return;   // maximized elsewhere
+    const on=wrap.dataset.geoLive==='1';
+    wrap.dataset.geoLive=on?'0':'1';
+    btn.classList.toggle('svg-act-active',!on);
+    _rerenderRichCard(wrap);
   }else if(/^(svg|tex|abc|plot|rich)-copy$/.test(act)){
     const [wrapSel,preSel,orig]=_SRC[act.replace('-copy','')];
     const code=btn.closest(wrapSel)?.querySelector(preSel+' code');
@@ -5751,6 +6362,17 @@ document.addEventListener('click',function(e){
   }else if(act==='chart-png'){
     const wrap=btn.closest('.rich-wrap'); const inst=wrap?.querySelector('.rich-output')?._richInst;
     if(inst?.kind==='chart'){ const a=document.createElement('a'); a.href=inst.obj.toBase64Image(); a.download=`chart_${Date.now()}.png`; a.click(); toast('PNG downloaded','success'); }
+  }else if(act==='fractal-reset'){
+    const inst=btn.closest('.rich-wrap')?.querySelector('.rich-output')?._richInst;
+    if(inst?.kind==='fractal'&&inst.resetView){ inst.resetView(); btn.style.display='none'; }
+  }else if(act==='fractal-png'){
+    const inst=btn.closest('.rich-wrap')?.querySelector('.rich-output')?._richInst;
+    if(inst?.kind==='fractal'&&inst.canvas){
+      const a=document.createElement('a');
+      a.href=inst.canvas.toDataURL('image/png');
+      a.download=`fractal_${Date.now()}.png`; a.click();
+      toast('PNG downloaded','success');
+    }
   }else if(act==='plot3d-png'){
     const wrap=btn.closest('.rich-wrap'); const inst=wrap?.querySelector('.rich-output')?._richInst;
     if(inst?.kind==='plot3d'&&window.Plotly){
@@ -5771,6 +6393,8 @@ document.addEventListener('click',function(e){
     if(svg&&window.downloadSvgAsPng)downloadSvgAsPng(svg);
   }else if(act==='model-use'){
     if(typeof selectModelFromSettings==='function')selectModelFromSettings(btn.dataset.model||'');
+  }else if(act==='model-del'){
+    deleteOllamaModel(btn.dataset.model||'');
   }
 });
 
@@ -5844,6 +6468,68 @@ function closeLightbox(){
 }
 function _lbKeyClose(e){if(e.key==='Escape')closeLightbox();}
 
+// ── Maximized pan/zoom ──────────────────────────────────────────────────────
+// Big flowcharts and dependency graphs are scroll-only in the modal; wheel-zoom
+// (to the cursor) + drag-pan + double-click reset make them explorable. Applied
+// as a CSS transform on the SVG — no library, and closeMaximize's cssText
+// restore wipes it on exit. Only the static-SVG lanes get it: chart/plot3d/map
+// have their own native zoom, and a live geometry board has draggable points.
+const _PZ_KINDS=new Set(['mermaid','dot','gantt','timeline','svg']);
+function _pzEnable(container,outEl){
+  const svg=outEl.querySelector('svg');
+  if(!svg)return;
+  const st={s:1,tx:0,ty:0,drag:null};
+  svg.style.transformOrigin='0 0';
+  const apply=()=>{svg.style.transform=`translate(${st.tx}px,${st.ty}px) scale(${st.s})`;};
+  st.wheel=e=>{
+    e.preventDefault();
+    const r=container.getBoundingClientRect();
+    const px=e.clientX-r.left, py=e.clientY-r.top;
+    const f=Math.exp(-e.deltaY*0.0015);
+    const ns=Math.min(20,Math.max(0.2,st.s*f)), k=ns/st.s;
+    // keep the point under the cursor fixed while scaling
+    st.tx=px-(px-st.tx)*k; st.ty=py-(py-st.ty)*k; st.s=ns;
+    apply();
+  };
+  st.down=e=>{
+    if(e.button!==0)return;
+    st.drag={x:e.clientX,y:e.clientY,tx:st.tx,ty:st.ty};
+    container.style.cursor='grabbing';
+    e.preventDefault();
+  };
+  st.move=e=>{
+    if(!st.drag)return;
+    st.tx=st.drag.tx+(e.clientX-st.drag.x); st.ty=st.drag.ty+(e.clientY-st.drag.y);
+    apply();
+  };
+  st.up=()=>{st.drag=null;container.style.cursor='';};
+  st.dbl=()=>{st.s=1;st.tx=0;st.ty=0;apply();};
+  container.addEventListener('wheel',st.wheel,{passive:false});
+  container.addEventListener('pointerdown',st.down);
+  window.addEventListener('pointermove',st.move);
+  window.addEventListener('pointerup',st.up);
+  // Touch/pen: the browser can take over the gesture and fire pointercancel
+  // instead of pointerup — without this, the pan sticks to a lifted finger.
+  window.addEventListener('pointercancel',st.up);
+  container.addEventListener('dblclick',st.dbl);
+  st._prevTouchAction=container.style.touchAction;
+  container.style.touchAction='none';
+  outEl._pz={container,st};
+}
+function _pzDisable(outEl){
+  const pz=outEl?._pz;
+  if(!pz)return;
+  pz.container.removeEventListener('wheel',pz.st.wheel);
+  pz.container.removeEventListener('pointerdown',pz.st.down);
+  window.removeEventListener('pointermove',pz.st.move);
+  window.removeEventListener('pointerup',pz.st.up);
+  window.removeEventListener('pointercancel',pz.st.up);
+  pz.container.removeEventListener('dblclick',pz.st.dbl);
+  pz.container.style.cursor='';
+  pz.container.style.touchAction=pz.st._prevTouchAction||'';
+  outEl._pz=null;
+}
+
 // ── Maximize / restore for any rich-render card ─────────────────────────────
 // Moves (reparents) the card's own output element into a full-viewport panel —
 // does NOT clone it, so a live Chart.js/Plotly/Leaflet/JSXGraph instance keeps
@@ -5863,6 +6549,16 @@ function _vizResize(outEl){
       if(host)inst.obj.resizeContainer(host.clientWidth,host.clientHeight,true);
     }
     else if(inst.kind==='molecule3d'){ inst.obj.resize(); inst.obj.render(); }
+    else if(inst.kind==='fractal'&&inst.canvas){
+      // a canvas is a fixed raster: re-render at the container's new size
+      // (maximize/restore) instead of letting CSS stretch it blurry.
+      const host=inst.canvas.parentElement, dpr=Math.min(2,window.devicePixelRatio||1);
+      if(host&&host.clientWidth){
+        inst.canvas.width=Math.round(host.clientWidth*dpr);
+        inst.canvas.height=Math.round(host.clientHeight*dpr);
+        inst.redraw();
+      }
+    }
   }catch(e){}
 }
 function openMaximize(btn){
@@ -5893,9 +6589,13 @@ function openMaximize(btn){
   outEl.style.height='';
   outEl.parentNode.replaceChild(placeholder,outEl);
   const labelEl=wrap.querySelector('.svg-render-label,.katex-block-label');
-  document.getElementById('viz-max-label').textContent=labelEl?labelEl.textContent:'';
+  const kind=wrap.getAttribute('data-kind')||(wrap.classList.contains('svg-render-wrap')?'svg':'');
+  const zoomable=_PZ_KINDS.has(kind);
+  document.getElementById('viz-max-label').textContent=
+    (labelEl?labelEl.textContent:'')+(zoomable?'  ·  scroll to zoom · drag to pan · double-click to reset':'');
   content.appendChild(outEl);
   overlay.classList.add('open');
+  if(zoomable)_pzEnable(content,outEl);
   document.addEventListener('keydown',_vmKeyClose);
   // Let the panel finish layout before asking the instance to measure it.
   // A timer, not requestAnimationFrame: rAF is suspended when the page isn't
@@ -5910,6 +6610,7 @@ function closeMaximize(){
   const overlay=document.getElementById('viz-max-overlay');
   const content=document.getElementById('viz-max-content');
   const outEl=content?.querySelector('.viz-output-el');
+  if(outEl)_pzDisable(outEl);   // before the cssText restore wipes the transform
   if(outEl&&outEl._maxOrigin){
     const {parent,next,placeholder,height,svgStyles}=outEl._maxOrigin;
     outEl.style.height=height||'';

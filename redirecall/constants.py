@@ -144,7 +144,8 @@ Every fenced block below is BLOCK-LEVEL: put it on its own lines with a blank li
 - ```geojson — geographic features with attributes. Body: a GeoJSON FeatureCollection, e.g. {"type":"FeatureCollection","features":[{"type":"Feature","properties":{"name":"Berlin"},"geometry":{"type":"Point","coordinates":[13.405,52.52]}}]}. Coordinates are [lng,lat] (NOT lat,lng). Each feature's properties become a click popup. Use ```map for simple pins, ```geojson for shapes/regions or per-feature data.
 - ```mermaid — flowchart, sequence, class, state or ER diagram (for Gantt prefer the dedicated ```gantt fence). Body: mermaid syntax, e.g. `graph TD` then `A[Start] --> B{Choice}`.
 - ```dot — a graph best drawn by automatic layout (dependencies, call graphs). Body: Graphviz DOT, e.g. `digraph G { A -> B }`.
-- ```geometry — an exact geometric construction. Body: JSON {"boundingbox":[xmin,ymax,xmax,ymin],"axis":true,"elements":[…]}. Each element is {"type":…,"args":[…],"attrs":{…}}. Coordinates must be NUMBERS. A text element takes its content as the LAST arg: {"type":"text","args":[1.5,-1.5,"a²=9"]}. Colours use fillColor/strokeColor/strokeWidth (plain fill/stroke are also accepted). Allowed types: point, line, segment, circle (centre+radius, e.g. args [[0,0],2]), ellipse (centre+radii, e.g. args [[0,0],[3,1]]), polygon, text, angle, arc, sector (arc/sector as three points, or centre+radius+start/end angle in DEGREES, e.g. args [[0,0],2,0,90]), midpoint, arrow, vector, bisector, rect (a rectangle from two opposite corners, e.g. args [[0,-0.5],[2,0.5]]). Data only — never a function or code string (use ```plot for curves).
+- ```fractal — REQUIRED for every Mandelbrot set, Julia set, IFS/chaos-game attractor (fern, Sierpinski gasket/triangle), or L-system (dragon curve, Koch curve/snowflake, plant). Do not hand-draw or approximate these with ```geometry (a handful of static polygons is not a fractal — it has no iteration) or ```svg (decorative art, not the actual structure) — ```fractal genuinely computes and renders the iteration client-side; nothing else in this app can. Body: JSON. Presets need only a type: {"type":"fern"}, "sierpinski", "dragon", "koch", "plant", "mandelbrot", or {"type":"julia","c":[-0.8,0.156]}. Escape-time options: "center":[x,y], "zoom":N, "iter":16-1000, "palette":"fire"|"ocean"|"mono"|"viridis" (the reader can click to zoom). Custom IFS: {"type":"ifs","maps":[[a,b,c,d,e,f,p],…]} — affine maps, PLAIN DECIMAL NUMBERS only (0.333, not the fraction 1/3 — JSON has no division operator). Custom L-system: {"type":"lsystem","axiom":"F","rules":{"F":"F+F--F+F"},"angle":60,"depth":4} — strings use letters and + - [ ] only (F/G draw, f moves, [ ] branches; other letters are placeholders). Data only — never code.
+- ```geometry — an exact geometric construction (NOT for fractals/IFS/Julia/Mandelbrot — those are ```fractal, always). Body: JSON {"boundingbox":[xmin,ymax,xmax,ymin],"axis":true,"elements":[…]}. Each element is {"type":…,"args":[…],"attrs":{…}}. Coordinates must be NUMBERS. A text element takes its content as the LAST arg: {"type":"text","args":[1.5,-1.5,"a²=9"]}. Colours use fillColor/strokeColor/strokeWidth (plain fill/stroke are also accepted). Allowed types: point, line, segment, circle (centre+radius, e.g. args [[0,0],2]), ellipse (centre+radii, e.g. args [[0,0],[3,1]]), polygon, text, angle, arc, sector (arc/sector as three points, or centre+radius+start/end angle in DEGREES, e.g. args [[0,0],2,0,90]), midpoint, arrow, vector, bisector, rect (a rectangle from two opposite corners, e.g. args [[0,-0.5],[2,0.5]]). Data only — never a function or code string (use ```plot for curves).
 - ```map — a map. Body: JSON {"center":[lat,lng],"zoom":11,"markers":[{"lat":..,"lng":..,"label":".."}]} (optional "geojson").
 - ```plot3d — a 3-D surface/scatter. For a formula, let the app compute it: {"zfunction":"x*y","x":[-5,5],"y":[-5,5],"layout":{"title":{"text":"…"}}}. For explicit data use Plotly JSON {"data":[{"type":"surface","z":[[1,2],[3,4]]}]} — z must be NUMBERS; never write an expression such as [[x*y]] inside JSON.
 - ```molecule — a chemical structure. Body: one SMILES string, e.g. CC(=O)Oc1ccccc1C(=O)O
@@ -156,7 +157,7 @@ Every fenced block below is BLOCK-LEVEL: put it on its own lines with a blank li
 - ```diff — compare two texts. Body: `--- before` / lines / `--- after` / lines. The app computes the real diff.
 - ```regex — test a pattern. Body: `pattern: \d{4}-\d{2}` then `test:` lines. The app runs it and shows real matches.
 - ```truth — truth table for a boolean expression, e.g. `(A and B) or not C`. The app enumerates every row.
-- ```abc — music notation (see below). ```svg — only for a custom diagram none of the above can express.
+- ```abc — music notation (see below). ```svg — only for a custom diagram none of the above can express (never for a fractal — that is always ```fractal).
 Use ordinary ```language fences for code (they are syntax-highlighted). One block per figure; put explanation as prose outside the block.
 
 === GRAPHING A FUNCTION (y = f(x)) — ALWAYS use this, never hand-draw the curve ===
@@ -319,6 +320,30 @@ DEFAULT_CONFIG: dict = {
         "js_concurrency": 3,     # max simultaneous Playwright browser tabs
         "smart_mode":     True,  # httpx-first; fall back to Playwright only when needed
         "min_words":      100,   # word threshold below which smart mode triggers JS fallback
+    },
+    # ── Watched local folders ─────────────────────────────────────────────────
+    # Each entry is {"path": "/abs/dir", "instance": "default"}. When enabled, a
+    # background scan ingests new and changed supported files into the target RAG
+    # instance (the local-disk twin of the scheduled web re-crawl).
+    "watch_folders": {"enabled": False, "interval_minutes": 5, "folders": []},
+    # ── Token pricing (USD per 1M tokens) ─────────────────────────────────────
+    # Used only to estimate cost from provider-reported usage. APPROXIMATE
+    # defaults for a few common paid models — edit to match your actual bill.
+    # "cached_in" prices provider-cached input re-reads (Claude ≈ 0.1× input);
+    # cache WRITES default to 1.25× input unless a "cache_write" price is set.
+    # A model without an entry shows token counts but contributes $0 — the cost
+    # pill then shows a trailing "+" to mark the figure as partial. Qwen, Mistral,
+    # Groq and Gemini all have paid tiers too: add entries here for the models
+    # you actually pay for. Local (Ollama) models cost nothing by definition.
+    "pricing": {
+        "claude-opus-4-6":           {"in": 15.0, "out": 75.0, "cached_in": 1.50},
+        "claude-sonnet-4-6":         {"in": 3.0,  "out": 15.0, "cached_in": 0.30},
+        "claude-haiku-4-5-20251001": {"in": 1.0,  "out": 5.0,  "cached_in": 0.10},
+        "gpt-4o":                    {"in": 2.5,  "out": 10.0},
+        "gpt-4o-mini":               {"in": 0.15, "out": 0.60},
+        "gpt-4.1":                   {"in": 2.0,  "out": 8.0},
+        "gpt-4.1-mini":              {"in": 0.40, "out": 1.60},
+        "gpt-4.1-nano":              {"in": 0.10, "out": 0.40},
     },
 }
 

@@ -149,7 +149,14 @@ def api_delete_document(instance: str, source: str, endpoint: str | None = None)
                 fmap = {rag._decode(fields[j]): rag._decode(fields[j + 1]) for j in range(0, len(fields) - 1, 2)}
                 txt = fmap.get("text", "")
                 if txt:
-                    hashes.append(hashlib.sha256(" ".join(txt.lower().split()).encode()).hexdigest())
+                    # MUST mirror ingest_text's dedup key exactly: hashes are
+                    # source-scoped (sha256("{source}\x00{normalised}")). Releasing
+                    # the unscoped spelling freed nothing, so a delete + re-ingest
+                    # of the same document silently produced 0 chunks — the doc
+                    # was gone for good (hit hardest by the watched-folder
+                    # change path, which does exactly delete-then-re-ingest).
+                    hashes.append(hashlib.sha256(
+                        f"{source}\x00{' '.join(txt.lower().split())}".encode()).hexdigest())
                 pipe.delete(key)
                 deleted += 1
             pipe.execute()

@@ -80,6 +80,7 @@ _rag_stats: dict[str, dict] = {}
 _reranker: Optional["CrossEncoder"] = None
 _reranker_model_name: str = ""
 _recrawl_task: Optional[asyncio.Task] = None
+_watch_task: Optional[asyncio.Task] = None
 
 
 def _record_rag_stats(

@@ -6,7 +6,10 @@ module-qualified so runtime rebinding and test monkeypatching stay live.
 """
 import logging
 import asyncio
+import copy
 import json
+import time
+import uuid
 from datetime import datetime, timezone
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from . import appcore, config, constants, ingest, sessions, state
@@ -86,6 +89,53 @@ def api_delete_session(sid: str):
     state._sessions.pop(sid, None)
     sessions.delete_session_from_redis(sid)
     return {"ok": True}
+
+
+@appcore.app.post("/api/sessions/{sid}/fork")
+def api_fork_session(sid: str, payload: dict):
+    """Fork a conversation: a new session holding the messages up to and
+    including the anchored one. The original is untouched; the fork continues
+    independently from that point.
+
+    The anchor is {role, content_prefix, occurrence} rather than a bare index:
+    the client's message array can run AHEAD of the stored one (aborted and
+    errored streams are kept client-side but never persisted), so a client
+    index would silently fork at the wrong message after any Stop. Content is
+    identical for every turn both sides persisted, and turns only the client
+    has can never match, so occurrence counting stays aligned."""
+    msgs = state._sessions.get(sid) or sessions.load_session(sid)
+    if not msgs:
+        raise HTTPException(404, "session not found")
+    role = payload.get("role")
+    prefix = payload.get("content_prefix")
+    occurrence = payload.get("occurrence", 1)
+    if role not in ("user", "assistant") or not isinstance(prefix, str) or not prefix:
+        raise HTTPException(400, "role and content_prefix are required")
+    if not isinstance(occurrence, int) or occurrence < 1:
+        raise HTTPException(400, "occurrence must be a positive int")
+    at, seen = None, 0
+    for i, m in enumerate(msgs):
+        c = m.get("content")
+        c = c if isinstance(c, str) else str(c)
+        if m.get("role") == role and c.startswith(prefix):
+            seen += 1
+            if seen == occurrence:
+                at = i
+                break
+    if at is None:
+        raise HTTPException(409, "message not found in the stored session "
+                                 "(it may not have been persisted — e.g. an aborted answer)")
+    new_sid = f"sess_{int(time.time() * 1000)}_{uuid.uuid4().hex[:6]}_fork"
+    state._sessions[new_sid] = [copy.deepcopy(m) for m in msgs[:at + 1]]
+    state.touch_session(new_sid)
+    sessions.save_session(new_sid, state._sessions[new_sid])
+    return {"id": new_sid, "messages": len(state._sessions[new_sid])}
+
+
+@appcore.app.get("/api/usage")
+def api_usage():
+    """All-time provider-reported token usage, per provider:model."""
+    return sessions.usage_totals()
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ROUTES — PROMPT TEMPLATES

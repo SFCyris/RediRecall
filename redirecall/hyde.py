@@ -5,6 +5,7 @@ Split out mechanically for maintainability; cross-module references are
 module-qualified so runtime rebinding and test monkeypatching stay live.
 """
 import logging
+import asyncio
 from . import providers
 
 log = logging.getLogger(__name__)
@@ -33,35 +34,41 @@ async def hyde_generate(query: str, provider: str, model: str) -> str:
         f"Question: {query}"
     )}]
     hypothesis = ""
+    # HyDE is a real billed LLM call on every RAG query when enabled — tally it
+    # into the cumulative usage counter (it belongs to no chat turn of its own).
+    usage: dict = {}
     try:
         if provider == "claude":
-            async for tok, done in providers.claude_stream(prompt, model):
+            async for tok, done in providers.claude_stream(prompt, model, usage=usage):
                 hypothesis += tok
                 if done: break
         elif provider == "openai":
-            async for tok, done in providers.openai_stream(prompt, model):
+            async for tok, done in providers.openai_stream(prompt, model, usage=usage):
                 hypothesis += tok
                 if done: break
         elif provider == "qwen":
-            async for tok, done in providers.qwen_stream(prompt, model):
+            async for tok, done in providers.qwen_stream(prompt, model, usage=usage):
                 hypothesis += tok
                 if done: break
         elif provider == "mistral":
-            async for tok, done in providers.mistral_stream(prompt, model):
+            async for tok, done in providers.mistral_stream(prompt, model, usage=usage):
                 hypothesis += tok
                 if done: break
         elif provider == "groq":
-            async for tok, done in providers.groq_stream(prompt, model):
+            async for tok, done in providers.groq_stream(prompt, model, usage=usage):
                 hypothesis += tok
                 if done: break
         elif provider == "gemini":
-            async for tok, done in providers.gemini_stream(prompt, model):
+            async for tok, done in providers.gemini_stream(prompt, model, usage=usage):
                 hypothesis += tok
                 if done: break
         else:
-            async for tok, done in providers.ollama_stream(prompt, model):
+            async for tok, done in providers.ollama_stream(prompt, model, usage=usage):
                 hypothesis += tok
                 if done: break
+        if usage.get("prompt") is not None:
+            from . import sessions
+            await asyncio.to_thread(sessions.record_usage, provider, model, usage)
     except Exception as e:
         log.warning(f"HyDE generation failed: {e}")
     return hypothesis.strip()

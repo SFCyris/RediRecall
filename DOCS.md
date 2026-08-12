@@ -174,6 +174,7 @@ Answers are rendered inline: the model writes a short, declarative block and the
 | ` ```mermaid ` | **Diagram** — flowchart, sequence, class, state, ER, Gantt | mermaid syntax | Mermaid |
 | ` ```dot ` | **Auto-laid-out graph** — dependency/call graphs | Graphviz DOT | Viz.js |
 | ` ```geometry ` | **Geometric construction** | JSON: `boundingbox` + `elements` | JSXGraph |
+| ` ```fractal ` | **Fractal** — Mandelbrot/Julia (click-to-zoom), IFS chaos game, L-systems; presets `fern`, `sierpinski`, `dragon`, `koch`, `plant` | JSON: `type` + parameters | plain canvas (no library) |
 | ` ```map ` | **Map** with markers / GeoJSON | JSON: `center`, `zoom`, `markers` | Leaflet + OpenStreetMap |
 | ` ```plot3d ` | **3-D surface / scatter** | Plotly JSON | Plotly |
 | ` ```molecule ` | **Chemical structure** | a SMILES string | SmilesDrawer |
@@ -654,6 +655,8 @@ All endpoints are served at `http://localhost:8420`.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/ollama/models` | List Ollama models (vision-detected) |
+| `POST` | `/api/ollama/pull` | Pull a model onto the Ollama server (`{"model": "..."}`; NDJSON progress stream) |
+| `DELETE` | `/api/ollama/models/{name}` | Remove a model from the Ollama server |
 | `GET` | `/api/claude/models` | List Claude models |
 | `GET` | `/api/openai/models` | List OpenAI models (live + static fallback) |
 | `GET` | `/api/qwen/models` | List Qwen models |
@@ -746,6 +749,8 @@ DELETE /api/cache/entry?entry_id=abc123
 | `GET` | `/api/sessions` | List sessions |
 | `GET` | `/api/sessions/{sid}` | Fetch message history |
 | `DELETE` | `/api/sessions/{sid}` | Delete session |
+| `POST` | `/api/sessions/{sid}/fork` | Fork at a message (`{"role","content_prefix","occurrence"}`) → new session id |
+| `GET` | `/api/usage` | All-time provider-reported token usage per `provider:model` |
 
 ### Templates
 

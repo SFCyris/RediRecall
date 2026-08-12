@@ -293,22 +293,24 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     stream_error  = False
     t_llm_start   = time.time()
 
+    usage_sink: dict = {}   # filled by the provider stream when counts are reported
     try:
         # Route to the correct provider
         if provider == "claude":
-            stream_gen = providers.claude_stream(messages, model)
+            stream_gen = providers.claude_stream(messages, model, usage=usage_sink)
         elif provider == "openai":
-            stream_gen = providers.openai_stream(messages, model)
+            stream_gen = providers.openai_stream(messages, model, usage=usage_sink)
         elif provider == "qwen":
-            stream_gen = providers.qwen_stream(messages, model)
+            stream_gen = providers.qwen_stream(messages, model, usage=usage_sink)
         elif provider == "mistral":
-            stream_gen = providers.mistral_stream(messages, model)
+            stream_gen = providers.mistral_stream(messages, model, usage=usage_sink)
         elif provider == "groq":
-            stream_gen = providers.groq_stream(messages, model)
+            stream_gen = providers.groq_stream(messages, model, usage=usage_sink)
         elif provider == "gemini":
-            stream_gen = providers.gemini_stream(messages, model)
+            stream_gen = providers.gemini_stream(messages, model, usage=usage_sink)
         else:
-            stream_gen = providers.ollama_stream(messages, model, images or None)
+            stream_gen = providers.ollama_stream(messages, model, images or None,
+                                                 usage=usage_sink)
 
         async for token, done in stream_gen:
             full_response += token
@@ -349,8 +351,10 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
                            "meta": sessions._turn_meta(chunks,
                                               {"cache": t_cache, "hyde": t_hyde, "rag": t_rag,
                                                "llm": t_llm, "total": total},
-                                              provider, model)})
+                                              provider, model, usage_sink)})
     await asyncio.to_thread(sessions.save_session, sid, state._sessions[sid])
+    if usage_sink.get("prompt") is not None:
+        await asyncio.to_thread(sessions.record_usage, provider, model, usage_sink)
 
     # ── 5. Release the client FIRST ─────────────────────────────────────────
     # stream_end unlocks the composer. Auto-titling is a second, full LLM call
@@ -361,6 +365,7 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     await ws.send_json({
         "type":    "stream_end",
         "latency": {"cache": t_cache, "hyde": t_hyde, "rag": t_rag, "llm": t_llm, "total": total},
+        "usage":   usage_sink if usage_sink.get("prompt") is not None else None,
         "title":   None,
     })
     state._chat_tasks.pop(sid, None)
@@ -382,43 +387,48 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
                 f"Just the title words. Query: {query}"
             )}]
             title_chunks = ""
+            # The title is a real billed LLM call — tally it (it has no chat turn
+            # of its own, so it lands only in the cumulative usage counter).
+            title_usage: dict = {}
 
             # Use the same provider that answered the question
             if provider == "claude":
-                async for tok, done in providers.claude_stream(t_payload, model):
+                async for tok, done in providers.claude_stream(t_payload, model, usage=title_usage):
                     title_chunks += tok
                     if done:
                         break
             elif provider == "openai":
-                async for tok, done in providers.openai_stream(t_payload, model):
+                async for tok, done in providers.openai_stream(t_payload, model, usage=title_usage):
                     title_chunks += tok
                     if done:
                         break
             elif provider == "qwen":
-                async for tok, done in providers.qwen_stream(t_payload, model):
+                async for tok, done in providers.qwen_stream(t_payload, model, usage=title_usage):
                     title_chunks += tok
                     if done:
                         break
             elif provider == "mistral":
-                async for tok, done in providers.mistral_stream(t_payload, model):
+                async for tok, done in providers.mistral_stream(t_payload, model, usage=title_usage):
                     title_chunks += tok
                     if done:
                         break
             elif provider == "groq":
-                async for tok, done in providers.groq_stream(t_payload, model):
+                async for tok, done in providers.groq_stream(t_payload, model, usage=title_usage):
                     title_chunks += tok
                     if done:
                         break
             elif provider == "gemini":
-                async for tok, done in providers.gemini_stream(t_payload, model):
+                async for tok, done in providers.gemini_stream(t_payload, model, usage=title_usage):
                     title_chunks += tok
                     if done:
                         break
             else:
-                async for tok, done in providers.ollama_stream(t_payload, model):
+                async for tok, done in providers.ollama_stream(t_payload, model, usage=title_usage):
                     title_chunks += tok
                     if done:
                         break
+            if title_usage.get("prompt") is not None:
+                await asyncio.to_thread(sessions.record_usage, provider, model, title_usage)
 
             # Clean the response: take first non-empty line, strip list markers
             raw_title  = title_chunks.strip()
@@ -610,33 +620,34 @@ async def api_chat(payload: dict):
 
     full_response = ""
     stream_error  = False
+    usage_sink: dict = {}
     try:
         if provider == "claude":
-            async for tok, done in providers.claude_stream(messages, model):
+            async for tok, done in providers.claude_stream(messages, model, usage=usage_sink):
                 full_response += tok
                 if done: break
         elif provider == "openai":
-            async for tok, done in providers.openai_stream(messages, model):
+            async for tok, done in providers.openai_stream(messages, model, usage=usage_sink):
                 full_response += tok
                 if done: break
         elif provider == "qwen":
-            async for tok, done in providers.qwen_stream(messages, model):
+            async for tok, done in providers.qwen_stream(messages, model, usage=usage_sink):
                 full_response += tok
                 if done: break
         elif provider == "mistral":
-            async for tok, done in providers.mistral_stream(messages, model):
+            async for tok, done in providers.mistral_stream(messages, model, usage=usage_sink):
                 full_response += tok
                 if done: break
         elif provider == "groq":
-            async for tok, done in providers.groq_stream(messages, model):
+            async for tok, done in providers.groq_stream(messages, model, usage=usage_sink):
                 full_response += tok
                 if done: break
         elif provider == "gemini":
-            async for tok, done in providers.gemini_stream(messages, model):
+            async for tok, done in providers.gemini_stream(messages, model, usage=usage_sink):
                 full_response += tok
                 if done: break
         else:
-            async for tok, done in providers.ollama_stream(messages, model):
+            async for tok, done in providers.ollama_stream(messages, model, usage=usage_sink):
                 full_response += tok
                 if done: break
         if full_response.startswith("Error:") or "error:" in full_response.lower()[:20]:
@@ -646,12 +657,15 @@ async def api_chat(payload: dict):
 
     state._sessions[sid].append({"role": "user", "content": query, "meta": sessions._turn_meta()})
     state._sessions[sid].append({"role": "assistant", "content": full_response,
-                           "meta": sessions._turn_meta(chunks, None, provider, model)})
+                           "meta": sessions._turn_meta(chunks, None, provider, model, usage_sink)})
     await asyncio.to_thread(sessions.save_session, sid, state._sessions[sid])
+    if usage_sink.get("prompt") is not None:
+        await asyncio.to_thread(sessions.record_usage, provider, model, usage_sink)
 
     if not stream_error and cacheable:
         await asyncio.to_thread(cache.cache_store, query, full_response, chunks, cache_scope)
 
-    return {"session_id": sid, "response": full_response, "chunks": chunks, "cache_hit": False}
+    return {"session_id": sid, "response": full_response, "chunks": chunks, "cache_hit": False,
+            "usage": usage_sink if usage_sink.get("prompt") is not None else None}
 
 

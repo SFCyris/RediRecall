@@ -76,7 +76,19 @@ fi
 if pid_alive "${APP_PID}"; then
   c_info "App already running (pid $(cat "${APP_PID}")) — leaving it."
 elif port_in_use "${APP_PORT}"; then
-  c_warn "Port ${APP_PORT} is already in use by another process — not starting a second app."
+  # Identify the squatter before shrugging: an instance started by hand (no
+  # pidfile) is still OURS, and pretending "another process" has the port while
+  # the banner below announces the repo version made a failed swap look like a
+  # successful one (a stale 1.5.0 kept serving under a "v1.7.0 is running" banner).
+  _live="$(curl -fsS -m 2 "http://127.0.0.1:${APP_PORT}/api/health" 2>/dev/null || true)"
+  if printf '%s' "${_live}" | grep -q '"app" *: *"RediRecall"'; then
+    _lv="$(printf '%s' "${_live}" | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p')"
+    c_warn "Port ${APP_PORT} already serves RediRecall v${_lv:-?} — an instance these scripts don't track (no pidfile)."
+    c_warn "Not starting a second app. Run ./restart.sh (stop.sh now finds and stops port-squatting instances too)."
+  else
+    c_err "Port ${APP_PORT} is in use by something that is NOT RediRecall — not starting."
+    exit 1
+  fi
 else
   c_info "Starting RediRecall on http://${APP_HOST}:${APP_PORT}…"
   # --app-dir puts the repo on sys.path so `main:app` imports without a cd — and
@@ -106,8 +118,12 @@ else
 fi
 
 # ── Status banner ─────────────────────────────────────────────────────────────
-# Version: read the same __version__ the app imports (they match right after start).
-APP_VERSION="$(sed -n 's/^__version__ *= *["'"'"']\(.*\)["'"'"']/\1/p' "${REPO_DIR}/redirecall/__init__.py" 2>/dev/null)"
+# Version: ask the RUNNING server what it is — the repo file only says what the
+# next start would serve, and quoting it after a skipped start announced a
+# version that was not actually running. File value is the fallback only.
+APP_VERSION="$(curl -fsS -m 2 "http://127.0.0.1:${APP_PORT}/api/health" 2>/dev/null \
+  | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p')"
+[ -z "${APP_VERSION}" ] && APP_VERSION="$(sed -n 's/^__version__ *= *["'"'"']\(.*\)["'"'"']/\1/p' "${REPO_DIR}/redirecall/__init__.py" 2>/dev/null)"
 [ -z "${APP_VERSION}" ] && APP_VERSION="?"
 
 # Best-effort primary LAN IPv4, for the case where the app is bound to all interfaces.

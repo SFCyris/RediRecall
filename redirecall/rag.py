@@ -297,8 +297,15 @@ def _decode(v) -> str:
 def build_context_prompt(chunks: list[dict]) -> str:
     """Render retrieved chunks into a system-prompt section.
 
-    Two behaviours the previous flat blob lacked:
+    Three behaviours the previous flat blob lacked:
 
+    * **Relevance gate.** Retrieval is a similarity search, and a weak match can
+      clear the floor on vocabulary overlap alone (a real case: "Beginning of Old
+      MacDonald" pulled a 43% Linux man-page chunk, and the model summarised the
+      man page and abstained instead of answering the song). The model is told the
+      context is machine-retrieved and possibly irrelevant, to judge it first, and
+      to IGNORE it — not narrate it — when it does not bear on the question. Each
+      chunk carries its match score so the model can calibrate that judgement.
     * **Citations.** Chunks are numbered ``[1]…[k]`` and the model is told to mark
       each claim with the number it came from, so a reader can trace a specific
       sentence back to a specific chunk instead of being handed the whole set.
@@ -312,17 +319,34 @@ def build_context_prompt(chunks: list[dict]) -> str:
             "Say so in one short sentence before answering, then answer from general "
             "knowledge and make clear that the answer is not grounded in the user's documents."
         )
+
+    def _pct(c: dict) -> str:
+        s = c.get("relevance", c.get("score"))
+        try:
+            return f", match {round(float(s) * 100)}%" if s is not None else ""
+        except (TypeError, ValueError):
+            return ""
+
     numbered = "\n\n".join(
-        f"[{i}] (source: {c.get('source', 'unknown')})\n{c.get('text', '')}"
+        f"[{i}] (source: {c.get('source', 'unknown')}{_pct(c)})\n{c.get('text', '')}"
         for i, c in enumerate(chunks, 1)
     )
     return (
-        "\n\nAnswer using the numbered context below. Cite the context you use by "
-        "appending its number in square brackets to the sentence it supports — for "
-        "example: \"Streams are append-only [2].\" Cite only what you actually used, "
-        "and use several markers when a sentence draws on more than one. If the "
-        "context does not cover part of the question, say so rather than filling the "
-        "gap from general knowledge.\n\n"
+        "\n\nThe numbered context below was retrieved from the user's knowledge base "
+        "by automatic similarity search — it may or may not be relevant to the "
+        "question (low match percentages are often vocabulary coincidences). Judge "
+        "that first:\n"
+        "- If none of it bears on the question, IGNORE it entirely: do not describe "
+        "or summarise it, and do not answer with what the context lacks. Instead say "
+        "in one short sentence that the knowledge base has nothing relevant, then "
+        "answer the question from general knowledge.\n"
+        "- If only some chunks are relevant, use those and silently ignore the rest.\n"
+        "- When you do use the context, cite it by appending the chunk number in "
+        "square brackets to the sentence it supports — for example: \"Streams are "
+        "append-only [2].\" Cite only what you actually used, and use several markers "
+        "when a sentence draws on more than one. If the context covers the question "
+        "only partly, ground what you can and say which part goes beyond the "
+        "user's documents.\n\n"
         f"{numbered}"
     )
 

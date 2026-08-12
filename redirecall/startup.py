@@ -227,3 +227,7 @@ async def startup():
     state._recrawl_task = asyncio.create_task(ws._recrawl_loop())
     log.info("  Recrawl scheduler: started")
 
+    # ── Start watched-folder scanner ──────────────────────────────────────
+    state._watch_task = asyncio.create_task(ws._watch_folder_loop())
+    log.info("  Watched-folder scanner: started")
+

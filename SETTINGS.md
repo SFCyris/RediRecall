@@ -198,6 +198,10 @@ Found in **Settings → Providers** (accordion). Each provider card is expanded 
 - **What it does:** The Ollama model name used for chat completions (e.g. `llama3.2`, `mistral`, `llava`).
 - **Vision detection:** Models whose name contains `llava`, `bakllava`, `moondream`, `vision`, `minicpm`, `gemma3`, or `qwen-vl` are automatically detected as vision-capable and the 📎 image attach button is shown.
 
+#### Manage models
+- **Available Models table:** every model installed on the Ollama server, with size and vision capability. **Use** switches to it; **🗑** removes it from the server (frees its disk space — pulling again re-downloads).
+- **Pull a model:** enter any name from the Ollama library (e.g. `llama3.2`, `qwen2.5:7b`) and click **⬇ Pull**; download progress streams live below the field.
+
 ---
 
 ### Claude (Anthropic)
@@ -400,6 +404,24 @@ Found in **Settings → Web Sources** when configuring a URL crawl.
 - **Config key:** `crawl.js_concurrency`
 - **Default:** `3`
 - **What it does:** Maximum number of simultaneous headless-browser tabs when JS rendering is used. Kept lower than `concurrency` because each browser tab is far more resource-intensive than an `httpx` fetch.
+
+---
+
+## Watched Folders
+
+*(Settings → Web Sources → Watched Folders; config key `watch_folders`)*
+
+- **Enable folder watching:** global on/off toggle (`watch_folders.enabled`, default off).
+- **Scan every N min:** `watch_folders.interval_minutes`, default 5.
+- **Folders:** each row maps an absolute local folder to a RAG instance. New and changed supported files (`.txt .md .csv .pdf .docx .xlsx`) under it — recursively, skipping dot-directories — are ingested automatically. An edited file **replaces** its previous version; files deleted from disk **stay indexed** until removed via Documents.
+- **Reach:** everything readable under a watched folder becomes retrievable through chat. On a machine shared over the network, watch specific folders rather than broad roots (the app itself has no authentication by default).
+
+---
+
+## Token Usage & Pricing
+
+- The topbar shows this session's tokens: **↑ input · ↓ output · Σ total**. Exact numbers are the provider's own reported billed counts (stored with each answer); a `~` marks a session where at least one turn had to be estimated (≈ characters ÷ 4). Measured input counts the *full prompt the provider processed* — system prompt, re-sent history, retrieved context — so it grows with conversation length.
+- **Cost pill** (config key `pricing`, config.json only): USD per 1M tokens per model id, fields `in`, `out`, optional `cached_in` (provider cache re-reads) and `cache_write`. Ships with approximate defaults for a few common paid models — **edit to match your actual bill**. A model with no entry contributes $0 and the figure gains a trailing `+` to mark it partial. `GET /api/usage` returns the all-time tally per provider and model.
 
 ---
 

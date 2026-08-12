@@ -5,6 +5,57 @@ All notable changes to RediRecall are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-08-12
+
+### Added
+- **Real token usage & cost.** Every provider's reported token counts are captured
+  per turn, stored with the conversation, and tallied all-time (`GET /api/usage`).
+  The top-bar pills show exact input/output/total when the provider reports them
+  (the `~` estimate remains only for turns without counts), plus an estimated cost
+  from the editable `pricing` table in config.json (approximate defaults for the
+  common paid models; free-tier and local models show no cost).
+- **Watched folders.** Point a RAG instance at local folders (Settings → Web
+  Sources): new and changed supported files are ingested automatically on a
+  configurable interval; an edited file replaces its previous version. Files
+  deleted from disk stay indexed until removed via Documents.
+- **Fork a conversation** (⑂ on any answer): a new session containing everything
+  up to that point; the original is untouched.
+- **Ollama model management** in Settings → Providers → Ollama: pull a model with
+  live progress, and remove installed models.
+- **Editable card source.** A rich card's Source view is now editable — Apply
+  re-renders the card from the edited spec in place (local only; the stored
+  conversation is unchanged); **↺ Reset** discards the edits and restores the
+  original.
+- **⟲ Reset zoom** on a Mandelbrot/Julia card after a click-to-zoom, returning
+  to the spec's own view (mirrors the existing chart zoom-reset).
+- **Pan & zoom in Maximize** for diagram cards (mermaid, dot, gantt, timeline,
+  SVG): scroll to zoom at the cursor, drag to pan, double-click to reset.
+- **Interactive geometry** (✋ on a geometry card): shows the construction's
+  control points and lets you drag them; toggle off to return to the clean figure.
+- The welcome screen shows the running build — version (linked to its release
+  notes), license, and the AGPL source link — reported live by `/api/health`.
+- **` ```fractal ` render lane** — Mandelbrot and Julia sets (click to zoom,
+  shift-click to zoom out, smooth colouring, four palettes), IFS chaos-game
+  attractors and L-system turtle graphics, all drawn on a plain canvas with no
+  external library. Presets `fern`, `sierpinski`, `dragon`, `koch`, `plant`,
+  `mandelbrot` and `julia` render from a one-line spec; custom affine maps and
+  rewrite rules are data-only, with hard caps on iterations, points and
+  expansion size.
+
+### Fixed
+- Grounded answers judge **relevance** first: retrieved context that does not bear
+  on the question is ignored (with a one-line note) and the question is answered
+  from general knowledge — a weak vocabulary-overlap match no longer produces an
+  answer that summarises an unrelated document and abstains. Each context chunk
+  now carries its match score so the model can calibrate.
+- `stop.sh` also finds and stops a RediRecall instance started outside the
+  scripts (no pidfile) but holding the app port; `start.sh` no longer announces
+  the repo's version when a pre-existing instance kept the port — the banner now
+  reports what is actually serving.
+- `` ```fractal `` no longer fails to render when an IFS probability is written
+  as a fraction (`1/3`) — valid maths, invalid JSON. It is now converted to its
+  decimal value before parsing.
+
 ## [1.6.0] — 2026-08-10
 
 ### Added
@@ -125,6 +176,7 @@ keep working with the model they were built with.
 See the [GitHub releases](https://github.com/SFCyris/RediRecall/releases) for
 1.3.x and 1.2.0.
 
+[1.7.0]: https://github.com/SFCyris/RediRecall/releases/tag/v1.7.0
 [1.6.0]: https://github.com/SFCyris/RediRecall/releases/tag/v1.6.0
 [1.5.1]: https://github.com/SFCyris/RediRecall/releases/tag/v1.5.1
 [1.5.0]: https://github.com/SFCyris/RediRecall/releases/tag/v1.5.0

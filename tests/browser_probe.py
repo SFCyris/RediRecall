@@ -85,6 +85,10 @@ def build_harness(html: str) -> str:
     # so the real functions and the real overlay markup are used, not a mock.
     overlay = _between(html, '<div id="viz-max-overlay"', "</div>\n</div>\n")
     viz_resize = _js_fn(html, "function _vizResize(outEl){")
+    # openMaximize/closeMaximize call the maximized pan/zoom helpers — extract the
+    # whole block (const _PZ_KINDS … _pzDisable) or the maximize flow throws
+    # ReferenceError the moment a test maximizes a card.
+    pan_zoom = _between(html, "const _PZ_KINDS", "outEl._pz=null;\n}")
     open_max = _js_fn(html, "function openMaximize(btn){")
     close_max = _js_fn(html, "function closeMaximize(){")
     vm_key = _between(html, "function _vmKeyClose(e){", "}\n")
@@ -105,8 +109,8 @@ def build_harness(html: str) -> str:
         "function _abcPlay(){}\nfunction downloadSvgAsPng(){}\n"
         "function downloadImgFromSrc(){}\nfunction openLightbox(){}\n"
         "function _isDark(){return false;}\n"
-        # the real maximize flow
-        + viz_resize + "\n" + open_max + "\n" + close_max + "\n"
+        # the real maximize flow (incl. the pan/zoom helpers it references)
+        + viz_resize + "\n" + pan_zoom + "\n" + open_max + "\n" + close_max + "\n"
         + vm_key + "\n"
         # the real lane and the real card markup
         "const RICH_LANES={\n" + chart_lane + "\n};\n"

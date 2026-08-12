@@ -33,6 +33,34 @@ log = logging.getLogger(__name__)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# TOKEN USAGE
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Every *_stream() accepts an optional `usage` dict the caller owns. When the
+# provider's final chunk reports real token counts, the stream fills it in place
+# — a mutable sink, because the yield contract is (token, done) tuples and a
+# generator cannot also return a value to an `async for` consumer.
+
+def _sink_usage(sink: dict | None, prompt, completion, cached=None) -> None:
+    """Record provider-reported token counts into the caller's sink dict.
+    Only writes when both counts are real non-negative ints — a partial record
+    would be mistaken downstream for a measured turn."""
+    if sink is None:
+        return
+    try:
+        p, c = int(prompt), int(completion)
+    except (TypeError, ValueError):
+        return
+    if p < 0 or c < 0:
+        return
+    sink["prompt"], sink["completion"] = p, c
+    if cached is not None:
+        try:
+            sink["cached"] = max(0, int(cached))
+        except (TypeError, ValueError):
+            pass
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # LLM PROVIDER — OLLAMA
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -149,7 +177,8 @@ def _to_ollama_messages(messages: list) -> list:
     return result
 
 
-async def ollama_stream(messages: list, model: str, images: list[str] | None = None):
+async def ollama_stream(messages: list, model: str, images: list[str] | None = None,
+                        usage: dict | None = None):
     """
     Stream tokens from Ollama /api/chat endpoint.
     Yields (token: str, done: bool) tuples.
@@ -169,6 +198,8 @@ async def ollama_stream(messages: list, model: str, images: list[str] | None = N
                     d    = json.loads(line)
                     msg  = d.get("message", {})
                     done = d.get("done", False)
+                    if done:   # the final chunk carries the real token counts
+                        _sink_usage(usage, d.get("prompt_eval_count"), d.get("eval_count"))
 
                     # Standard text content
                     token = msg.get("content", "")
@@ -226,7 +257,7 @@ def _to_claude_content(content):
     return result
 
 
-async def claude_stream(messages: list, model: str):
+async def claude_stream(messages: list, model: str, usage: dict | None = None):
     """
     Stream tokens from Anthropic Claude using the native anthropic SDK.
     Yields (token: str, done: bool) tuples.
@@ -262,6 +293,19 @@ async def claude_stream(messages: list, model: str):
         async with client.messages.stream(**kwargs) as stream:
             async for text in stream.text_stream:
                 yield text, False
+            try:
+                # The accumulated final message carries the billed counts. Cache
+                # reads are input billed at ~0.1x, cache WRITES at ~1.25x — both
+                # reported separately so the cost estimate prices them correctly
+                # (cache writes happen on the first turn and after every expiry).
+                u = (await stream.get_final_message()).usage
+                _sink_usage(usage, u.input_tokens, u.output_tokens,
+                            getattr(u, "cache_read_input_tokens", 0))
+                cw = getattr(u, "cache_creation_input_tokens", 0) or 0
+                if usage is not None and "prompt" in usage and cw:
+                    usage["cache_write"] = int(cw)
+            except Exception:
+                pass   # usage is best-effort; never fail a delivered answer over it
         yield "", True
     except _anthropic.APIStatusError as e:
         yield f"Error: {e.message}", True
@@ -314,7 +358,72 @@ async def openai_models() -> list[dict]:
         return OPENAI_MODELS_STATIC
 
 
-async def openai_stream(messages: list, model: str):
+# Providers whose endpoint rejected stream_options once — skipped from then on,
+# so a non-OpenAI base_url doesn't pay a failed round-trip on every message.
+_NO_STREAM_OPTIONS: set = set()
+
+
+async def _openai_compat_stream(provider_key: str, client, model: str, messages: list,
+                                usage: dict | None, want_stream_options: bool):
+    """The shared streaming loop for every OpenAI-SDK provider.
+
+    Two deliberate differences from the old per-provider loops:
+      * no `break` on finish_reason — the usage-bearing final chunk arrives AFTER
+        it (with empty `choices`), so breaking early is exactly what would lose
+        the counts. The stream closes itself right after.
+      * usage is read from `chunk.usage` wherever the endpoint puts it (OpenAI
+        with include_usage, Mistral and DashScope report it unprompted), plus
+        Groq's `chunk.x_groq.usage` spelling.
+    """
+    kwargs: dict = {"model": model, "messages": messages, "stream": True}
+    if want_stream_options and provider_key not in _NO_STREAM_OPTIONS:
+        kwargs["stream_options"] = {"include_usage": True}
+    try:
+        stream = await client.chat.completions.create(**kwargs)
+    except Exception as e:
+        # Demote ONLY on an actual rejection of the parameter. A 401/429/DNS blip
+        # here must surface as itself — permanently dropping include_usage over a
+        # transient failure would silently kill usage reporting until restart.
+        msg = str(e).lower()
+        rejected = ("stream_options" in msg
+                    or getattr(e, "status_code", None) == 400
+                    or "badrequest" in type(e).__name__.lower())
+        if "stream_options" not in kwargs or not rejected:
+            raise
+        log.warning(f"{provider_key}: endpoint rejected stream_options "
+                    f"({e}) — usage reporting off for this provider until restart")
+        _NO_STREAM_OPTIONS.add(provider_key)
+        kwargs.pop("stream_options")
+        stream = await client.chat.completions.create(**kwargs)
+    # After finish_reason the only expected trailing chunk is the usage one; a
+    # misbehaving OpenAI-compatible proxy that then holds the connection open
+    # would otherwise hang the composer forever (the finish_reason `break` used
+    # to be the terminator). 3 s is far above a same-connection trailing chunk.
+    it = stream.__aiter__()
+    finished = False
+    while True:
+        try:
+            if finished:
+                chunk = await asyncio.wait_for(it.__anext__(), timeout=3.0)
+            else:
+                chunk = await it.__anext__()
+        except StopAsyncIteration:
+            break
+        except asyncio.TimeoutError:
+            break
+        u = getattr(chunk, "usage", None) or getattr(getattr(chunk, "x_groq", None), "usage", None)
+        if u is not None:
+            _sink_usage(usage, getattr(u, "prompt_tokens", None), getattr(u, "completion_tokens", None))
+        if not chunk.choices:
+            continue
+        if chunk.choices[0].finish_reason:
+            finished = True
+        delta = chunk.choices[0].delta
+        if delta.content:
+            yield delta.content, False
+
+
+async def openai_stream(messages: list, model: str, usage: dict | None = None):
     """
     Stream tokens from the OpenAI /v1/chat/completions endpoint using the native openai SDK.
     Yields (token: str, done: bool) tuples — same interface as claude_stream.
@@ -333,17 +442,9 @@ async def openai_stream(messages: list, model: str):
 
     try:
         client = config._cached_client("openai", api_key, f"{base_url}/v1")
-        stream = await client.chat.completions.create(
-            model=model, messages=messages, stream=True,
-        )
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if delta.content:
-                yield delta.content, False
-            if chunk.choices[0].finish_reason:
-                break
+        async for tok, done in _openai_compat_stream("openai", client, model, messages,
+                                                     usage, want_stream_options=True):
+            yield tok, done
         yield "", True
     except Exception as e:
         yield f"OpenAI error: {e}", True
@@ -367,7 +468,7 @@ QWEN_MODELS_STATIC = [
 ]
 
 
-async def qwen_stream(messages: list, model: str):
+async def qwen_stream(messages: list, model: str, usage: dict | None = None):
     """
     Stream tokens from Alibaba DashScope using the openai SDK with DashScope's base URL.
     Yields (token: str, done: bool) — same interface as openai_stream / claude_stream.
@@ -389,17 +490,9 @@ async def qwen_stream(messages: list, model: str):
     try:
         # DashScope base_url already includes /v1 path — pass it directly to the SDK
         client = config._cached_client("openai", api_key, base_url)
-        stream = await client.chat.completions.create(
-            model=model, messages=messages, stream=True,
-        )
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if delta.content:
-                yield delta.content, False
-            if chunk.choices[0].finish_reason:
-                break
+        async for tok, done in _openai_compat_stream("qwen", client, model, messages,
+                                                     usage, want_stream_options=False):
+            yield tok, done
         yield "", True
     except Exception as e:
         yield f"Qwen error: {e}", True
@@ -418,7 +511,7 @@ MISTRAL_MODELS_STATIC = [
     {"id": "pixtral-12b-2409",       "name": "Pixtral 12B (vision)",        "context": 128000},
 ]
 
-async def mistral_stream(messages: list, model: str):
+async def mistral_stream(messages: list, model: str, usage: dict | None = None):
     """
     Stream tokens from Mistral La Plateforme via the openai SDK (Mistral is
     OpenAI-compatible). Yields (token: str, done: bool) — same interface as the others.
@@ -440,17 +533,9 @@ async def mistral_stream(messages: list, model: str):
     try:
         # Mistral's base_url already includes /v1 — pass it directly to the SDK.
         client = config._cached_client("openai", api_key, base_url)
-        stream = await client.chat.completions.create(
-            model=model, messages=messages, stream=True,
-        )
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if delta.content:
-                yield delta.content, False
-            if chunk.choices[0].finish_reason:
-                break
+        async for tok, done in _openai_compat_stream("mistral", client, model, messages,
+                                                     usage, want_stream_options=False):
+            yield tok, done
         yield "", True
     except Exception as e:
         yield f"Mistral error: {e}", True
@@ -493,7 +578,7 @@ async def groq_models() -> list[dict]:
         return GROQ_MODELS_STATIC
 
 
-async def groq_stream(messages: list, model: str):
+async def groq_stream(messages: list, model: str, usage: dict | None = None):
     """
     Stream tokens from Groq using the openai SDK (Groq is fully OpenAI-compatible).
     Yields (token: str, done: bool) — same interface as openai_stream.
@@ -510,17 +595,9 @@ async def groq_stream(messages: list, model: str):
 
     try:
         client = config._cached_client("openai", api_key, f"{base_url}/v1")
-        stream = await client.chat.completions.create(
-            model=model, messages=messages, stream=True,
-        )
-        async for chunk in stream:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if delta.content:
-                yield delta.content, False
-            if chunk.choices[0].finish_reason:
-                break
+        async for tok, done in _openai_compat_stream("groq", client, model, messages,
+                                                     usage, want_stream_options=False):
+            yield tok, done
         yield "", True
     except Exception as e:
         err = str(e)
@@ -625,7 +702,7 @@ async def gemini_models() -> list[dict]:
         return GEMINI_MODELS_STATIC
 
 
-async def gemini_stream(messages: list, model: str):
+async def gemini_stream(messages: list, model: str, usage: dict | None = None):
     """
     Stream tokens from Google Gemini using the native google-genai SDK.
     Yields (token: str, done: bool) — same interface as openai_stream / claude_stream.
@@ -648,6 +725,10 @@ async def gemini_stream(messages: list, model: str):
         async for chunk in await client.aio.models.generate_content_stream(
             model=model, contents=contents, config=cfg,
         ):
+            um = getattr(chunk, "usage_metadata", None)
+            if um is not None:   # each chunk carries a snapshot; the last one is the total
+                _sink_usage(usage, getattr(um, "prompt_token_count", None),
+                            getattr(um, "candidates_token_count", None))
             text = getattr(chunk, "text", None)
             if text:
                 yield text, False

@@ -33,7 +33,31 @@ stop_pidfile() {
 }
 
 # ── 1. App ────────────────────────────────────────────────────────────────────
-stop_pidfile "${APP_PID}" "app" || c_info "App was not running."
+# Pidfile first; if that knows nothing, look for OUR app listening on the app
+# port anyway — an instance started by hand (plain `uvicorn …`) has no pidfile,
+# and "App was not running" while it kept the port meant restart.sh silently
+# left the OLD build serving. Only a process whose command line is recognisably
+# this app is ever killed; anything else on the port is left alone.
+stop_port_fallback() {
+  local p cmd
+  p="$(lsof -tnP -iTCP:"${APP_PORT}" -sTCP:LISTEN 2>/dev/null | head -n1 || true)"
+  [ -z "${p}" ] && return 1
+  cmd="$(ps -p "${p}" -o command= 2>/dev/null || true)"
+  if ! printf '%s' "${cmd}" | grep -qE 'uvicorn[^|]*redirecall|redirecall\.main|-m *redirecall'; then
+    c_warn "Port ${APP_PORT} is held by a process that is not RediRecall (pid ${p}) — leaving it."
+    return 1
+  fi
+  c_info "Stopping app found on port ${APP_PORT} (pid ${p}, started outside these scripts)…"
+  kill "${p}" 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    kill -0 "${p}" 2>/dev/null || { c_ok "App stopped."; return 0; }
+    sleep 0.5
+  done
+  c_warn "App did not exit on TERM — sending KILL."
+  kill -9 "${p}" 2>/dev/null || true
+  return 0
+}
+stop_pidfile "${APP_PID}" "app" || stop_port_fallback || c_info "App was not running."
 
 # ── 2. Redis (clean shutdown flushes AOF/RDB) ────────────────────────────────
 if rcli -p "${RPORT}" ping >/dev/null 2>&1; then
