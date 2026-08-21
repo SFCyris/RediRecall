@@ -9,15 +9,18 @@ import shutil
 
 import pytest
 
-from _jsrun import run_node
+from _jsrun import extract_js_function, run_node
 
 _INDEX = pathlib.Path(__file__).resolve().parents[1] / "redirecall" / "index.html"
 
 
 def _fn() -> str:
+    """updateTokenCounter plus _tokenCost, which it calls for the per-turn pricing
+    lookup (the same helper the Analytics token table uses, so the pill and the table
+    can never drift apart on how a turn is priced)."""
     html = _INDEX.read_text(encoding="utf-8")
-    s = html.index("function updateTokenCounter(")
-    return html[s:html.index("\n}", s) + 2]
+    return "\n".join(extract_js_function(html, n) for n in
+                     ("_tokenCost", "updateTokenCounter"))
 
 
 def _run(messages, pricing) -> dict:

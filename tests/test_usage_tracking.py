@@ -66,7 +66,12 @@ class _FakeClient:
 
 
 def _run(coro):
-    return asyncio.new_event_loop().run_until_complete(coro)
+    """Run on a fresh loop and CLOSE it — an unclosed loop leaks a kqueue fd per call."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def test_usage_chunk_after_finish_reason_is_captured():
@@ -161,6 +166,109 @@ def test_record_usage_and_totals_roundtrip(monkeypatch):
     rc.delete(key)
 
 
+@pytest.fixture
+def usage_redis(monkeypatch):
+    """A namespaced tally key on the real Redis, or skip. Never touches the live key.
+
+    A fixture rather than a helper so the client is actually CLOSED afterwards — a bare
+    redis.Redis() per test leaks a socket, and this project has already had one
+    FD-exhaustion incident.
+    """
+    key = f"__rrtest_{os.getpid()}__:usage"
+    monkeypatch.setattr(sessions, "_USAGE_KEY", key)
+    import redis as _redis
+    from conftest import REDIS_HOST, REDIS_PORT, REDIS_DB
+    from redirecall import redis_store
+    try:
+        rc = _redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB,
+                          socket_connect_timeout=2)
+        rc.ping()
+        rc.delete(key)
+    except Exception:
+        pytest.skip("redis not reachable")
+    monkeypatch.setattr(redis_store, "r", lambda: rc)
+    try:
+        yield rc, key
+    finally:
+        try:
+            rc.delete(key)
+        finally:
+            rc.close()
+
+
+def test_cache_write_tokens_reach_the_cumulative_tally(usage_redis):
+    """Claude bills cache CREATION at ~1.25x input, separately from cache reads. The
+    per-turn meta carried it from the start but the cumulative tally silently dropped it,
+    so the all-time cost was under-reported by the most expensive token class there is."""
+    rc, key = usage_redis
+    sessions.record_usage("claude", "sonnet",
+                          {"prompt": 10, "completion": 2, "cached": 4, "cache_write": 7})
+    sessions.record_usage("claude", "sonnet",
+                          {"prompt": 1, "completion": 1, "cache_write": 3})
+    t = sessions.usage_totals()["claude:sonnet"]
+    assert t["cache_write"] == 10, t
+    assert t == {"in": 11, "out": 3, "cached": 4, "cache_write": 10}
+
+
+def test_a_model_name_containing_colons_round_trips(usage_redis):
+    """Fields are '<provider>:<model>:<kind>' and read back by splitting on the LAST
+    colon. Ollama tags and OpenRouter ids carry colons of their own, so a naive split
+    would truncate the model and merge two models' counters into one row."""
+    rc, key = usage_redis
+    sessions.record_usage("ollama", "qwen2.5:7b", {"prompt": 5, "completion": 1})
+    sessions.record_usage("ollama", "qwen2.5:14b", {"prompt": 9, "completion": 2})
+    t = sessions.usage_totals()
+    assert t["ollama:qwen2.5:7b"]["in"] == 5
+    assert t["ollama:qwen2.5:14b"]["in"] == 9
+
+
+def test_clear_usage_zeroes_the_tally_and_survives_a_second_call(usage_redis):
+    rc, key = usage_redis
+    sessions.record_usage("openai", "gpt-4o", {"prompt": 100, "completion": 40})
+    assert sessions.usage_totals()
+    sessions.clear_usage()
+    assert sessions.usage_totals() == {}
+    sessions.clear_usage()          # clearing an already-empty tally must not raise
+    assert sessions.usage_totals() == {}
+    # and the counter still works afterwards — delete must not leave a broken key
+    sessions.record_usage("openai", "gpt-4o", {"prompt": 7, "completion": 1})
+    assert sessions.usage_totals()["openai:gpt-4o"]["in"] == 7
+
+
+def test_usage_endpoints_read_and_clear(usage_redis):
+    """The two routes the Analytics token table drives — exercised through the HTTP
+    router, not by calling the handlers.
+
+    Calling the function objects proved nothing about routing: deleting the
+    @app.delete("/api/usage") decorator outright, or moving it to
+    GET /api/usage/clear, both left this green while the Reset button 404s.
+    """
+    from fastapi.testclient import TestClient
+    from redirecall import appcore
+    rc, key = usage_redis
+    client = TestClient(appcore.app)
+    sessions.record_usage("openai", "gpt-4o", {"prompt": 20, "completion": 5})
+
+    r = client.get("/api/usage")
+    assert r.status_code == 200, f"GET /api/usage -> {r.status_code}"
+    assert r.json()["openai:gpt-4o"]["in"] == 20
+
+    r = client.delete("/api/usage")
+    assert r.status_code == 200, f"DELETE /api/usage -> {r.status_code}"
+    assert r.json() == {"ok": True}
+
+    assert client.get("/api/usage").json() == {}
+
+
+def test_the_usage_routes_are_registered_at_the_paths_the_ui_calls():
+    """The frontend hardcodes these; a rename anywhere else must fail here."""
+    from redirecall import appcore
+    reg = {(getattr(r, "path", None), m)
+           for r in appcore.app.routes for m in getattr(r, "methods", set())}
+    assert ("/api/usage", "GET") in reg
+    assert ("/api/usage", "DELETE") in reg
+
+
 # ── fork endpoint ────────────────────────────────────────────────────────────
 def test_fork_copies_prefix_and_leaves_original(monkeypatch):
     sid = f"__rrtest_{os.getpid()}__fork_src"
@@ -187,26 +295,50 @@ def test_fork_copies_prefix_and_leaves_original(monkeypatch):
 
 
 def test_fork_anchor_survives_client_side_extra_turns(monkeypatch):
-    """The reason the anchor exists: the client keeps aborted answers the server
-    never stored. Anchoring on (role, content, occurrence) must land on the right
-    stored message even though the client's indices are shifted."""
+    """The reason the anchor exists: the client keeps aborted answers the server never
+    stored. Anchoring on (role, content, occurrence) must land on the right STORED message
+    even though the client's indices are shifted.
+
+    The store deliberately contains a DECOY assistant turn before the target, and the
+    target's prefix is shared with a later turn. With a single unique match, dropping the
+    prefix test or the occurrence count changes nothing and the test cannot discriminate
+    anchoring from plain indexing — which is exactly what it exists to prove.
+    """
     sid = f"__rrtest_{os.getpid()}__fork_desync"
-    # server-side store — NO aborted partial in here
-    state._sessions[sid] = [{"role": "user", "content": "q2"},
-                            {"role": "assistant", "content": "a2"},
-                            {"role": "user", "content": "q3"},
-                            {"role": "assistant", "content": "a3"}]
+    state._sessions[sid] = [
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "draft answer"},    # decoy: an earlier assistant
+        {"role": "user", "content": "q2"},
+        {"role": "assistant", "content": "final answer v1"},  # occurrence 1 of "final"
+        {"role": "user", "content": "q3"},
+        {"role": "assistant", "content": "final answer v2"},  # occurrence 2 of "final"
+    ]
     monkeypatch.setattr(sessions, "save_session", lambda s, m: None)
+    made = []
     try:
-        # the client wanted to fork at a2 — with the aborted pair before it, its
-        # local index would have been 3 (which is a3 server-side, the old bug)
+        # occurrence 1 must land on the FIRST "final answer", not the decoy and not v2
         out = routes_misc.api_fork_session(
-            sid, {"role": "assistant", "content_prefix": "a2", "occurrence": 1})
-        forked = state._sessions[out["id"]]
-        assert [m["content"] for m in forked] == ["q2", "a2"], \
-            f"anchor landed on the wrong message: {[m['content'] for m in forked]}"
-        state._sessions.pop(out["id"], None)
+            sid, {"role": "assistant", "content_prefix": "final answer", "occurrence": 1})
+        made.append(out["id"])
+        got = [m["content"] for m in state._sessions[out["id"]]]
+        assert got == ["q1", "draft answer", "q2", "final answer v1"], got
+
+        # occurrence 2 must land on the SECOND — a matcher that ignores the count, or one
+        # that takes the last match, gets this wrong
+        out2 = routes_misc.api_fork_session(
+            sid, {"role": "assistant", "content_prefix": "final answer", "occurrence": 2})
+        made.append(out2["id"])
+        got2 = [m["content"] for m in state._sessions[out2["id"]]]
+        assert got2[-1] == "final answer v2" and len(got2) == 6, got2
+
+        # the decoy is reachable by its own prefix — proving the prefix is really compared
+        out3 = routes_misc.api_fork_session(
+            sid, {"role": "assistant", "content_prefix": "draft", "occurrence": 1})
+        made.append(out3["id"])
+        assert [m["content"] for m in state._sessions[out3["id"]]] == ["q1", "draft answer"]
     finally:
+        for i in made:
+            state._sessions.pop(i, None)
         state._sessions.pop(sid, None)
 
 

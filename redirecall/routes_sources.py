@@ -34,7 +34,7 @@ def _scan_unique_sources(rc: redis.Redis, prefix: str) -> set[str]:
                 src = raw.decode() if isinstance(raw, bytes) else raw
                 if src:
                     sources.add(src)
-    for key in rc.scan_iter(f"{prefix}:chunk:*", count=500):
+    for key in rc.scan_iter(rag.chunk_glob_for_prefix(prefix), count=500):
         batch.append(key)
         if len(batch) >= routes_ingestion._EXPORT_BATCH:
             _drain(batch); batch = []

@@ -48,6 +48,10 @@ from . import config, ingest, rag, rag_admin, state
 
 log = logging.getLogger(__name__)
 
+# How long the crawl teardown waits for the embed worker to flush its last batch. Bounded
+# so a wedged worker cannot hang the `finally` — and with it the whole crawl task — forever.
+_EMBED_DRAIN_TIMEOUT = 30.0
+
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # WEB CRAWLING
@@ -321,9 +325,16 @@ async def crawl_url(
     smart_mode: bool = True,
     min_words: int = 100,
     force_reindex: bool = False,
+    stats: dict | None = None,
 ):
     """
     Parallel BFS web crawler with optional JavaScript rendering.
+
+    ``stats``, when given, is a caller-owned dict this crawl keeps up to date in place
+    with ``discovered`` (URLs the frontier has ever admitted) and ``queued`` (URLs still
+    waiting). A BFS over an unknown site has no total to count towards, so pages-done
+    against pages-discovered is the only honest progress ratio available — the UI shows
+    an indeterminate bar without it whenever max_pages is 0, which is the default.
 
     Architecture
     ------------
@@ -365,8 +376,46 @@ async def crawl_url(
     sem                      = asyncio.Semaphore(max(1, concurrency))
     queue: asyncio.Queue     = asyncio.Queue()
 
+    def _note_frontier() -> None:
+        """Publish the live frontier size into the caller's stats dict.
+
+        len(visited_urls) is the discovered count rather than a separate counter: a URL
+        enters visited_urls exactly once, at the moment it is admitted to the frontier,
+        so the set already IS the tally and cannot drift from it.
+
+        `discovered` is deliberately the count of URLs ADMITTED, not of pages indexed:
+        a URL is admitted before the crawlable-type, already-indexed, robots, empty-text
+        and duplicate-content checks, any of which can end it without an index. Progress
+        must therefore be measured as pages RESOLVED (indexed + skipped + blocked +
+        errored) over discovered — resolved reaches discovered when the crawl drains.
+        Dividing pages_done alone by this number stalls: on an incremental re-crawl where
+        most pages are already indexed, pages_done stays near zero while discovered climbs.
+        `resolved` is published here so a caller does not have to sum four counters and
+        get that wrong.
+        """
+        if stats is not None:
+            stats["discovered"] = len(visited_urls)
+            stats["queued"] = queue.qsize()
+            stats["resolved"] = _resolved["n"]
+
+    # Pages that have reached a terminal state. Counted from the crawler's own progress
+    # callback rather than summed from counters the caller happens to keep, so it is
+    # correct for every caller and can be asserted without one.
+    _resolved = {"n": 0}
+    _TERMINAL_STATUS = ("indexed", "skipped", "blocked", "error")
+    _user_progress_cb = progress_cb
+
+    async def progress_cb(u, status, n=0, err="", count=0):   # noqa: F811 — wraps the arg
+        if status in _TERMINAL_STATUS:
+            _resolved["n"] += 1
+            if stats is not None:
+                stats["resolved"] = _resolved["n"]
+        if _user_progress_cb is not None:
+            await _user_progress_cb(u, status, n, err, count)
+
     visited_urls.add(seed_url)
     queue.put_nowait((seed_url, depth))
+    _note_frontier()
 
     # ── URL-level deduplication across crawl sessions ──────────────────────
     # Load the full indexed-URL set into memory once at crawl start.
@@ -595,6 +644,7 @@ async def crawl_url(
                     log.warning("worker: unhandled exception for %s: %s", page_url, e)
                 finally:
                     queue.task_done()
+                    _note_frontier()   # a page just finished discovering its children
 
         num_workers = min(max(1, concurrency), 50)
         embed_task   = asyncio.create_task(embed_worker())
@@ -603,23 +653,60 @@ async def crawl_url(
         try:
             await queue.join()   # blocks until every queued item has been task_done()
         finally:
+            # Also on the cancel path. _note_frontier otherwise runs only in the worker's
+            # finally, and a worker cancelled while parked on queue.get() never reaches it
+            # — so a cancelled crawl was left advertising a queue it no longer has.
+            _note_frontier()
             for t in worker_tasks:
                 t.cancel()
             await asyncio.gather(*worker_tasks, return_exceptions=True)
 
-        # Signal embed worker to flush remaining chunks and exit
-        await embed_queue.put(None)
-        await embed_task
-
-        # Flush all newly indexed URLs to Redis in a single pipeline
-        if _newly_indexed:
+            # Shutdown belongs in the finally, not after it. Cancelling a crawl makes
+            # queue.join() raise CancelledError, which skipped everything below the
+            # try/finally — so embed_worker's `while True` kept spinning at 10 Hz for
+            # the life of the process, one orphan per cancelled crawl, each pinning its
+            # closure, and the pages already indexed were never recorded.
+            cancelled_during_drain = False
             try:
-                pipe = _crawl_rc.pipeline(transaction=False)
-                for u in _newly_indexed:
-                    pipe.sadd(_indexed_urls_key, u)
-                await asyncio.to_thread(pipe.execute)   # only the round-trip blocks
-            except Exception:
-                pass
+                embed_queue.put_nowait(None)   # unbounded queue: never blocks
+                # Bounded: if the worker wedges, this finally must not wedge with it.
+                await asyncio.wait_for(asyncio.shield(embed_task), timeout=_EMBED_DRAIN_TIMEOUT)
+            except asyncio.CancelledError:
+                # Being torn down while draining. Stop the worker (it catches
+                # CancelledError and flushes first), then RE-RAISE below — swallowing it
+                # here made the crawl task report success and left task.cancelled() False,
+                # so callers could not tell a cancelled crawl from a finished one.
+                cancelled_during_drain = True
+                embed_task.cancel()
+                await asyncio.gather(embed_task, return_exceptions=True)
+            except asyncio.TimeoutError:
+                log.warning("crawl: embed worker did not drain in "
+                            f"{_EMBED_DRAIN_TIMEOUT}s — cancelling it; the last batch may be lost")
+                embed_task.cancel()
+                await asyncio.gather(embed_task, return_exceptions=True)
+            except Exception as e:
+                # A worker failure outside flush()'s own try (progress_cb, append_log, a
+                # loop bug) used to be discarded with no log at all, and the crawl still
+                # reported success.
+                log.warning(f"crawl: embed worker failed during shutdown: {e!r}")
+                embed_task.cancel()
+                await asyncio.gather(embed_task, return_exceptions=True)
+
+            # Flush all newly indexed URLs to Redis in a single pipeline
+            if _newly_indexed:
+                try:
+                    pipe = _crawl_rc.pipeline(transaction=False)
+                    for u in _newly_indexed:
+                        pipe.sadd(_indexed_urls_key, u)
+                    await asyncio.to_thread(pipe.execute)   # only the round-trip blocks
+                except Exception as e:
+                    log.warning(f"crawl: could not record {len(_newly_indexed)} indexed "
+                                f"URLs — they will be re-crawled next time: {e!r}")
+
+            # Cancellation must still propagate: a caller that awaits this task has to be
+            # able to distinguish "cancelled" from "completed".
+            if cancelled_during_drain:
+                raise asyncio.CancelledError
 
     # ── Helpers shared by all browser-based fetch paths ────────────────────
     def _links_from_result(r) -> list[str]:

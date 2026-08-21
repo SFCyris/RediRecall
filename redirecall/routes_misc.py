@@ -137,6 +137,13 @@ def api_usage():
     """All-time provider-reported token usage, per provider:model."""
     return sessions.usage_totals()
 
+
+@appcore.app.delete("/api/usage")
+def api_usage_clear():
+    """Reset the all-time token-usage tally (Analytics → Token Usage → Reset)."""
+    sessions.clear_usage()
+    return {"ok": True}
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # ROUTES — PROMPT TEMPLATES
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

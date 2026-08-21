@@ -25,7 +25,7 @@ try:
 except ImportError:
     _OPENAI_SDK_AVAILABLE = False
 import redis
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 try:
     import fitz          # PyMuPDF — PDF text extraction
@@ -347,23 +347,37 @@ async def api_ollama_status():
         return {"ok": False, "error": str(e)}
 
 
-@appcore.app.get("/api/status/claude")
-async def api_claude_status(key: str | None = None):
+async def _probe_key(request: Request) -> str | None:
+    """A one-off API key to test, taken from the POST body.
+
+    It used to arrive as ``?key=…``. A query string is written to the server's access
+    log, to every proxy log in front of it, and to the browser's own history — so the
+    one endpoint whose whole purpose is handling a credential was the one leaking it.
+    A request body is in none of those. GET keeps working as the no-key health check
+    against the already-configured credential.
+
+    The Settings form pre-fills a saved key's field with _SECRET_SENTINEL (the redacted
+    placeholder from GET /api/config) and the Test button sends whatever is in the field,
+    so the sentinel must fall through to the stored key rather than be tried as one.
     """
-    Verify the Claude API key. Accepts an optional ?key= param so the UI
-    can test an unsaved key without requiring a save-first workflow.
-    """
-    # The Settings form pre-fills an already-saved key's field with
-    # _SECRET_SENTINEL (the redacted placeholder from GET /api/config), and the
-    # Test button sends whatever's in the field. Without this check, testing an
-    # already-saved key would send the literal sentinel string as the API key
-    # instead of falling back to the real one below.
-    if key == config._SECRET_SENTINEL:
-        key = None
+    if request.method != "POST":
+        return None
+    try:
+        payload = await request.json()
+    except Exception:
+        return None
+    key = payload.get("key") if isinstance(payload, dict) else None
+    return None if (not key or key == config._SECRET_SENTINEL) else str(key)
+
+
+@appcore.app.api_route("/api/status/claude", methods=["GET", "POST"])
+async def api_claude_status(request: Request):
+    """Verify the Claude API key. POST {"key": "..."} to test an unsaved one."""
+    key = await _probe_key(request)
     api_key  = key or state._config.get("claude", {}).get("api_key", "")
     base_url = state._config.get("claude", {}).get("base_url", "https://api.anthropic.com").rstrip("/")
     if not api_key:
-        return {"ok": False, "error": "No API key configured"}
+        return {"ok": False, "configured": False, "error": "No API key configured"}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             res = await client.post(
@@ -387,15 +401,14 @@ async def api_claude_status(key: str | None = None):
         return {"ok": False, "error": str(e)}
 
 
-@appcore.app.get("/api/status/openai")
-async def api_openai_status(key: str | None = None):
-    """Verify the OpenAI API key using the native SDK. Accepts optional ?key= for testing unsaved keys."""
-    if key == config._SECRET_SENTINEL:
-        key = None
+@appcore.app.api_route("/api/status/openai", methods=["GET", "POST"])
+async def api_openai_status(request: Request):
+    """Verify the OpenAI API key using the native SDK. POST {"key": "..."} to test an unsaved one."""
+    key = await _probe_key(request)
     api_key  = key or state._config.get("openai", {}).get("api_key", "")
     base_url = state._config.get("openai", {}).get("base_url", "https://api.openai.com").rstrip("/")
     if not api_key:
-        return {"ok": False, "error": "No API key configured"}
+        return {"ok": False, "configured": False, "error": "No API key configured"}
     if not _OPENAI_SDK_AVAILABLE:
         return {"ok": False, "error": "openai package not installed. Run: pip install openai"}
     try:
@@ -406,16 +419,15 @@ async def api_openai_status(key: str | None = None):
         return {"ok": False, "error": str(e)}
 
 
-@appcore.app.get("/api/status/qwen")
-async def api_qwen_status(key: str | None = None):
-    """Verify the Qwen API key. Accepts optional ?key= for testing unsaved keys."""
-    if key == config._SECRET_SENTINEL:
-        key = None
+@appcore.app.api_route("/api/status/qwen", methods=["GET", "POST"])
+async def api_qwen_status(request: Request):
+    """Verify the Qwen API key. POST {"key": "..."} to test an unsaved one."""
+    key = await _probe_key(request)
     api_key  = key or state._config.get("qwen", {}).get("api_key", "")
     base_url = state._config.get("qwen", {}).get("base_url",
                            "https://dashscope.aliyuncs.com/compatible-mode/v1").rstrip("/")
     if not api_key:
-        return {"ok": False, "error": "No API key configured. Get a free key at qwen.ai"}
+        return {"ok": False, "configured": False, "error": "No API key configured. Get a free key at qwen.ai"}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             res = await client.get(
@@ -430,9 +442,9 @@ async def api_qwen_status(key: str | None = None):
         return {"ok": False, "error": str(e)}
 
 
-@appcore.app.get("/api/status/mistral")
-async def api_mistral_status(key: str | None = None, probe: bool = False):
-    """Verify the Mistral API key. Accepts optional ?key= for testing unsaved keys.
+@appcore.app.api_route("/api/status/mistral", methods=["GET", "POST"])
+async def api_mistral_status(request: Request, probe: bool = False):
+    """Verify the Mistral API key. POST {"key": "..."} to test an unsaved one.
     The cheap check is GET /models; some free-tier keys are denied that specific
     endpoint (401) while chat completions work fine, so a bare /models 401 is not
     proof the key itself is invalid. The periodic background poll (checkCloudStatus,
@@ -440,12 +452,11 @@ async def api_mistral_status(key: str | None = None, probe: bool = False):
     ?probe=1 — sent only by the user-initiated Settings "Test" button — confirms a
     /models failure with one minimal real chat-completion call before reporting the
     key as invalid."""
-    if key == config._SECRET_SENTINEL:
-        key = None
+    key = await _probe_key(request)
     api_key  = key or state._config.get("mistral", {}).get("api_key", "")
     base_url = state._config.get("mistral", {}).get("base_url", "https://api.mistral.ai/v1").rstrip("/")
     if not api_key:
-        return {"ok": False, "error": "No API key configured. Get a free key at console.mistral.ai"}
+        return {"ok": False, "configured": False, "error": "No API key configured. Get a free key at console.mistral.ai"}
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             res = await client.get(
@@ -474,15 +485,14 @@ async def api_mistral_status(key: str | None = None, probe: bool = False):
         return {"ok": False, "error": str(e)}
 
 
-@appcore.app.get("/api/status/groq")
-async def api_groq_status(key: str | None = None):
-    """Verify the Groq API key using the openai SDK. Accepts optional ?key= for testing unsaved keys."""
-    if key == config._SECRET_SENTINEL:
-        key = None
+@appcore.app.api_route("/api/status/groq", methods=["GET", "POST"])
+async def api_groq_status(request: Request):
+    """Verify the Groq API key using the openai SDK. POST {"key": "..."} to test an unsaved one."""
+    key = await _probe_key(request)
     api_key  = key or state._config.get("groq", {}).get("api_key", "")
     base_url = state._config.get("groq", {}).get("base_url", "https://api.groq.com/openai").rstrip("/")
     if not api_key:
-        return {"ok": False, "error": "No API key configured. Get a free key at console.groq.com"}
+        return {"ok": False, "configured": False, "error": "No API key configured. Get a free key at console.groq.com"}
     if not _OPENAI_SDK_AVAILABLE:
         return {"ok": False, "error": "openai package not installed. Run: pip install openai"}
     try:
@@ -493,21 +503,20 @@ async def api_groq_status(key: str | None = None):
         return {"ok": False, "error": str(e)}
 
 
-@appcore.app.get("/api/status/gemini")
-async def api_gemini_status(key: str | None = None, probe: bool = False):
-    """Verify the Gemini API key using the native SDK. Accepts optional ?key= for
-    unsaved keys. The cheap check is models.list(); some keys are denied that
+@appcore.app.api_route("/api/status/gemini", methods=["GET", "POST"])
+async def api_gemini_status(request: Request, probe: bool = False):
+    """Verify the Gemini API key using the native SDK. POST {"key": "..."} to test an
+    unsaved one. The cheap check is models.list(); some keys are denied that
     specific method (403 PERMISSION_DENIED) while generateContent still works
     fine, so a bare list() failure is not proof the key itself is invalid. The
     periodic background poll (checkCloudStatus, every 5 min) relies on the cheap
     check alone and accepts that rare imprecision. ?probe=1 — sent only by the
     user-initiated Settings "Test" button — confirms a list() failure with one
     minimal real generateContent call before reporting the key as invalid."""
-    if key == config._SECRET_SENTINEL:
-        key = None
+    key = await _probe_key(request)
     api_key = key or state._config.get("gemini", {}).get("api_key", "")
     if not api_key:
-        return {"ok": False, "error": "No API key configured. Get a free key at aistudio.google.com"}
+        return {"ok": False, "configured": False, "error": "No API key configured. Get a free key at aistudio.google.com"}
     if not _GENAI_AVAILABLE:
         return {"ok": False, "error": "google-genai not installed. Run: pip install google-genai"}
     client = _google_genai.Client(api_key=api_key)

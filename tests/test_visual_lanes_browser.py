@@ -46,6 +46,20 @@ _CANDIDATE_PYTHONS = [
 ]
 _resolved: list = []
 
+def _no_browser():
+    """Skip — or FAIL when CI insists the browser tests must really run.
+
+    A silent skip is indistinguishable from a pass in CI output: the suite would be a
+    no-op with nothing saying so. REDIRECALL_REQUIRE_BROWSER_TESTS=1 makes a missing
+    interpreter a hard failure, so a pipeline can assert these actually executed.
+    """
+    msg = ("no interpreter with playwright installed "
+           "(set REDIRECALL_TEST_PLAYWRIGHT_PYTHON)")
+    if os.environ.get("REDIRECALL_REQUIRE_BROWSER_TESTS") == "1":
+        pytest.fail(msg + " — required because REDIRECALL_REQUIRE_BROWSER_TESTS=1")
+    pytest.skip(msg)
+
+
 
 def _playwright_python():
     if _resolved:
@@ -71,8 +85,7 @@ def _playwright_python():
 def probe():
     py = _playwright_python()
     if py is None:
-        pytest.skip("no interpreter with playwright installed "
-                    "(set REDIRECALL_TEST_PLAYWRIGHT_PYTHON)")
+        _no_browser()
     r = subprocess.run([py, str(_PROBE), str(_INDEX)],
                        capture_output=True, text=True, timeout=600)
     out = (r.stdout or "").strip()

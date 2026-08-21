@@ -6,14 +6,29 @@ This document explains the main settings in the application: what each controls,
 
 ## Table of Contents
 
-1. [Redis Connection](#redis-connection)
-2. [RAG Settings](#rag-settings)
-3. [Semantic Cache Settings](#semantic-cache-settings)
-4. [Provider Settings](#provider-settings)
-5. [General / UI Settings](#general--ui-settings)
-6. [Web Crawler Settings](#web-crawler-settings)
-7. [Prompt Templates & Base Instruction](#prompt-templates--base-instruction)
-8. [Security Settings](#security-settings)
+1. [How this panel saves](#how-this-panel-saves)
+2. [Redis Connection](#redis-connection)
+3. [RAG Settings](#rag-settings)
+4. [Semantic Cache Settings](#semantic-cache-settings)
+5. [Provider Settings](#provider-settings)
+6. [General / UI Settings](#general--ui-settings)
+7. [Web Crawler Settings](#web-crawler-settings)
+8. [Scheduled Re-crawl](#scheduled-re-crawl)
+9. [Watched Folders](#watched-folders)
+10. [Token Usage & Pricing](#token-usage--pricing)
+11. [Prompt Templates & Base Instruction](#prompt-templates--base-instruction)
+12. [Security Settings](#security-settings)
+
+---
+
+## How this panel saves
+
+Two kinds of control live here:
+
+- **Staged until you press 💾 Save Settings** — everything on this page unless noted below, plus the selected provider.
+- **Applied the moment you change them** — RAG instances (create, delete, enable, reset) and Redis endpoints. Those sections say so in place.
+
+Editing a staged control marks the panel **Unsaved changes**; closing it with Cancel, Escape or a click outside then asks before discarding. Switching provider takes effect in the browser immediately but is only remembered once you save.
 
 ---
 
@@ -371,6 +386,7 @@ Found in **Settings → Web Sources** when configuring a URL crawl.
 - **What it does:** Caps the total number of pages fetched in a single crawl. The crawl stops as soon as this limit is reached, regardless of depth.
 - **0 = unlimited:** Risky for large sites at depth 2+. Always set a cap when crawling the open web.
 - **Practical values:** 50–200 pages covers most documentation sites; the Redis `llms.txt` preset typically fetches 80–150 pages.
+- **Progress readout:** with a cap set, the bar fills towards it (`25 of 100 pages`). With `0`, the bar shows pages *resolved* — indexed, skipped, blocked or failed — against pages *discovered so far* (`23 of 47 pages found so far · 18 indexed · 29 queued`). Both numbers grow as the crawl finds more links; a discovered page can end without being indexed if it was already indexed, was duplicate content, or is disallowed by `robots.txt`.
 
 ### Respect robots.txt
 - **Default:** On
@@ -407,6 +423,18 @@ Found in **Settings → Web Sources** when configuring a URL crawl.
 
 ---
 
+## Scheduled Re-crawl
+
+*(Settings → Web Sources → Scheduled Re-crawl; config key `recrawl` and `scheduled_sources`)*
+
+- **Enable scheduled re-crawl:** global on/off toggle (`recrawl.enabled`, default off). Saved with **Save Settings**.
+- **Every N min:** `recrawl.interval_minutes`, default 60. Saved with **Save Settings**.
+- **Schedule Current URL:** adds whatever is in the crawl URL box to the schedule, against the instance and depth selected beside it. Re-adding an existing URL replaces its entry. Applied immediately — it does not wait for Save Settings.
+- **Re-crawl All Now:** runs every scheduled source at once in the background, ignoring the interval.
+- **Behaviour:** the scheduler wakes once a minute and re-crawls a source when `interval_minutes` has elapsed since its last run. Pages whose content has not changed are skipped, so re-crawling an unchanged site is cheap. Removing a source only cancels the timer — pages already indexed from it stay in the knowledge base.
+
+---
+
 ## Watched Folders
 
 *(Settings → Web Sources → Watched Folders; config key `watch_folders`)*
@@ -421,7 +449,8 @@ Found in **Settings → Web Sources** when configuring a URL crawl.
 ## Token Usage & Pricing
 
 - The topbar shows this session's tokens: **↑ input · ↓ output · Σ total**. Exact numbers are the provider's own reported billed counts (stored with each answer); a `~` marks a session where at least one turn had to be estimated (≈ characters ÷ 4). Measured input counts the *full prompt the provider processed* — system prompt, re-sent history, retrieved context — so it grows with conversation length.
-- **Cost pill** (config key `pricing`, config.json only): USD per 1M tokens per model id, fields `in`, `out`, optional `cached_in` (provider cache re-reads) and `cache_write`. Ships with approximate defaults for a few common paid models — **edit to match your actual bill**. A model with no entry contributes $0 and the figure gains a trailing `+` to mark it partial. `GET /api/usage` returns the all-time tally per provider and model.
+- **Cost pill** (config key `pricing`, config.json only): USD per 1M tokens per model id, fields `in`, `out`, optional `cached_in` (provider cache re-reads) and `cache_write`. Ships with approximate defaults for a few common paid models — **edit to match your actual bill**. A model with no entry contributes $0 to the figure.
+- **All-time totals** live in **Analytics → 💰 Token Usage**: every provider and model since the counter was last reset, with fresh input, cache reads, cache writes and output as separate columns, ordered by cost. Models missing from `pricing` are listed by name so a partial cost total is never mistaken for a complete one. `GET /api/usage` returns the same tally; `DELETE /api/usage` (the card's **Reset tally** button) zeroes it without touching your conversations.
 
 ---
 

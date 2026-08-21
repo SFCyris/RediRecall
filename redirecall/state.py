@@ -6,6 +6,7 @@ module-qualified so runtime rebinding and test monkeypatching stay live.
 """
 import logging
 import asyncio
+import pathlib
 import os
 from collections import OrderedDict
 from typing import Any, Optional
@@ -72,6 +73,64 @@ _crawl_gates: dict[str, asyncio.Event] = {}
 # Active crawl state — survives browser refresh/reconnect.
 # Key: url.  Value: {instance, pages_done, chunks, errors, blocked, start_ts, done}
 _active_crawls: dict[str, dict] = {}
+
+# Active file-ingest jobs, the disk-file twin of the crawl state above. A file ingest
+# used to be invisible the moment its SSE stream was lost: no way to see one running,
+# and no way to stop one — closing the tab left it indexing with nobody watching.
+# Key: job id.  Value: {job, instance, total, index, ok, errors, files, done, cancelled}
+_active_ingests: dict[str, dict] = {}
+# Job id -> cancel flag, SET to ask the ingest loop to stop before the next file.
+# Separate from the state dict above because that one is returned as JSON.
+_ingest_cancels: dict[str, asyncio.Event] = {}
+# How many finished jobs to keep so a reconnecting UI can still read the outcome.
+_INGEST_HISTORY = 20
+
+
+# A job registered this long ago whose generator never ran will never run: the response
+# body was dropped before the first chunk. Generous enough that a slow client cannot be
+# mistaken for one.
+_INGEST_START_GRACE = 60.0
+
+
+def reap_finished_ingests(now: float | None = None) -> int:
+    """Drop finished jobs beyond the keep-window, and any job that never started.
+
+    Finished jobs are kept deliberately — a browser that reconnects after the stream
+    ended still needs to learn how it ended — but keeping every one of them for the
+    life of the process is a leak, which is what the crawl equivalent above does.
+
+    The never-started case is a different leak with a worse symptom. Registration happens
+    before the streaming response is returned; everything that clears a job lives in the
+    generator's ``finally``. A client that disconnects before pulling the first chunk
+    therefore leaves a job that is registered, not done, and unreachable — and the UI
+    attaches to the first not-done job it finds, so that phantom freezes the ingest panel
+    for good. Reaping it also removes the uploads it left behind.
+    """
+    import time as _time
+    now = _time.time() if now is None else now
+    dropped = 0
+
+    for j, st in list(_active_ingests.items()):
+        if st.get("done") or st.get("started"):
+            continue
+        if now - float(st.get("registered_at", now)) < _INGEST_START_GRACE:
+            continue
+        for name in st.get("upload_paths", []):
+            try:
+                pathlib.Path(name).unlink(missing_ok=True)
+            except OSError:
+                pass
+        _active_ingests.pop(j, None)
+        _ingest_cancels.pop(j, None)
+        dropped += 1
+
+    finished = [j for j, st in _active_ingests.items() if st.get("done")]
+    stale = finished[:-_INGEST_HISTORY] if len(finished) > _INGEST_HISTORY else []
+    for j in stale:
+        _active_ingests.pop(j, None)
+        _ingest_cancels.pop(j, None)
+        dropped += 1
+    return dropped
 
 # Per-instance RAG query statistics (in-memory, reset on restart).
 # Keys: instance name.  Values: counters used to derive hit-rate and avg score.

@@ -121,23 +121,30 @@ def _tool_result_to_markdown(tool_calls: list) -> str:
         name = fn.get("name", "tool")
         args = fn.get("arguments", {})
 
-        # Check if any argument value looks like an image
+        # Check if any argument value looks like an image. The image branches used to
+        # `continue`, which does not end a for/else — so the else fired every time and
+        # the raw JSON (including the whole base64 data URI) was appended after the
+        # image markdown on every call. Track the hit explicitly instead.
+        found_image = False
         for val in (args.values() if isinstance(args, dict) else []):
             val = str(val).strip()
             # Data URI
             if val.startswith("data:image/"):
                 parts.append(f"\n![{name} result]({val})\n")
+                found_image = True
                 continue
             # Local file path with image extension
             p = Path(val)
             if p.suffix.lower() in _IMG_EXTS and p.is_file():
                 parts.append(f"\n![{name} result](/api/files/image?path={val})\n")
+                found_image = True
                 continue
             # HTTP URL pointing to an image
             if val.startswith(("http://", "https://")) and Path(val).suffix.lower() in _IMG_EXTS:
                 parts.append(f"\n![{name} result]({val})\n")
+                found_image = True
                 continue
-        else:
+        if not found_image:
             # No image found — emit the raw tool call as a code block
             parts.append(f"\n```json\n[tool: {name}] {json.dumps(args, ensure_ascii=False)}\n```\n")
     return "".join(parts)
@@ -385,16 +392,37 @@ async def _openai_compat_stream(provider_key: str, client, model: str, messages:
         # here must surface as itself — permanently dropping include_usage over a
         # transient failure would silently kill usage reporting until restart.
         msg = str(e).lower()
-        rejected = ("stream_options" in msg
-                    or getattr(e, "status_code", None) == 400
-                    or "badrequest" in type(e).__name__.lower())
-        if "stream_options" not in kwargs or not rejected:
+        if "stream_options" not in kwargs:
             raise
-        log.warning(f"{provider_key}: endpoint rejected stream_options "
-                    f"({e}) — usage reporting off for this provider until restart")
-        _NO_STREAM_OPTIONS.add(provider_key)
+        # The message has to implicate the parameter. Treating a bare 400 as a rejection
+        # was the bug: a mistyped model name, an over-long context and a malformed image
+        # are all 400s, and each one permanently disabled token counting for the whole
+        # provider — the exact feature the user asked to be able to track.
+        names_param = "stream_options" in msg or "include_usage" in msg
+        status_400  = (getattr(e, "status_code", None) == 400
+                       or "badrequest" in type(e).__name__.lower())
+        if not (names_param or status_400):
+            raise
         kwargs.pop("stream_options")
-        stream = await client.chat.completions.create(**kwargs)
+        try:
+            stream = await client.chat.completions.create(**kwargs)
+        except Exception as retry_err:
+            # The retry failed too, so the 400 was about something else — surface the
+            # ORIGINAL error, which describes the user's actual problem. Chain the retry
+            # error rather than discarding it with `from None`: when the two differ (a 400
+            # followed by a 429) the second one was vanishing silently, leaving no trace of
+            # a rate limit anywhere.
+            if type(retry_err) is not type(e) or str(retry_err) != str(e):
+                log.warning(f"{provider_key}: retry without stream_options also failed "
+                            f"({retry_err!r}); reporting the original error")
+            raise e from retry_err
+        if names_param:
+            # Only a message that actually named the parameter is evidence the endpoint
+            # does not support it. A bare 400 that happened to succeed on retry is not,
+            # so that case retries each turn rather than poisoning the process.
+            log.warning(f"{provider_key}: endpoint rejected stream_options "
+                        f"({e}) — usage reporting off for this provider until restart")
+            _NO_STREAM_OPTIONS.add(provider_key)
     # After finish_reason the only expected trailing chunk is the usage one; a
     # misbehaving OpenAI-compatible proxy that then holds the connection open
     # would otherwise hang the composer forever (the finish_reason `break` used

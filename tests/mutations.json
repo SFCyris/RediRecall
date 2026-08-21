@@ -1127,16 +1127,16 @@
   {
     "id": "M139_vector_alias_removed",
     "file": "redirecall/index.html",
-    "find": "const _GEO_TYPE_ALIAS={vector:'arrow'};",
-    "replace": "const _GEO_TYPE_ALIAS={};",
+    "find": "const _GEO_TYPE_ALIAS={vector:'arrow',rect:'polygon',rectangle:'polygon'};",
+    "replace": "const _GEO_TYPE_ALIAS={rect:'polygon',rectangle:'polygon'};",
     "defect": "vector no longer aliased to arrow -> JSXGraph 'Unknown element type vector' blanks the figure",
     "expect": "test_vector_is_supported_and_aliased_to_arrow"
   },
   {
     "id": "M140_relational_type_readvertised",
     "file": "redirecall/index.html",
-    "find": "'sector','midpoint','arrow','vector','bisector']);",
-    "replace": "'sector','midpoint','perpendicular','arrow','vector','bisector']);",
+    "find": "  'sector','midpoint','arrow','vector','bisector','rect','rectangle']);",
+    "replace": "  'sector','midpoint','perpendicular','arrow','vector','bisector','rect','rectangle']);",
     "defect": "a reference-only relational type is advertised again although it can never build data-only",
     "expect": "test_reference_only_relational_types_are_not_advertised"
   },
@@ -1191,10 +1191,10 @@
   {
     "id": "M147_mermaid_labels_not_wrapped",
     "file": "redirecall/index.html",
-    "find": "    return '[\"'+NL(inner.replace(/\"([^\"]*)\"/g,'“$1”').replace(/\"/g,'”'))+'\"]';",
+    "find": "    return push('[\"'+NL(foldQuotes(inner))+'\"]');",
     "replace": "    return m;",
     "defect": "flowchart labels not wrapped -> unquoted specials like () and \" break mermaid, blanking the diagram",
-    "expect": "test_unquoted_label_with_quotes_is_wrapped_and_inner_quotes_curled"
+    "expect": "test_a_node_label_pipe_does_not_swallow_a_real_edge_label test_a_word_inside_a_label_is_not_read_as_a_node_id test_already_quoted_label_is_left_alone"
   },
   {
     "id": "M148_mermaid_transform_not_wired",
@@ -1218,7 +1218,7 @@
     "find": "    if(/^[/\\\\][\\s\\S]*[/\\\\]$/.test(t))return m;",
     "replace": "    if(false)return m;",
     "defect": "parallelogram/trapezoid [/x/] shapes wrapped as rectangles, delimiters become literal text",
-    "expect": "test_parallelogram_and_trapezoid_shapes_are_preserved"
+    "expect": "test_a_padded_compound_shape_is_left_alone"
   },
   {
     "id": "M151_mermaid_gate_ignores_leading_comment",
@@ -1331,5 +1331,846 @@
     "replace": "          ;",
     "defect": "click-zoom never reveals the Reset zoom button -> the user has no way back to the original view",
     "expect": "test_click_zoom_reveals_the_reset_button"
+  },
+  {
+    "id": "M165_pipe_anchor_single_char",
+    "file": "redirecall/index.html",
+    "find": "  s=s.replace(/((?:-{2,}|-\\.-*|={2,})[>xo]?)\\|([^|\\n]+)\\|/g,(m,link,inner)=>{",
+    "replace": "  s=s.replace(/([-.=>ox])\\|([^|\\n]+)\\|/g,(m,link,inner)=>{",
+    "defect": "pipe wrap anchored on a single arrow-tail char -> the 'o' of Ratio| and 'x' of Max| match, mis-pairing two node labels across the arrow and corrupting both",
+    "expect": "test_pipes_inside_two_unquoted_node_labels_are_not_paired_into_an_edge_label"
+  },
+  {
+    "id": "M166_placeholder_restore_single_pass",
+    "file": "redirecall/index.html",
+    "find": "  for(let pass=0;pass<held.length+1&&/￿\\d+￿/.test(s);pass++)\n    s=s.replace(/￿(\\d+)￿/g,(m,i)=>held[+i]??m);\n  return s;",
+    "replace": "  return s.replace(/￿(\\d+)￿/g,(m,i)=>held[+i]??m);",
+    "defect": "single restore pass leaves a placeholder nested inside a pushed value unresolved -> raw U+FFFF reaches mermaid",
+    "expect": "test_no_placeholder_sentinel_survives_into_the_output"
+  },
+  {
+    "id": "M167_sentinel_not_stripped_from_source",
+    "file": "redirecall/index.html",
+    "find": "  let s=String(src).replace(/￿/g,'');",
+    "replace": "  let s=String(src);",
+    "defect": "a U+FFFF present in the model's own output is read as a placeholder and swapped for another label's content",
+    "expect": "test_no_placeholder_sentinel_survives_into_the_output"
+  },
+  {
+    "id": "M168_stadium_demoted_to_round",
+    "file": "redirecall/index.html",
+    "find": "  s=s.replace(shape(String.raw`\\(\\[`,  String.raw`\\]\\)`,  String.raw`[^\\[\\]\\n]*?`),wrap('([', '])'));",
+    "replace": "",
+    "defect": "without the stadium pass the round matcher claims A([x]) and emits a ROUND node whose label literally reads [x]",
+    "expect": "test_stadium_is_not_demoted_to_a_round_node"
+  },
+  {
+    "id": "M169_subgraph_title_uses_node_glyph",
+    "file": "redirecall/index.html",
+    "find": "  s=s.replace(/(\\bsubgraph\\s+)\"([^\"\\n]*)\"/gi,(m,p,i)=>push(p+'\"'+EL(i)+'\"'));",
+    "replace": "  s=s.replace(/(\\bsubgraph\\s+)\"([^\"\\n]*)\"/gi,(m,p,i)=>push(p+'\"'+NL(i)+'\"'));",
+    "defect": "subgraph titles decode #lt; to a real '<'; using the node fullwidth glyph there shows a look-alike instead",
+    "expect": "test_subgraph_title_uses_the_entity_like_other_edge_contexts"
+  },
+  {
+    "id": "M170_cache_write_not_tallied",
+    "file": "redirecall/sessions.py",
+    "find": "        if usage.get(\"cache_write\"):   # Claude cache-creation tokens, billed ~1.25x input\n            pipe.hincrby(_USAGE_KEY, f\"{pfx}:cache_write\", int(usage[\"cache_write\"]))",
+    "replace": "        pass",
+    "defect": "cache-creation tokens dropped from the cumulative tally -> all-time cost under-reports the most expensive token class",
+    "expect": "test_cache_write_tokens_reach_the_cumulative_tally"
+  },
+  {
+    "id": "M171_clear_usage_noop",
+    "file": "redirecall/sessions.py",
+    "find": "        redis_store.r().delete(_USAGE_KEY)",
+    "replace": "        pass",
+    "defect": "Reset tally silently does nothing -> the counter keeps growing after the user resets it",
+    "expect": "test_clear_usage_zeroes_the_tally_and_survives_a_second_call"
+  },
+  {
+    "id": "M172_focus_trap_includes_docked_panel",
+    "file": "redirecall/index.html",
+    "find": "  const dlg=_openModalEls()[0];   // modal layers only — never the docked pinned panel",
+    "replace": "  const dlg=_openDialogEls()[0];",
+    "defect": "Tab is captured by the non-modal pinned panel -> keyboard trap, composer unreachable (WCAG 2.1.2)",
+    "expect": "test_a_docked_panel_does_not_capture_tab"
+  },
+  {
+    "id": "M173_dialog_autofocuses_destructive_action",
+    "file": "redirecall/index.html",
+    "find": "    const safe=items.find(el=>el.classList.contains('btn-secondary'))\n             ||items.find(el=>/^(cancel|close|keep|not now)\\b/i.test((el.textContent||'').trim()))\n             ||items.find(el=>!el.classList.contains('btn-danger')&&!el.classList.contains('btn-primary'))\n             ||items[0];\n    safe.focus();",
+    "replace": "    items[0].focus();",
+    "defect": "the confirm dialog focuses Export & Delete / Clear Chunks -> Enter destroys the instance the dialog exists to protect",
+    "expect": "test_a_dialog_does_not_autofocus_its_destructive_action"
+  },
+  {
+    "id": "M174_search_escape_closes_two_layers",
+    "file": "redirecall/index.html",
+    "find": "onkeydown=\"if(event.key==='Escape'){event.stopPropagation();closeSearch();}\"",
+    "replace": "onkeydown=\"if(event.key==='Escape')closeSearch()\"",
+    "defect": "Escape in the search box closes search AND the layer beneath it",
+    "expect": "test_escape_inside_the_search_box_closes_exactly_one_layer"
+  },
+  {
+    "id": "M175_smil_animates_under_reduced_motion",
+    "file": "redirecall/index.html",
+    "find": "  const anim = s => still ? '' : s;",
+    "replace": "  const anim = s => s;",
+    "defect": "the streaming avatar keeps animating under prefers-reduced-motion (SMIL is unreachable by CSS) — WCAG 2.2.2",
+    "expect": "test_reduced_motion_also_stops_the_smil_avatar"
+  },
+  {
+    "id": "M176_endpoint_name_in_js_string",
+    "file": "redirecall/index.html",
+    "find": "      <button class=\"btn btn-danger btn-sm\" data-ep-del=\"${escHtml(ep.name)}\"",
+    "replace": "      <button class=\"btn btn-danger btn-sm\" onclick=\"deleteRedisEndpoint('${escHtml(ep.name)}')\" data-x=\"${escHtml(ep.name)}\"",
+    "defect": "endpoint name interpolated into a JS string context -> an endpoint named ');alert(1);// executes",
+    "expect": "test_endpoint_buttons_do_not_interpolate_a_name_into_a_js_string"
+  },
+  {
+    "id": "M177_crawl_cancel_swallowed",
+    "file": "redirecall/crawler.py",
+    "find": "                raise asyncio.CancelledError",
+    "replace": "                pass",
+    "defect": "a cancelled crawl reports success and task.cancelled() is False",
+    "expect": "test_crawl_teardown_propagates_cancellation_and_logs_failures"
+  },
+  {
+    "id": "M178_import_skips_vector_width_check",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "            if emb_bytes and expect_bytes and len(emb_bytes) != expect_bytes:",
+    "replace": "            if False:",
+    "defect": "a vector of the wrong width is imported and silently rejected by the index -> instance holds all its data and finds nothing",
+    "expect": "test_import_re_embeds_a_vector_whose_width_does_not_match_the_index"
+  },
+  {
+    "id": "M179_retry_error_discarded",
+    "file": "redirecall/providers.py",
+    "find": "            raise e from retry_err",
+    "replace": "            raise e from None",
+    "defect": "the retry error (e.g. a 429 after a 400) is discarded with no trace anywhere",
+    "expect": "test_a_failed_retry_keeps_the_original_error_and_chains_the_second"
+  },
+  {
+    "id": "M180_export_remainder_reads_legacy_field",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "            emb_raw = d.get(field) or d.get(b\"embedding\", b\"\")   # legacy rows predate the rename",
+    "replace": "            emb_raw = d.get(b\"embedding\", b\"\")",
+    "defect": "the export remainder reads the legacy vector field -> the final partial batch exports empty vectors",
+    "expect": "test_export_emits_a_vector_for_every_chunk_including_the_last_partial_batch"
+  },
+  {
+    "id": "M181_replace_from_accepts_bool",
+    "file": "redirecall/routes_chat.py",
+    "find": "    if isinstance(value, bool) or not isinstance(value, int):\n        return False",
+    "replace": "    if not isinstance(value, (int, bool)):\n        return False",
+    "defect": "a JSON true is accepted as index 1 -> regenerate deletes the whole conversation",
+    "expect": "test_replace_from_rejects_a_boolean"
+  },
+  {
+    "id": "M182_prefix_glob_not_escaped",
+    "file": "redirecall/rag.py",
+    "find": "    return f\"{prefix.translate(_GLOB_META)}:chunk:*\"",
+    "replace": "    return f\"{prefix}:chunk:*\"",
+    "defect": "the prefix-based glob helper stops escaping -> export/source scans widen across instances",
+    "expect": "test_the_prefix_glob_helper_escapes_too"
+  },
+  {
+    "id": "M183_ingest_stream_url_not_normalised",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "    url = crawler._strip_fragment(url)",
+    "replace": "    pass",
+    "defect": "the streaming crawl registers its gate under the raw URL -> pause/cancel silently no-op",
+    "expect": "test_pause_and_cancel_key_on_the_same_url_the_crawler_does"
+  },
+  {
+    "id": "M184_cache_write_not_priced",
+    "file": "redirecall/index.html",
+    "find": "       + cw/1e6*(p.cache_write??(p.in||0)*1.25) + compTok/1e6*(p.out||0);",
+    "replace": "       + compTok/1e6*(p.out||0);",
+    "defect": "cache-creation tokens are not priced -> the most expensive token class contributes $0 to the cost",
+    "expect": "test_cache_write_tokens_are_priced"
+  },
+  {
+    "id": "M185_directive_hold_removed",
+    "file": "redirecall/index.html",
+    "find": "  s=s.replace(/%%\\{[\\s\\S]*?\\}%%/g,m=>push(m));\n",
+    "replace": "",
+    "defect": "a multi-line %%{init}%% directive is rewritten -> rgb(1,2,3) becomes rgb(\"1,2,3\") and the JSON breaks",
+    "expect": "test_init_directive_survives_and_the_diagram_is_still_transformed"
+  },
+  {
+    "id": "M186_click_style_hold_removed",
+    "file": "redirecall/index.html",
+    "find": "  s=s.replace(/^[ \\t]*(?:click|style|classDef|linkStyle)[^\\n]*/gim,m=>push(m));\n",
+    "replace": "",
+    "defect": "click/style statements are treated as labels -> click A call myFn(1,2) becomes myFn(\"1,2\")",
+    "expect": "test_directive_statements_keep_their_syntax_parens"
+  },
+  {
+    "id": "M187_icon_buttons_unnamed",
+    "file": "redirecall/index.html",
+    "find": "<button id=\"toggle-sidebar\" onclick=\"toggleSidebar()\" title=\"Toggle sidebar\" aria-label=\"Toggle sidebar\">☰</button>",
+    "replace": "<button id=\"toggle-sidebar\" onclick=\"toggleSidebar()\">☰</button>",
+    "defect": "an icon-only button loses its accessible name -> announced as an unnamed button",
+    "expect": "test_icon_only_buttons_have_accessible_names"
+  },
+  {
+    "id": "M188_csv_omits_token_rows",
+    "file": "redirecall/index.html",
+    "find": "    rows.push([],['Provider','Model','Input','Cached','Cache write','Output','Cost USD']);",
+    "replace": "    if(false){}",
+    "defect": "the analytics CSV loses its token/cost rows -> the one table worth reconciling against a bill cannot leave the app",
+    "expect": "test_token_rows_are_included_with_a_header"
+  },
+  {
+    "id": "M189_csv_fields_not_quoted",
+    "file": "redirecall/index.html",
+    "find": "  const csv=rows.map(r=>r.map(v=>`\"${String(v??'').replace(/\"/g,'\"\"')}\"`).join(',')).join('\\n');",
+    "replace": "  const csv=rows.map(r=>r.join(',')).join('\\n');",
+    "defect": "a model id containing a comma splits into an extra CSV column and shifts every later value",
+    "expect": "test_a_model_name_containing_a_comma_does_not_shift_the_columns"
+  },
+  {
+    "id": "M190_form_control_labels_unlinked",
+    "file": "redirecall/index.html",
+    "find": "<label for=\"s-chunk-size\">",
+    "replace": "<label>",
+    "defect": "a slider loses its programmatic label -> announced as an unnamed control",
+    "expect": "test_no_form_control_is_left_without_an_accessible_name"
+  },
+  {
+    "id": "M191_overlay_escape_double_closes",
+    "file": "redirecall/index.html",
+    "find": "      if(_isOpen(document.getElementById('img-lightbox'))\n         ||_isOpen(document.getElementById('viz-max-overlay')))return;\n",
+    "replace": "",
+    "defect": "Escape closes the lightbox AND the layer underneath it in one press",
+    "expect": "test_escape_over_a_fullscreen_overlay_closes_only_the_overlay"
+  },
+  {
+    "id": "M192_fork_anchor_ignores_prefix",
+    "file": "redirecall/routes_misc.py",
+    "find": "        if m.get(\"role\") == role and c.startswith(prefix):",
+    "replace": "        if m.get(\"role\") == role:",
+    "defect": "fork anchors on position rather than content -> forks at the wrong message after an aborted answer",
+    "expect": "test_fork_anchor_survives_client_side_extra_turns"
+  },
+  {
+    "id": "M193_fork_shares_message_objects",
+    "file": "redirecall/routes_misc.py",
+    "find": "    state._sessions[new_sid] = [copy.deepcopy(m) for m in msgs[:at + 1]]",
+    "replace": "    state._sessions[new_sid] = msgs[:at + 1]",
+    "defect": "the fork shares message objects with the original -> editing one mutates the other",
+    "expect": "test_fork_copies_prefix_and_leaves_original"
+  },
+  {
+    "id": "M194_crawl_progress_only_when_capped",
+    "file": "redirecall/index.html",
+    "find": "} else if(found>0){",
+    "replace": "} else if(false){",
+    "defect": "crawl progress ignores the discovered count, so the default (max_pages=0) crawl shows an indeterminate bar start to finish",
+    "expect": "test_crawl_progress_states_both_numbers_and_which_total_it_is_using test_crawl_progress_tracks_pages_done_against_pages_discovered test_reattaching_shows_the_crawls_measured_progress_not_a_placeholder"
+  },
+  {
+    "id": "M195_reattach_hardcoded_half",
+    "file": "redirecall/index.html",
+    "find": "  bar.style.background='';\n  _renderCrawlProgress(c);",
+    "replace": "  bar.style.background='';\n  bar.style.width='50%';",
+    "defect": "re-attaching to a running crawl paints a literal 50% that means nothing",
+    "expect": "test_reattaching_shows_the_crawls_measured_progress_not_a_placeholder"
+  },
+  {
+    "id": "M196_reattach_clobbers_url_box",
+    "file": "redirecall/index.html",
+    "find": "  _crawlUrl=_crawlKeyOf(c.url)||null;\n  _crawlPaused=!!c.paused;",
+    "replace": "  document.getElementById('crawl-url').value=c.url||'';\n  _crawlUrl=_crawlKeyOf(c.url)||null;\n  _crawlPaused=!!c.paused;",
+    "defect": "re-attaching overwrites the URL the user is part-way through typing",
+    "expect": "test_reattaching_does_not_overwrite_the_url_the_user_is_typing"
+  },
+  {
+    "id": "M197_reattach_ignores_paused",
+    "file": "redirecall/index.html",
+    "find": "  _crawlPaused=!!c.paused;",
+    "replace": "  _crawlPaused=false;",
+    "defect": "re-attaching shows a paused crawl as running, so the button offers to pause it again",
+    "expect": "test_reattaching_to_a_paused_crawl_shows_it_as_paused"
+  },
+  {
+    "id": "M198_other_crawls_hidden",
+    "file": "redirecall/index.html",
+    "find": "  const others=(running||[]).filter(c=>_crawlKeyOf(c.url)!==_crawlUrl);",
+    "replace": "  const others=[];",
+    "defect": "a second running crawl is unreachable from the panel",
+    "expect": "test_other_running_crawls_are_reachable_not_silently_dropped"
+  },
+  {
+    "id": "M199_pause_reads_url_box",
+    "file": "redirecall/index.html",
+    "find": "async function togglePauseCrawl(){\n  const url=_crawlUrl;",
+    "replace": "async function togglePauseCrawl(){\n  const url=document.getElementById('crawl-url').value.trim();",
+    "defect": "Pause acts on the URL input rather than the attached crawl, so editing that field pauses nothing",
+    "expect": "test_pause_and_cancel_target_the_attached_crawl_not_the_url_box"
+  },
+  {
+    "id": "M200_cancel_reads_url_box",
+    "file": "redirecall/index.html",
+    "find": "async function cancelCrawl(){\n  const url=_crawlUrl;",
+    "replace": "async function cancelCrawl(){\n  const url=document.getElementById('crawl-url').value.trim();",
+    "defect": "Cancel acts on the URL input rather than the attached crawl, so the crawl runs on after the UI says stopped",
+    "expect": "test_pause_and_cancel_target_the_attached_crawl_not_the_url_box"
+  },
+  {
+    "id": "M201_ingest_cancel_hidden",
+    "file": "redirecall/index.html",
+    "find": "  const btn=document.getElementById('ingest-cancel-btn');\n  if(btn){btn.style.display='inline-flex';btn.disabled=false;}\n}",
+    "replace": "  const btn=document.getElementById('ingest-cancel-btn');\n  if(btn){btn.style.display='none';btn.disabled=false;}\n}",
+    "defect": "a running file ingest offers no cancel control",
+    "expect": "test_a_running_ingest_is_found_on_reopening_and_can_be_cancelled"
+  },
+  {
+    "id": "M202_settings_dirty_never_true",
+    "file": "redirecall/index.html",
+    "find": "  if(!_settingsTouched||_settingsBaseline===null)return false;",
+    "replace": "  return false;\n  if(!_settingsTouched||_settingsBaseline===null)return false;",
+    "defect": "closing Settings discards staged edits without asking",
+    "expect": "test_closing_settings_with_staged_edits_asks_before_discarding"
+  },
+  {
+    "id": "M203_first_run_gate_off",
+    "file": "redirecall/index.html",
+    "find": "  const ready=_providerReady();",
+    "replace": "  const ready=true;",
+    "defect": "the welcome screen offers suggestion chips that cannot work when no model is configured",
+    "expect": "test_with_no_model_the_welcome_screen_offers_setup_instead_of_chips"
+  },
+  {
+    "id": "M204_status_drops_providers",
+    "file": "redirecall/index.html",
+    "find": "  ['mistral','Mistral'],['groq','Groq'],['gemini','Gemini'],\n];",
+    "replace": "];",
+    "defect": "System Status covers only some providers",
+    "expect": "test_the_provider_dots_are_actually_painted test_the_status_tab_reports_all_seven_providers"
+  },
+  {
+    "id": "M205_provider_dots_unpainted",
+    "file": "redirecall/index.html",
+    "find": "    el.style.background=s.ok?'var(--green)':(configured?'var(--red)':'var(--text3)');",
+    "replace": "    /* dot left unpainted */",
+    "defect": "the per-provider dots are never painted, so all seven stay at the not-configured grey",
+    "expect": "test_the_provider_dots_are_actually_painted"
+  },
+  {
+    "id": "M206_recrawl_not_saved",
+    "file": "redirecall/index.html",
+    "find": "    recrawl:{enabled:getCheck('s-recrawl-enabled'),\n             interval_minutes:parseInt(getVal('s-recrawl-interval'))||60},",
+    "replace": "",
+    "defect": "the scheduled-re-crawl toggle and interval are omitted from the saved config, so both controls are inert",
+    "expect": "test_recrawl_can_be_triggered_now_and_its_toggle_is_actually_saved"
+  },
+  {
+    "id": "M207_recrawl_blank_instance",
+    "file": "redirecall/index.html",
+    "find": "body:JSON.stringify({url,instance:instance||'default',depth})",
+    "replace": "body:JSON.stringify({url,instance,depth})",
+    "defect": "scheduling before the instance list loads stores the URL against an instance no crawl writes to",
+    "expect": "test_scheduling_a_url_posts_the_instance_and_depth_beside_it"
+  },
+  {
+    "id": "M208_error_toast_expires",
+    "file": "redirecall/index.html",
+    "find": "const _TOAST_MS={success:3000,info:3000,warning:6000,error:0};",
+    "replace": "const _TOAST_MS={success:3000,info:3000,warning:3000,error:3000};",
+    "defect": "an error message self-destructs after three seconds",
+    "expect": "test_a_persistent_toast_can_be_dismissed test_an_error_toast_outlives_the_old_three_second_expiry"
+  },
+  {
+    "id": "M209_toast_not_dismissable",
+    "file": "redirecall/index.html",
+    "find": "    +`<button class=\"toast-close\" aria-label=\"Dismiss this message\" title=\"Dismiss\">✕</button>`;",
+    "replace": "    ;",
+    "defect": "a message that never expires has no dismiss control, so it covers the app for good",
+    "expect": "test_a_persistent_toast_can_be_dismissed"
+  },
+  {
+    "id": "M210_no_notification_log",
+    "file": "redirecall/index.html",
+    "find": "  _toastLog.push({ts:Date.now(),type,msg:String(msg)});",
+    "replace": "",
+    "defect": "messages are not recorded, so an error cannot be read after it has gone",
+    "expect": "test_every_message_is_recoverable_from_the_notification_log"
+  },
+  {
+    "id": "M211_cmd_f_hijacked",
+    "file": "redirecall/index.html",
+    "find": "    if(mod&&e.shiftKey&&(e.key==='f'||e.key==='F')){e.preventDefault();openSearch();}",
+    "replace": "    if(mod&&e.key==='f'){e.preventDefault();openSearch();}",
+    "defect": "the browser's own find is intercepted and replaced with a weaker search",
+    "expect": "test_plain_cmd_f_is_left_to_the_browser test_shift_cmd_f_opens_the_app_search"
+  },
+  {
+    "id": "M212_search_no_count",
+    "file": "redirecall/index.html",
+    "find": "  countEl.textContent=hits.length\n    ? `${hits.length} match${hits.length===1?'':'es'}${all?` in ${new Set(hits.map(h=>h.id)).size} conversation(s)`:''}`\n    : 'no matches';",
+    "replace": "  countEl.textContent='';",
+    "defect": "search reports no match count",
+    "expect": "test_search_reaches_retrieved_source_text_and_other_conversations test_search_reports_how_many_matches_it_found"
+  },
+  {
+    "id": "M213_search_current_session_only",
+    "file": "redirecall/index.html",
+    "find": "  let ids=[S.sessionId];\n  if(all){",
+    "replace": "  let ids=[S.sessionId];\n  if(false){",
+    "defect": "search cannot reach any conversation but the current one",
+    "expect": "test_search_reaches_retrieved_source_text_and_other_conversations"
+  },
+  {
+    "id": "M214_search_skips_chunks",
+    "file": "redirecall/index.html",
+    "find": "      if(withChunks)(m.meta?.chunks||[]).forEach(c=>{",
+    "replace": "      if(false)(m.meta?.chunks||[]).forEach(c=>{",
+    "defect": "search cannot reach retrieved source text",
+    "expect": "test_search_reaches_retrieved_source_text_and_other_conversations test_search_reports_how_many_matches_it_found"
+  },
+  {
+    "id": "M215_btn_ghost_undefined",
+    "file": "redirecall/index.html",
+    "find": ".btn-ghost{background:transparent;color:var(--text2);border:1px solid transparent}",
+    "replace": "",
+    "defect": "a button class referenced by a dialog is never defined, so that button renders unstyled",
+    "expect": "test_btn_ghost_is_a_real_rule_not_an_inherited_default"
+  },
+  {
+    "id": "M216_inspector_labels_by_position",
+    "file": "redirecall/index.html",
+    "find": "'Cosine similarity to your question'}\">#${c.n} ${(rel(c)*100).toFixed(1)}%",
+    "replace": "'Cosine similarity to your question'}\">#${i+1} ${(rel(c)*100).toFixed(1)}%",
+    "defect": "the sources panel numbers a chunk by its position on screen, so [n] in the answer and #n in the panel can differ",
+    "expect": "test_the_inspector_labels_a_chunk_with_the_number_the_answer_cites"
+  },
+  {
+    "id": "M217_citations_inert",
+    "file": "redirecall/index.html",
+    "find": "    _linkCitations(el,msgId,chunks.length);",
+    "replace": "",
+    "defect": "the [n] markers in an answer are inert text with no route to the source",
+    "expect": "test_a_bracketed_number_inside_code_is_not_turned_into_a_citation test_a_citation_marker_opens_the_source_it_refers_to"
+  },
+  {
+    "id": "M218_citations_rewrite_code",
+    "file": "redirecall/index.html",
+    "find": ".closest('pre,code,a,.cite-ref,.rag-inspector,.see-also')",
+    "replace": ".closest('a,.cite-ref,.rag-inspector,.see-also')",
+    "defect": "a bracketed number inside a code sample is turned into a citation button",
+    "expect": "test_a_bracketed_number_inside_code_is_not_turned_into_a_citation"
+  },
+  {
+    "id": "M219_crawler_frontier_stat",
+    "file": "redirecall/crawler.py",
+    "find": "            stats[\"discovered\"] = len(visited_urls)",
+    "replace": "            stats[\"discovered\"] = 1",
+    "defect": "the crawler reports a frontier size unrelated to what it has discovered",
+    "expect": "test_a_crawl_reports_how_many_urls_it_has_discovered"
+  },
+  {
+    "id": "M220_citation_stamp_dropped",
+    "file": "redirecall/rag.py",
+    "find": "        c[\"n\"] = i",
+    "replace": "        pass",
+    "defect": "chunks are not stamped with the citation number, so the stored turn cannot line [n] up with its source",
+    "expect": "test_number_chunks_stamps_the_position_the_prompt_will_show test_the_prompt_numbers_match_the_stamp_not_the_list_position"
+  },
+  {
+    "id": "M221_stored_turn_drops_n",
+    "file": "redirecall/sessions.py",
+    "find": "            \"n\":         c.get(\"n\", i),",
+    "replace": "",
+    "defect": "the stored-turn projection drops the citation number",
+    "expect": "test_a_stored_turn_carries_the_citation_number test_a_turn_stored_before_the_stamp_existed_still_gets_numbers"
+  },
+  {
+    "id": "M222_no_configured_flag",
+    "file": "redirecall/routes_settings.py",
+    "find": "{\"ok\": False, \"configured\": False, \"error\": \"No API key",
+    "replace": "{\"ok\": False, \"error\": \"No API key",
+    "defect": "a keyless provider is indistinguishable from a failing one except by its error prose",
+    "expect": "test_a_keyless_provider_reports_itself_unconfigured",
+    "sites": 6
+  },
+  {
+    "id": "M223_ingest_cancel_ignored",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "                if cancel.is_set():\n                    break",
+    "replace": "                if False:\n                    break",
+    "defect": "the ingest loop never checks its cancel flag, so cancelling indexes every remaining file anyway",
+    "expect": "test_cancelling_stops_before_the_next_file_and_keeps_the_ones_already_done"
+  },
+  {
+    "id": "M224_ingest_job_unannounced",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "            yield f\"data: {json.dumps({'job': job, 'total': len(saved)})}\\n\\n\"",
+    "replace": "            pass",
+    "defect": "the ingest stream never sends its job id, so there is nothing to cancel by",
+    "expect": "test_an_ingest_announces_a_job_id_and_appears_in_the_active_list"
+  },
+  {
+    "id": "M225_ingest_history_unbounded",
+    "file": "redirecall/state.py",
+    "find": "    stale = finished[:-_INGEST_HISTORY] if len(finished) > _INGEST_HISTORY else []",
+    "replace": "    stale = []",
+    "defect": "finished ingest jobs are kept for the life of the process",
+    "expect": "test_reap_finished_ingests_keeps_recent_outcomes_and_drops_the_rest"
+  },
+  {
+    "id": "M226_ingest_cancel_lies",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "    if ev is None:\n        raise HTTPException(404, \"No active ingest with that id\")",
+    "replace": "    if ev is None:\n        return {\"ok\": True}",
+    "defect": "cancelling an ingest that is not running reports success",
+    "expect": "test_cancelling_an_ingest_that_is_not_running_is_a_404_not_a_silent_ok"
+  },
+  {
+    "id": "M227_citations_never_linked_live",
+    "file": "redirecall/index.html",
+    "find": "    _linkCitations(el,id,_citationCount(id));\n",
+    "replace": "",
+    "defect": "the [n] markers are linked only where the chunks arrive, which on a live answer is before the first token — so they stay inert on every real turn",
+    "expect": "test_citations_are_linked_on_a_live_streamed_answer test_finalising_twice_leaves_exactly_one_button_per_marker"
+  },
+  {
+    "id": "M228_version_switch_drops_citations",
+    "file": "redirecall/index.html",
+    "find": "  _linkCitations(el,msgId,_citationCount(msgId));\n  renderVersionSwitcher(msgId,versions,idx);",
+    "replace": "  renderVersionSwitcher(msgId,versions,idx);",
+    "defect": "stepping between regenerated versions rewrites the bubble and leaves the citation markers inert",
+    "expect": "test_stepping_between_regenerated_versions_keeps_citations_live"
+  },
+  {
+    "id": "M229_citation_count_ignores_stored_turn",
+    "file": "redirecall/index.html",
+    "find": "  const msgs=S.sessions[S.sessionId]?.messages||[];\n  return (msgs.find(m=>m.meta?.id===msgId)?.meta?.chunks||[]).length;",
+    "replace": "  return 0;",
+    "defect": "the source count is read only from the live side-channel meta, which is deleted once the turn lands — so a later re-link finds nothing to link",
+    "expect": "test_stepping_between_regenerated_versions_keeps_citations_live"
+  },
+  {
+    "id": "M230_citation_relink_nests_buttons",
+    "file": "redirecall/index.html",
+    "find": ".closest('pre,code,a,.cite-ref,.rag-inspector,.see-also')",
+    "replace": ".closest('pre,code,a,.rag-inspector,.see-also')",
+    "defect": "a second linking pass reads the marker inside the button it already made and nests another button in it",
+    "expect": "test_linking_citations_twice_is_idempotent"
+  },
+  {
+    "id": "M231_paren_shape_unbounded",
+    "file": "redirecall/index.html",
+    "find": "  let _paren=String.raw`[^()\\n]*`;\n  for(let d=0;d<3;d++)_paren=String.raw`(?:[^()\\n]|\\(`+_paren+String.raw`\\))*`;\n  const paren=_paren+'?';",
+    "replace": "  const paren=String.raw`(?:[^\\n]|\\((?:[^\\n]|\\((?:[^\\n])*\\))*\\))*?`;",
+    "defect": "the paren-shape pattern nests an unbounded quantifier, so a malformed diagram hangs the tab",
+    "expect": "test_deeply_nested_parens_in_a_shape_label_are_rescued test_every_shape_normalises_to_its_own_quoted_form"
+  },
+  {
+    "id": "M232_paren_shape_backtracks",
+    "file": "redirecall/index.html",
+    "find": "  let _paren=String.raw`[^()\\n]*`;\n  for(let d=0;d<3;d++)_paren=String.raw`(?:[^()\\n]|\\(`+_paren+String.raw`\\))*`;\n  const paren=_paren+'?';",
+    "replace": "  const paren=String.raw`(?:[^()\\n]*|\\([^()\\n]*\\))*?`;",
+    "defect": "the paren-shape pattern's first alternative can match empty — the classic nested-quantifier blowup — so a malformed diagram hangs the tab",
+    "expect": "test_deeply_nested_parens_in_a_shape_label_are_rescued"
+  },
+  {
+    "id": "M233_toast_repeats_pile_up",
+    "file": "redirecall/index.html",
+    "find": "  const dup=[...c.querySelectorAll('.toast')].find(\n    el=>el.dataset.toastMsg===String(msg)&&el.dataset.toastType===type);",
+    "replace": "  const dup=null;",
+    "defect": "an error raised many times over stacks identical never-expiring toasts, each needing its own dismissal",
+    "expect": "test_a_repeated_error_collapses_into_one_counted_toast"
+  },
+  {
+    "id": "M234_rectangle_label_unheld",
+    "file": "redirecall/index.html",
+    "find": "    return push('[\"'+NL(foldQuotes(inner))+'\"]');",
+    "replace": "    return '[\"'+NL(foldQuotes(inner))+'\"]';",
+    "defect": "a rectangle label is returned unprotected, so a later pass reads the '--' inside it as a link and splits the label through its own middle",
+    "expect": "test_an_unquoted_rectangle_label_containing_a_link_token_survives"
+  },
+  {
+    "id": "M235_node_id_matches_inside_label",
+    "file": "redirecall/index.html",
+    "find": "  const ID=String.raw`(^|[^\\w￿\\[\\](){}\"])([A-Za-z0-9_]+)`;",
+    "replace": "  const ID=String.raw`(^|[^\\w￿])([A-Za-z0-9_]+)`;",
+    "defect": "a word inside a label is read as a node id, so A[cost(usd)] is rewritten to A[\"cost(\"usd\")\"] and stops rendering",
+    "expect": "test_a_word_inside_a_label_is_not_read_as_a_node_id"
+  },
+  {
+    "id": "M236_chips_hidden_attr_only",
+    "file": "redirecall/index.html",
+    "find": ".suggestion-chips[hidden]{display:none}",
+    "replace": "",
+    "defect": "the suggestion chips are hidden by an attribute a display:flex rule overrides, so they stay on screen and clickable with no model configured",
+    "expect": "test_the_suggestion_chips_are_actually_hidden_when_no_model_is_available"
+  },
+  {
+    "id": "M237_cancel_aborts_any_stream",
+    "file": "redirecall/index.html",
+    "find": "  if(_crawlAbort&&_crawlStreamUrl===url){_crawlAbort.abort();_crawlAbort=null;_crawlStreamUrl=null;}",
+    "replace": "  if(_crawlAbort){_crawlAbort.abort();_crawlAbort=null;_crawlStreamUrl=null;}",
+    "defect": "Cancel aborts this tab's SSE stream whichever crawl the panel is attached to",
+    "expect": "test_cancelling_an_adopted_crawl_does_not_kill_this_tabs_own_stream"
+  },
+  {
+    "id": "M238_crawl_poll_never_stops",
+    "file": "redirecall/index.html",
+    "find": "      _stopCrawlTimers();\n      _crawlUrl=null;_crawlPaused=false;_renderAttached([]);",
+    "replace": "      _crawlUrl=null;_crawlPaused=false;_renderAttached([]);",
+    "defect": "the crawl poll keeps hitting the server once a second after its crawl is gone",
+    "expect": "test_the_crawl_poll_stops_instead_of_running_for_the_life_of_the_page"
+  },
+  {
+    "id": "M239_poll_survives_close",
+    "file": "redirecall/index.html",
+    "find": "  if(_crawlPollTimer){clearInterval(_crawlPollTimer);_crawlPollTimer=null;}\n  _stopIngestPoll();\n  document.getElementById('settings-overlay').classList.remove('open');",
+    "replace": "  document.getElementById('settings-overlay').classList.remove('open');",
+    "defect": "closing Settings leaves its polls running behind a hidden dialog",
+    "expect": "test_the_crawl_poll_stops_instead_of_running_for_the_life_of_the_page"
+  },
+  {
+    "id": "M240_tab_click_loads_nothing",
+    "file": "redirecall/index.html",
+    "find": "  try{ _TAB_ONENTER[tab]?.(); }catch(e){ console.warn('tab '+tab+' failed to load',e); }",
+    "replace": "",
+    "defect": "entering a settings tab by clicking its button loads none of its data",
+    "expect": "test_an_adopted_ingest_keeps_up_with_the_job_and_reports_how_it_ended test_every_settings_tab_loads_when_its_button_is_clicked test_the_crawl_poll_stops_instead_of_running_for_the_life_of_the_page"
+  },
+  {
+    "id": "M241_provider_switch_not_dirty",
+    "file": "redirecall/index.html",
+    "find": "  _markSettingsEdited();\n  const label=",
+    "replace": "  const label=",
+    "defect": "switching provider changes what Save Settings posts without marking the panel dirty, so closing it discards the change silently",
+    "expect": "test_switching_provider_counts_as_an_unsaved_change"
+  },
+  {
+    "id": "M242_settings_focus_on_export",
+    "file": "redirecall/index.html",
+    "find": "    if(!_SAFE_BUTTON_DIALOGS.includes(id)){",
+    "replace": "    if(false){",
+    "defect": "opening Settings puts keyboard focus on Export Config, so Enter downloads every stored API key",
+    "expect": "test_opening_settings_does_not_park_enter_on_export_config"
+  },
+  {
+    "id": "M243_toast_stack_unbounded",
+    "file": "redirecall/index.html",
+    "find": "  for(const old of [...c.querySelectorAll('.toast')].slice(0,-_TOAST_MAX_VISIBLE))old.remove();",
+    "replace": "",
+    "defect": "a run of never-expiring errors grows past the top of the viewport where the toasts cannot be reached",
+    "expect": "test_a_run_of_distinct_errors_does_not_grow_without_bound"
+  },
+  {
+    "id": "M244_crawl_key_keeps_fragment",
+    "file": "redirecall/index.html",
+    "find": "const _crawlKeyOf=u=>String(u||'').split('#')[0];",
+    "replace": "const _crawlKeyOf=u=>String(u||'');",
+    "defect": "the client tracks a crawl by a URL the server strips the fragment from, so every comparison fails",
+    "expect": "test_a_seed_url_with_a_fragment_still_matches_its_own_crawl"
+  },
+  {
+    "id": "M245_ingest_panel_never_refreshes",
+    "file": "redirecall/index.html",
+    "find": "  _ingestPollTimer=setInterval(async()=>{",
+    "replace": "  if(0)_ingestPollTimer=setInterval(async()=>{",
+    "defect": "an adopted ingest paints one snapshot and holds it after the job has finished",
+    "expect": "test_an_adopted_ingest_keeps_up_with_the_job_and_reports_how_it_ended"
+  },
+  {
+    "id": "M246_ingest_name_double_encoded",
+    "file": "redirecall/index.html",
+    "find": "    `Indexing ${j.current||''} (${(j.index|0)+1}/${j.total|0})`",
+    "replace": "    `Indexing ${escHtml(j.current||'')} (${(j.index|0)+1}/${j.total|0})`",
+    "defect": "a filename is HTML-escaped into textContent, so Q&A shows as Q&amp;A",
+    "expect": "test_a_filename_with_an_ampersand_is_not_double_encoded"
+  },
+  {
+    "id": "M247_search_refetches_per_key",
+    "file": "redirecall/index.html",
+    "find": "  if(!_hydrating.has(id))\n    _hydrating.set(id, _hydrateQuiet(id).finally(()=>_hydrating.delete(id)));\n  return _hydrating.get(id);",
+    "replace": "  return _hydrateQuiet(id);",
+    "defect": "overlapping searches each re-fetch every conversation instead of sharing the work",
+    "expect": "test_typing_does_not_refetch_every_conversation_once_per_character"
+  },
+  {
+    "id": "M248_progress_divides_by_indexed",
+    "file": "redirecall/index.html",
+    "find": "    pct=Math.min(98,Math.round(resolved/Math.max(found,1)*100));",
+    "replace": "    pct=Math.min(98,Math.round(done/Math.max(found,1)*100));",
+    "defect": "progress divides pages indexed by pages discovered, so an incremental re-crawl shows a bar that never moves",
+    "expect": "test_progress_counts_pages_resolved_not_pages_indexed"
+  },
+  {
+    "id": "M249_failed_file_counted_ok",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "                    status = result.get(\"status\", \"ok\")\n                    if status == \"ok\":\n                        st[\"ok\"] += 1\n                    else:\n                        st[\"errors\"] += 1",
+    "replace": "                    status = result.get(\"status\", \"ok\")\n                    st[\"ok\"] += 1",
+    "defect": "a file the indexer reports as failed is tallied as a success",
+    "expect": "test_a_file_that_fails_to_index_is_counted_as_an_error_not_a_success"
+  },
+  {
+    "id": "M250_unstarted_job_immortal",
+    "file": "redirecall/state.py",
+    "find": "        if st.get(\"done\") or st.get(\"started\"):\n            continue",
+    "replace": "        if True:\n            continue",
+    "defect": "an ingest whose stream never began is never cleared, and the UI attaches to that phantom for good",
+    "expect": "test_a_job_whose_stream_never_starts_is_expired_rather_than_left_immortal"
+  },
+  {
+    "id": "M251_streaming_upload_uncapped",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "        if len(blob) > config._MAX_UPLOAD_BYTES:\n            for done_path, _ in saved:\n                _unlink_quietly(done_path)",
+    "replace": "        if False:\n            for done_path, _ in saved:\n                _unlink_quietly(done_path)",
+    "defect": "the upload size limit is not enforced on the route the UI actually uses",
+    "expect": "test_the_streaming_upload_route_enforces_the_same_size_cap_as_its_twin"
+  },
+  {
+    "id": "M252_route_withholds_stats",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "                stats=_ns_state._active_crawls.get(url),\n",
+    "replace": "",
+    "defect": "the crawl route never hands the crawler a stats dict, so the API reports a frontier of zero",
+    "expect": "test_the_crawl_route_publishes_the_crawlers_own_frontier_to_the_api"
+  },
+  {
+    "id": "M253_resolved_not_counted",
+    "file": "redirecall/crawler.py",
+    "find": "            _resolved[\"n\"] += 1",
+    "replace": "            _resolved[\"n\"] += 0",
+    "defect": "the crawler does not count the pages it has resolved, so the progress bar has no numerator",
+    "expect": "test_a_crawl_counts_the_pages_it_has_resolved"
+  },
+  {
+    "id": "M254_no_text_ingest_route",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "@appcore.app.post(\"/api/rag/{instance}/ingest/text\")",
+    "replace": "@appcore.app.post(\"/api/rag/{instance}/ingest/text-DISABLED\")",
+    "defect": "there is no way to index text that did not come from a file or a crawl, so an answer worth keeping cannot be kept",
+    "expect": "test_a_saved_answer_must_be_attributable test_saving_text_is_bounded_by_the_upload_limit"
+  },
+  {
+    "id": "M255_saved_text_unattributable",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "    if not source:\n        # Chunks with no source are unattributable",
+    "replace": "    if False:\n        # Chunks with no source are unattributable",
+    "defect": "text can be indexed with no source, making those chunks impossible to attribute or to delete short of resetting the instance",
+    "expect": "test_a_saved_answer_must_be_attributable"
+  },
+  {
+    "id": "M256_saved_text_uncapped",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "    if size > config._MAX_UPLOAD_BYTES:",
+    "replace": "    if False:",
+    "defect": "the text-ingest route has no size limit, unlike every other ingest route",
+    "expect": "test_saving_text_is_bounded_by_the_upload_limit"
+  },
+  {
+    "id": "M257_duplicate_save_reported_as_new",
+    "file": "redirecall/routes_ingestion.py",
+    "find": "            \"chunks\": chunks, \"duplicate\": chunks == 0}",
+    "replace": "            \"chunks\": chunks, \"duplicate\": False}",
+    "defect": "re-saving unchanged text reports a successful save of nothing",
+    "expect": "test_saving_text_makes_it_a_findable_deletable_document"
+  },
+  {
+    "id": "M258_keep_dialog_edit_discarded",
+    "file": "redirecall/index.html",
+    "find": "  const body=(getVal('sv-answer')||'').trim();",
+    "replace": "  const body=_answerForSaving(0).answer||'x';",
+    "defect": "the review dialog's edits are discarded and the original answer is indexed instead",
+    "expect": "test_what_is_saved_is_the_edited_text_not_the_original"
+  },
+  {
+    "id": "M259_kept_answer_loses_its_question",
+    "file": "redirecall/index.html",
+    "find": "  const text=(question?`Q: ${question}\\n\\nA: ${body}`:body)",
+    "replace": "  const text=(body)",
+    "defect": "a kept answer is stored without the question, losing the wording a later search matches on",
+    "expect": "test_a_kept_answer_is_stored_with_its_question_and_its_provenance"
+  },
+  {
+    "id": "M260_kept_answer_loses_provenance",
+    "file": "redirecall/index.html",
+    "find": "            +(getCheck('sv-sources')?_provenanceBlock(chunks):'');",
+    "replace": "            +'';",
+    "defect": "a kept answer is stored without the sources it cited, so it reads later as original source material",
+    "expect": "test_a_kept_answer_is_stored_with_its_question_and_its_provenance"
+  },
+  {
+    "id": "M261_kept_answer_unlabelled",
+    "file": "redirecall/index.html",
+    "find": "  const source=`answer://${_isoDay()} ${title||'saved answer'}`;",
+    "replace": "  const source=`${title||'saved answer'}`;",
+    "defect": "a kept answer is stored under a label that does not mark it as model output",
+    "expect": "test_a_kept_answer_is_labelled_as_an_answer_and_dated"
+  },
+  {
+    "id": "M262_saved_instance_not_created",
+    "file": "redirecall/index.html",
+    "find": "    if(!(S.ragInstances||[]).some(r=>r.name===instance)){",
+    "replace": "    if(false){",
+    "defect": "saving into an instance that does not exist yet builds an index with no metadata",
+    "expect": "test_the_dedicated_instance_is_created_on_first_use_only"
+  },
+  {
+    "id": "M263_saved_answer_wrong_endpoint",
+    "file": "redirecall/index.html",
+    "find": "    const ep=(S.ragInstances||[]).find(r=>r.name===instance)?.redis_endpoint||'default';\n    const r=await fetch(`/api/rag/${encodeURIComponent(instance)}/ingest/text`\n                       +`?endpoint=${encodeURIComponent(ep)}`,{",
+    "replace": "    const r=await fetch(`/api/rag/${encodeURIComponent(instance)}/ingest/text`,{",
+    "defect": "a kept answer is written to the default Redis rather than the endpoint its instance lives on, landing in an index nothing queries",
+    "expect": "test_a_kept_answer_is_written_to_the_endpoint_its_instance_lives_on test_the_dedicated_instance_is_created_on_first_use_only"
+  },
+  {
+    "id": "M264_timeline_lane_skips_repair",
+    "file": "redirecall/index.html",
+    "find": "      await RICH_LANES.mermaid.draw(out,_timelineSafeColons(body),uid);",
+    "replace": "      await RICH_LANES.mermaid.draw(out,body,uid);",
+    "defect": "the timeline lane renders the source as written, so a clock time in a period makes the whole diagram unrenderable",
+    "expect": "test_the_timeline_lane_repairs_colons_before_it_renders"
+  },
+  {
+    "id": "M265_timeline_period_colon_kept",
+    "file": "redirecall/index.html",
+    "find": "    return head.replace(/:/g,'#58;')+(sep<0?'':line.slice(sep));",
+    "replace": "    return head+(sep<0?'':line.slice(sep));",
+    "defect": "a colon inside a timeline period is left as written, which mermaid's lexer rejects",
+    "expect": "test_a_clock_time_in_a_timeline_period_is_escaped test_a_colon_after_the_separator_is_left_alone test_a_colon_in_a_section_label_is_escaped"
+  },
+  {
+    "id": "M266_timeline_separator_misfound",
+    "file": "redirecall/index.html",
+    "find": "    const sep=line.search(/:(?=\\s|$)/);        // the period/event separator, if any",
+    "replace": "    const sep=line.indexOf(':');        // the period/event separator, if any",
+    "defect": "the period/event separator is taken as the first colon rather than the first colon followed by whitespace, so a clock time is mistaken for it",
+    "expect": "test_a_clock_time_in_a_timeline_period_is_escaped test_a_colon_after_the_separator_is_left_alone test_a_colon_in_a_section_label_is_escaped"
+  },
+  {
+    "id": "M267_timeline_title_rewritten",
+    "file": "redirecall/index.html",
+    "find": "    if(/^\\s*(?:timeline|title)\\b/i.test(line))return line;",
+    "replace": "    if(/^\\s*(?:timeline)\\b/i.test(line))return line;",
+    "defect": "a colon in a timeline title is rewritten to an entity, which the title renders verbatim so the reader sees '#58;'",
+    "expect": "test_a_colon_in_a_title_is_left_alone_even_without_a_following_space"
+  },
+  {
+    "id": "M268_timeline_acc_lines_exempted",
+    "file": "redirecall/index.html",
+    "find": "    if(/^\\s*(?:timeline|title)\\b/i.test(line))return line;",
+    "replace": "    if(/^\\s*(?:timeline|title|acc_title|acc_descr)\\b/i.test(line))return line;",
+    "defect": "acc_title and acc_descr are exempted alongside title — they read the same and do not behave the same, so a clock time in one leaves the diagram unrenderable",
+    "expect": "test_the_accessibility_lines_are_repaired_despite_looking_like_titles"
+  },
+  {
+    "id": "M269_timeline_section_exempted",
+    "file": "redirecall/index.html",
+    "find": "    if(/^\\s*(?:timeline|title)\\b/i.test(line))return line;",
+    "replace": "    if(/^\\s*(?:timeline|title|section)\\b/i.test(line))return line;",
+    "defect": "section is exempted alongside title, but a colon in a section label is a parse error",
+    "expect": "test_a_colon_in_a_section_label_is_escaped"
   }
 ]

@@ -122,6 +122,11 @@ If it shows red, go to the **Redis** tab and update the host/port to match your 
 
 ## Step 5 — Configure a language model
 
+Until a provider has a usable model, the welcome screen says so and links straight to the
+two places that fix it — it will not offer prompts that cannot run.
+
+![The welcome screen with no model configured](screenshots/features/first-run.png)
+
 Open **Settings → Providers**. Seven providers are available — pick one to start.
 
 ![Settings → Providers tab listing Ollama, Claude, OpenAI, Qwen, Mistral, Groq, and Gemini](screenshots/tutorial/05-providers.png)
@@ -205,6 +210,12 @@ RAG (Retrieval-Augmented Generation) lets the model answer questions using your 
 2. Select `my-docs` from the **Target Instance** dropdown
 3. Drag a `.txt`, `.pdf`, or `.csv` file onto the upload zone (or click to browse)
 4. Watch the progress bar — it shows per-file chunk counts in real time
+5. **✕ Cancel** stops after the file being indexed; anything already indexed is kept
+
+> **First run only:** before the first file is indexed the panel says the embedding model
+> is downloading (about 90 MB). That happens once — later ingests start straight away.
+> If you close the tab mid-ingest, reopening **Settings → RAG** re-attaches to the job
+> still running on the server.
 
 ### From the web (Redis docs preset)
 
@@ -213,9 +224,29 @@ RAG (Retrieval-Augmented Generation) lets the model answer questions using your 
 3. Leave **Smart mode** checked (httpx-first, fast)
 4. Click **🕷 Start Crawl** and watch pages ingest in real time with a live pages/sec rate
 
+The progress bar reads `23 of 47 pages found so far · 18 indexed · 29 queued`. With
+**Max Pages** left at `0` it counts pages *resolved* — indexed, skipped, blocked or failed
+— against the pages the crawler has *discovered*, both of which grow as it finds more
+links. A page can be discovered and then skipped: already indexed, duplicate content, or
+disallowed by `robots.txt`. Set a page limit and the bar fills towards that instead. **⏸ Pause** holds between pages and keeps everything
+indexed so far; **✕ Cancel** stops for good. Both act on the crawl named above the bar, so
+you can start typing the next URL without disturbing the one that is running.
+
+![The crawl progress panel — pages indexed against pages discovered, the crawl being tracked, and any others running](screenshots/tutorial/08c-crawl-progress.png)
+
 ![Settings → Web Sources — crawl a site or an llms.txt manifest into a knowledge base](screenshots/tutorial/08-web-sources.png)
 
 The `llms.txt` manifest lists the Redis documentation pages so the crawler can fetch them directly. Throughput depends on your network, the embedding model, and your hardware.
+
+### Keeping a site up to date
+
+Under **Scheduled Re-crawl** on the same tab, **＋ Schedule Current URL** puts the URL in the
+box on a timer, against the instance and depth beside it. Turn on **Enable scheduled
+re-crawl**, set the interval, and click **Save Settings** — the scheduler re-crawls each
+source when its interval has elapsed, skipping pages that have not changed. **⟳ Re-crawl All
+Now** runs every scheduled source immediately.
+
+![Settings → Web Sources → Scheduled Re-crawl — URLs on a timer, with the instance, depth and last run](screenshots/tutorial/08b-recrawl-schedule.png)
 
 ### Crawl modes explained
 
@@ -245,11 +276,49 @@ After the response, look for the **📚 N matched chunks** badge. Click it to se
 ## Step 10 — Explore the RAG inspector
 
 Expand the chunk inspector on any RAG response. Each chunk shows:
+- **#n** — the number the answer cites it by. Click a `[2]` marker in the answer to open
+  source `#2` and highlight it
 - **Score** — cosine similarity (0–1, higher is better)
 - **Source** — file name or URL
 - **Text** — the exact passage injected into the LLM prompt
 
 If chunks have low scores (< 0.5), the retrieval may be struggling. See [SETTINGS.md](SETTINGS.md) for tuning guidance.
+
+---
+
+## Step 10b — Finding things again
+
+Press **Shift+⌘/Ctrl+F** for RediRecall's own search (plain ⌘/Ctrl+F stays with your
+browser). It searches message text and the retrieved source passages, reports how many
+matches it found, and with **All conversations** ticked it looks through every conversation
+in the sidebar — clicking a result opens that conversation at the message.
+
+Anything the app tells you is also kept under **Settings → Logs → Notifications** for the
+rest of the session, so an error you missed can still be read.
+
+---
+
+## Step 10c — Keeping an answer worth keeping
+
+When an answer is worth more than the conversation it appeared in, click **💾** on it.
+Nothing else keeps it: the cache entry expires after an hour, the conversation after a day,
+and 📌 Pin is gone on reload.
+
+1. A dialog opens with the **question**, the **answer** and the **sources it cited**, all
+   editable — trim anything you would not want quoted back to you months from now
+2. Leave the knowledge base as `saved-answers` (created the first time you use it)
+3. Click **💾 Save to knowledge base**
+
+![Keeping an answer — the question, the answer and the sources it cited, editable before anything is indexed](screenshots/tutorial/10c-keep-answer.png)
+
+From then on the answer is retrieved like any other document, and shows up in the sources
+panel labelled `answer://…` so you can always tell a kept answer from a real source.
+
+> **Its own knowledge base.** A saved answer is retrieved and cited exactly like a
+> document, and being phrased in the words of the question it can rank above the document
+> it came from. Keeping saved answers in `saved-answers` means you can switch them off in
+> the top-bar selector when you want an answer grounded only in real sources. Remove one at
+> any time under **Settings → RAG → Documents**.
 
 ---
 
@@ -291,6 +360,16 @@ If retrieval isn't working well, open **Settings → Analytics → RAG Performan
 | Too many irrelevant chunks | Threshold too low | Raise similarity threshold (try 0.80) |
 
 See [SETTINGS.md](SETTINGS.md) for the full explanation of every knob.
+
+### Checking what you've spent
+
+Further down the same tab, the **💰 Token Usage** card totals every conversation you have had, per provider and model, with an estimated cost:
+
+![Settings → Analytics — the Token Usage table with per-model input, cache, output and cost columns](screenshots/tutorial/13b-token-usage.png)
+
+This is the all-time figure. The token pills in the top bar count only the conversation you are looking at and reset when you switch, so the two will not match.
+
+If a model shows **not priced**, add its rate to the `pricing` block in `config.json` — the card names the models it is missing, and the cost total says how many it could not price. Local Ollama models are genuinely free, so `$0.00` is the right answer for them.
 
 ---
 

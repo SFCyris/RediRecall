@@ -46,9 +46,12 @@ async def api_serve_image(path: str):
     if not p.is_file():
         raise HTTPException(404, "File not found")
 
-    # Security: only serve from allowed directories
+    # Security: only serve from allowed directories. A string prefix test is not
+    # containment — with /tmp allowed, "/tmpevil/x.png" starts with "/tmp" and passed.
+    # is_relative_to compares path components, so a sibling directory whose name merely
+    # begins with an allowed one is rejected.
     allowed = any(
-        str(p).startswith(str(d.resolve()))
+        p.is_relative_to(d.resolve())
         for d in _ALLOWED_IMAGE_DIRS
     )
     if not allowed:
