@@ -52,14 +52,9 @@ def api_rag_sources(instance: str, endpoint: str | None = None):
     # One server-side aggregation over the index: GROUPBY the source field returns
     # each distinct source once — instead of scanning + HGET-ing every chunk.
     try:
-        res = rc.execute_command(
-            "FT.AGGREGATE", idx_name, "*",
-            "GROUPBY", "1", "@source",
-            "LIMIT", "0", "1000000",
-            "DIALECT", "2",
-        )
+        rows = rag.aggregate_all(rc, idx_name, "GROUPBY", "1", "@source")
         sources: set[str] = set()
-        for row in res[1:]:          # res[0] is the group count
+        for row in rows:
             for j in range(0, len(row) - 1, 2):
                 if rag._decode(row[j]) == "source":
                     val = rag._decode(row[j + 1])
@@ -81,16 +76,14 @@ def api_rag_documents(instance: str, endpoint: str | None = None):
     rc = rag_admin._rc_for(instance, endpoint)
     idx_name = f"{rag.rag_prefix(instance)}:idx"
     try:
-        res = rc.execute_command(
-            "FT.AGGREGATE", idx_name, "*",
+        rows = rag.aggregate_all(
+            rc, idx_name,
             "GROUPBY", "1", "@source",
             "REDUCE", "COUNT", "0", "AS", "chunks",
             "REDUCE", "MAX", "1", "@ingested_at", "AS", "ingested_at",
-            "LIMIT", "0", "1000000",
-            "DIALECT", "2",
         )
         docs = []
-        for row in res[1:]:
+        for row in rows:
             d = {rag._decode(row[j]): rag._decode(row[j + 1]) for j in range(0, len(row) - 1, 2)}
             src = d.get("source", "")
             if not src:

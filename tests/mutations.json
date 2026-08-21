@@ -2172,5 +2172,29 @@
     "replace": "    if(/^\\s*(?:timeline|title|section)\\b/i.test(line))return line;",
     "defect": "section is exempted alongside title, but a colon in a section label is a parse error",
     "expect": "test_a_colon_in_a_section_label_is_escaped"
+  },
+  {
+    "id": "M270_aggregate_reads_one_page",
+    "file": "redirecall/rag.py",
+    "find": "            res = rc.execute_command(\"FT.CURSOR\", \"READ\", idx_name, cursor)\n            rows.extend(res[0][1:])\n            cursor = res[1]",
+    "replace": "            cursor = 0",
+    "defect": "an aggregate is read as a single page, so listing documents returns only the first page and silently loses the rest",
+    "expect": "test_listing_documents_returns_every_one_not_just_the_first_page"
+  },
+  {
+    "id": "M271_aggregate_drops_first_page",
+    "file": "redirecall/rag.py",
+    "find": "    rows, cursor = list(res[0][1:]), res[1]",
+    "replace": "    rows, cursor = [], res[1]",
+    "defect": "the first page of an aggregate is discarded, so a result set that fits in one page comes back empty",
+    "expect": "test_listing_documents_returns_every_one_not_just_the_first_page test_saving_text_makes_it_a_findable_deletable_document"
+  },
+  {
+    "id": "M272_aggregate_uses_unbounded_limit",
+    "file": "redirecall/rag.py",
+    "find": "                             \"WITHCURSOR\", \"COUNT\", str(_AGG_PAGE), \"DIALECT\", \"2\")",
+    "replace": "                             \"LIMIT\", \"0\", \"1000000\", \"DIALECT\", \"2\")",
+    "defect": "an aggregate asks for more rows than MAXAGGREGATERESULTS allows, which Redis refuses outright — the route 500s on a stock Redis Stack",
+    "expect": "test_listing_documents_returns_every_one_not_just_the_first_page test_saving_text_makes_it_a_findable_deletable_document"
   }
 ]

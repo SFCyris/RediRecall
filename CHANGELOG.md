@@ -5,6 +5,17 @@ All notable changes to RediRecall are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.1] — 2026-08-21
+
+### Fixed
+- **The Documents list failed on Redis Stack.** Listing an instance's documents asked
+  the search engine for up to a million rows at once, which a stock Redis Stack refuses
+  outright rather than truncating (`MAXAGGREGATERESULTS`, 10000 by default) — so
+  *Settings → RAG → Documents* returned an error on that deployment, and the source
+  list silently fell back to scanning the whole keyspace on every call. Both now read
+  through a cursor and return every document however many there are. Present since
+  1.5.1.
+
 ## [1.8.0] — 2026-08-21
 
 ### Added

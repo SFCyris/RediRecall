@@ -389,6 +389,47 @@ def build_context_prompt(chunks: list[dict]) -> str:
     )
 
 
+# FT.AGGREGATE caps its LIMIT at MAXAGGREGATERESULTS — 10000 on a stock
+# redis-stack-server. Asking for more is not truncated, it is REFUSED outright
+# ("LIMIT exceeds maximum of 10000"), so a route that asked for a large page failed
+# entirely rather than returning the first 10000 rows. Reading through a cursor is the
+# mechanism Redis provides for a result set of unknown size and is not bounded by that
+# config at all.
+_AGG_PAGE = 1000          # rows per cursor read
+_MAX_AGG_PAGES = 10_000   # backstop: 10M rows, far past any real corpus
+
+
+def aggregate_all(rc: redis.Redis, idx_name: str, *args: str) -> list:
+    """Run an FT.AGGREGATE and return EVERY row, paging through a cursor.
+
+    ``args`` is the pipeline after the index and query (GROUPBY/REDUCE/SORTBY/…) — do
+    not pass LIMIT or WITHCURSOR, both are supplied here.
+
+    The cursor is deleted if the loop is abandoned; leaving one open holds the result
+    set on the server until it times out.
+    """
+    res = rc.execute_command("FT.AGGREGATE", idx_name, "*", *args,
+                             "WITHCURSOR", "COUNT", str(_AGG_PAGE), "DIALECT", "2")
+    rows, cursor = list(res[0][1:]), res[1]
+    try:
+        for _page in range(_MAX_AGG_PAGES):
+            if not cursor:
+                break
+            res = rc.execute_command("FT.CURSOR", "READ", idx_name, cursor)
+            rows.extend(res[0][1:])
+            cursor = res[1]
+        else:
+            log.warning("aggregate_all: stopped at the %d-page backstop for %s",
+                        _MAX_AGG_PAGES, idx_name)
+    finally:
+        if cursor:
+            try:
+                rc.execute_command("FT.CURSOR", "DEL", idx_name, cursor)
+            except Exception:
+                pass
+    return rows
+
+
 def doc_id_for(source: str) -> str:
     """Stable id for a source document.
 
