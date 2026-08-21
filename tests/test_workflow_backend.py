@@ -746,3 +746,34 @@ def test_saving_text_is_bounded_by_the_upload_limit(app_module, monkeypatch):
         r = client.post(f"/api/rag/{KEY_PREFIX}big/ingest/text",
                         json={"text": "x" * 500, "source": "answer://big"})
     assert r.status_code == 413, (r.status_code, r.text[:200])
+
+
+def test_listing_documents_returns_every_one_not_just_the_first_page(
+        app_module, app_on_test_redis, monkeypatch):
+    """FT.AGGREGATE caps its LIMIT at MAXAGGREGATERESULTS — 10000 on a stock
+    redis-stack-server — and asking for more is REFUSED outright rather than truncated,
+    so the route that asked for a million rows returned a 500 on that server. Reading
+    through a cursor is not bounded by that config, but it has to actually page.
+
+    The page size is shrunk rather than ingesting thousands of documents: with
+    ``_AGG_PAGE`` at 2 and five sources indexed, a single-page read returns 2 and the
+    loop is the only thing that can produce 5.
+    """
+    from redirecall import ingest, rag, routes_sources
+
+    monkeypatch.setattr(rag, "_AGG_PAGE", 2)
+    inst = f"{KEY_PREFIX}paged"
+    expected = set()
+    for i in range(5):
+        src = f"doc-{i}.md"
+        expected.add(src)
+        ingest.ingest_text(inst, f"Passage number {i} about retrieval and indexing.",
+                           src, app_on_test_redis)
+
+    docs = routes_sources.api_rag_documents(inst)
+    got = {d["source"] for d in docs["documents"]}
+    assert got == expected, f"paging stopped early: {sorted(got)}"
+    assert docs["total"] == 5
+
+    # ...and the plain source list pages the same way
+    assert set(routes_sources.api_rag_sources(inst)) == expected
