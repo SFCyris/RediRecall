@@ -31,6 +31,29 @@ def rag_prefix(instance: str) -> str:
     return f"rag:{instance}"
 
 
+# Redis GLOB metacharacters. An instance name reaches SCAN MATCH patterns verbatim, so a
+# name containing one of these silently widens the match: an instance literally called "*"
+# turns `rag:*:chunk:*` into every chunk of every instance, and resetting or deleting that
+# one instance would take all the others with it.
+_GLOB_META = str.maketrans({c: "\\" + c for c in "*?[]\\"})
+
+
+def rag_chunk_glob(instance: str) -> str:
+    """SCAN MATCH pattern for one instance's chunk keys, with the name escaped.
+
+    Only for pattern matching — exact key building must keep using ``rag_prefix``,
+    where a backslash would become part of the key name.
+    """
+    return f"rag:{instance.translate(_GLOB_META)}:chunk:*"
+
+
+def chunk_glob_for_prefix(prefix: str) -> str:
+    """Same pattern, for the helpers that are handed a built prefix rather than the
+    instance name. Escapes the whole prefix — ``rag:`` contributes no metacharacters,
+    so escaping it is a no-op and the instance half is protected either way."""
+    return f"{prefix.translate(_GLOB_META)}:chunk:*"
+
+
 def _get_rag_index(instance: str, rc: redis.Redis) -> SearchIndex:
     """
     Build a redisvl SearchIndex for a RAG instance without creating it in Redis.
@@ -141,7 +164,7 @@ def _migrate_vector_field(instance: str, rc: redis.Redis) -> int:
         return 0                       # unregistered model — nothing renamed
     moved, batch = 0, []
     try:
-        for key in rc.scan_iter(f"{rag_prefix(instance)}:chunk:*", count=500):
+        for key in rc.scan_iter(rag_chunk_glob(instance), count=500):
             batch.append(key)
             if len(batch) >= 500:
                 moved += _migrate_vector_batch(rc, batch, field); batch = []
@@ -294,6 +317,21 @@ def _decode(v) -> str:
     return v.decode() if isinstance(v, bytes) else (v or "")
 
 
+def number_chunks(chunks: list[dict]) -> list[dict]:
+    """Stamp each chunk with the citation number the model will be shown, in place.
+
+    The ``[1]…[k]`` markers in an answer are positions in the list handed to the prompt,
+    so the number is a property of that list and nothing else. Recording it on the chunk
+    makes it survive into the websocket payload and the stored turn, which is what lets
+    the RAG inspector label a chunk with the same number the answer cites. Deriving it
+    again in the browser cannot work: the inspector re-orders by relevance, and a cached
+    or restored payload has no ordering guarantee at all.
+    """
+    for i, c in enumerate(chunks, 1):
+        c["n"] = i
+    return chunks
+
+
 def build_context_prompt(chunks: list[dict]) -> str:
     """Render retrieved chunks into a system-prompt section.
 
@@ -328,7 +366,7 @@ def build_context_prompt(chunks: list[dict]) -> str:
             return ""
 
     numbered = "\n\n".join(
-        f"[{i}] (source: {c.get('source', 'unknown')}{_pct(c)})\n{c.get('text', '')}"
+        f"[{c.get('n', i)}] (source: {c.get('source', 'unknown')}{_pct(c)})\n{c.get('text', '')}"
         for i, c in enumerate(chunks, 1)
     )
     return (
@@ -436,10 +474,10 @@ def _warn_if_index_empty_but_data_exists(instance: str, rc: redis.Redis) -> None
         # Only existence matters, so stop at the first key instead of counting the
         # whole keyspace, and memoise the clean result too — without that, a
         # genuinely empty instance re-scanned on every single query.
-        if next(rc.scan_iter(f"{rag_prefix(instance)}:chunk:*", count=200), None) is None:
+        if next(rc.scan_iter(rag_chunk_glob(instance), count=200), None) is None:
             _dim_mismatch_warned.add(instance)
             return                       # empty instance — nothing to explain
-        stored = sum(1 for _ in rc.scan_iter(f"{rag_prefix(instance)}:chunk:*", count=200))
+        stored = sum(1 for _ in rc.scan_iter(rag_chunk_glob(instance), count=200))
         _dim_mismatch_warned.add(instance)
         log.error(
             f"RAG DISABLED for '{instance}': {stored} chunks are stored but 0 are indexed. "
@@ -532,7 +570,10 @@ def search_rag(
 
     When ``hybrid=False`` only the vector search is performed.
     """
-    rc     = rc or r()
+    # redis_store.r(), not a bare r(): `r` is a loop variable further down this same
+    # function, which makes Python treat it as local for the whole body — so the bare
+    # call raised UnboundLocalError on every caller that left `rc` unset.
+    rc     = rc or redis_store.r()
     prefix = rag_prefix(instance)
     idx_name = f"{prefix}:idx"
     # Make sure the index exists with the current schema (source as TAG) before

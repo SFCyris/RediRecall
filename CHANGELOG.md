@@ -5,6 +5,152 @@ All notable changes to RediRecall are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] — 2026-08-21
+
+### Added
+- **Token usage in Analytics.** A new *Token Usage* card shows all-time token
+  consumption across every conversation, broken down by provider and model, with
+  fresh input, prompt-cache reads, cache writes and output as separate columns and
+  an estimated cost per model. Rows are ordered by cost, and when a model has no
+  entry in the `pricing` table the card names it and says the total is partial. A
+  *Reset tally* action clears the counters; conversations and their per-turn counts
+  are untouched. Token and cost figures are now included in the Analytics CSV export.
+- **Keep an answer.** **💾** on any answer indexes it into a knowledge base, so it outlives
+  the semantic cache (one hour by default) and the conversation (one day) — and stays
+  *retrievable*, not just readable. A review dialog offers the question, the answer and the
+  sources it cited for editing first. Saved answers go to their own `saved-answers`
+  instance, created on first use, so they can be switched off when an answer has to be
+  grounded only in real documents; each one is a document named `answer://<date> <title>`
+  that can be deleted on its own.
+- **Scheduled re-crawl, in the interface.** *Settings → Web Sources → Scheduled Re-crawl*
+  lists every URL on the timer with its instance, depth and last run, and can schedule the
+  current URL, remove one, or re-crawl everything now. The on/off switch and the interval
+  are saved with the rest of your settings.
+- **File ingestion can be watched and stopped.** An ingest now has a Cancel button, and
+  reopening the RAG tab re-attaches to one already running instead of showing an idle
+  panel. Cancelling stops before the next file; everything already indexed is kept. On a
+  first run the panel says the embedding model is being downloaded rather than sitting at
+  an unmoving bar for several minutes.
+- **Crawl progress shows real numbers.** With a page limit set the bar fills towards it;
+  without one — the default — it shows pages indexed against pages discovered so far, with
+  the queue depth beside it, and says which total it is counting against.
+- **Citations are clickable.** The `[2]` markers in an answer now open the matching source
+  in the sources panel and highlight it.
+- **Messages are reviewable.** Errors stay on screen until dismissed instead of vanishing
+  after three seconds, every message can be dismissed by hand, hovering pauses the
+  countdown, and *Settings → Logs* keeps the session's messages so an error can be read
+  after the fact.
+- **Search covers more.** It searches retrieved source text as well as messages, can search
+  every conversation rather than only the current one, reports how many matches it found
+  and highlights each one in context.
+- **A first run leads somewhere.** With no model available the welcome screen offers a route
+  into provider settings instead of suggestion prompts that cannot work, and the three
+  "select a model first" refusals now offer the same route.
+- **Unsaved settings are no longer lost silently.** The panel marks itself as having unsaved
+  changes and asks before discarding them on Escape, Cancel or a click outside. Sections
+  that apply immediately — RAG instances and Redis endpoints — say so.
+
+### Fixed
+- Diagram labels containing brackets, parentheses, quotes or `<` no longer blank the
+  diagram. Every flowchart node shape is now handled — rectangle, round, stadium,
+  subroutine, cylinder, circle, double circle, asymmetric, rhombus, hexagon,
+  parallelogram and trapezoid — as well as edge labels written as `-->|text|`, each
+  keeping its own shape. A `<` renders as a real `<` in edge labels and subgraph titles.
+- A valid diagram using a quoted compound shape, such as `A[("Redis (db)")]` or
+  `A[["Sub (x)"]]`, was corrupted into an unrenderable one.
+- A node label containing `|`, such as `A[Ratio|Score]`, was corrupted, and could also
+  swallow the label of the edge that followed it.
+- Diagrams are no longer inserted when the HTML sanitiser is unavailable, matching every
+  other rendering lane.
+- Cache-creation tokens were missing from the all-time tally, under-reporting cumulative
+  cost for prompt-cached conversations.
+- A provider error unrelated to token reporting — a mistyped model name, an over-long
+  conversation — switched token counting off for that provider until restart.
+- API keys are no longer sent in a URL when testing a provider connection, keeping them
+  out of server and proxy access logs and out of browser history.
+- A Redis endpoint whose name contained quotes or semicolons could run arbitrary script in
+  the page when the endpoint list was displayed.
+- Deleting or resetting a RAG instance whose name contained `*`, `?` or `[` could affect
+  other instances on the same Redis endpoint. Instance names are now validated wherever an
+  instance can be created, and the pattern is escaped everywhere it is used.
+- Images could be served from a directory whose name merely started with an allowed one.
+- Importing a RAG instance stored its chunks outside the search index, so an imported
+  instance held all its data and returned nothing from any search. An instance exported
+  under a different embedding model now has the affected chunks re-embedded rather than
+  stored as vectors the index cannot use.
+- Exporting a RAG instance omitted the embeddings of the final partial batch.
+- *Export & Delete* waited a fixed moment rather than for the export, so a large instance
+  could be deleted before its backup finished. It now waits, keeps the instance if the
+  export fails, and asks you to confirm the file actually downloaded — a cancelled save
+  cannot be detected by the browser.
+- Regenerating an answer could delete the whole conversation when the request carried a
+  malformed position.
+- Cancelling a crawl left a background worker running for the lifetime of the process and
+  discarded the record of pages already indexed.
+- Pausing or cancelling a crawl whose address contained a `#` fragment reported success
+  while the crawl continued at full speed.
+- A tool result containing an image also dumped the raw tool call, including the entire
+  image data, below the picture.
+- Importing a configuration now asks for confirmation first and reports the actual
+  outcome; a failed import previously reported success while changing nothing.
+- Exporting the configuration no longer navigates away from the app.
+- "Reset Defaults" no longer discards saved web sources, watched folders and endpoints
+  without saying so.
+- Clearing a conversation, removing a web source, a prompt template or a Redis endpoint,
+  and resetting the retrieval counters now ask for confirmation first and say exactly what
+  is lost.
+- Switching to Claude without a key no longer leaves the model list showing another
+  provider's models.
+- An ingestion that partly failed is now reported as a warning rather than as neutral
+  information.
+- Saved web-source URLs and ingestion-log instance names are escaped when displayed.
+- Dismissing a "Remove document?" dialog no longer raises a console error.
+- Pause and Cancel during a crawl acted on whatever was typed in the URL box rather than
+  on the running crawl, so editing that field — which is also where the next crawl is
+  composed — left the crawl running while the buttons reported it stopped.
+- Re-opening the panel during a crawl showed a fixed 50% that meant nothing, overwrote a
+  URL you were part-way through typing, showed a paused crawl as running, and could only
+  ever attach to the first of several crawls. It now shows measured progress, leaves the
+  URL box alone, names the crawl it is following and offers the others.
+- Scheduling a re-crawl before the instance list had loaded stored it against an instance
+  no crawl would ever write to.
+- *System Status* reported four of the seven providers, so Qwen, Mistral, Groq and Gemini
+  users found nothing about the provider they were running on. All seven are listed, an
+  unconfigured one is offered a route to set it up, and the per-provider dots on the
+  Providers tab — which no code had ever painted — now reflect what is reachable.
+- A "⟳ Update dots" button that refreshed nothing has been removed.
+- `⌘/Ctrl+F` no longer replaces the browser's own find. The in-app search moved to
+  `⌘/Ctrl+Shift+F`.
+- The sources panel numbered a chunk by its position on screen while the answer cited its
+  position in the retrieved list, so on a reopened or cached conversation `[2]` and `#2`
+  could refer to different sources.
+- A Cancel button in one confirmation dialog rendered unstyled.
+- A diagram node label written with spaces inside its shape, such as `A[ /In (raw)/ ]`,
+  failed to render at all when it contained brackets or parentheses.
+- A diagram node label with parentheses nested more than one level deep, such as
+  `A(a (b (c)) d)`, failed to render.
+- A diagram edge label written inline, such as `A -- say "hi" --> B`, failed to render when
+  it contained a quote, and showed the literal text `&lt;` where a `<` was meant.
+- A timeline containing a time of day failed to render entirely. Writing a timed event as
+  `2024-01-01 00:00 : Sunrise` is the natural thing to do, and the colon inside `00:00` was
+  read as the period separator; the error it produced pointed at the diagram's first line
+  rather than at the colon. Times now render as written, in periods, section labels and
+  accessibility lines alike.
+- **Accessibility.** Text colours in the light theme now meet the WCAG AA contrast
+  minimum, and so does the accent behind white text in both themes; the provider "not
+  configured" dot, the selected-model hint, the table filter and the provider name used
+  colours that were never defined and fell back to inherited text. Form controls have a
+  visible focus outline — which now appears the instant focus lands rather than fading in
+  over a quarter of a second — and a distinguishable border. Every field is linked to its
+  label, and toggles and icon-only buttons have accessible names. Dialogs declare
+  themselves as dialogs, move focus in on open and hand it back on close, keep Tab inside
+  themselves,
+  and close one layer at a time with Escape; the closed pinned panel is no longer
+  reachable by keyboard. Status and error messages are announced, the document has a
+  heading and landmarks, message actions are reachable by keyboard and visible on touch,
+  and animations — including the streaming avatar — honour the system "reduce motion"
+  setting.
+
 ## [1.7.0] — 2026-08-12
 
 ### Added

@@ -136,7 +136,7 @@ def reset_rag(instance: str, rc: redis.Redis | None = None):
     # FT.DROPINDEX DD may silently fail (e.g. index never existed), leaving
     # chunk keys behind so the instance keeps reappearing in list scans.
     batch: list = []
-    for k in rc.scan_iter(f"{prefix}:chunk:*", count=500):
+    for k in rc.scan_iter(rag.rag_chunk_glob(instance), count=500):
         batch.append(k)
         if len(batch) >= 500:
             rc.delete(*batch)

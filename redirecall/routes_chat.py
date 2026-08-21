@@ -19,6 +19,22 @@ from . import ws as _ns_ws
 log = logging.getLogger(__name__)
 
 
+def valid_replace_index(value, n_messages: int) -> bool:
+    """Is ``value`` a usable truncation point for a regenerate?
+
+    A named predicate rather than an inline condition so a test can exercise the real
+    rule. Written inline, the only thing a test could reach was the AST — which cannot
+    see polarity, so a guard inverted to ``or isinstance(value, bool)`` still "passed".
+
+    bool is a subclass of int, so a client-supplied JSON ``true`` used to satisfy the
+    isinstance check as the integer 1, walk back to index 0, and delete the entire
+    conversation — which was then persisted as an empty list.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        return False
+    return 0 <= value <= n_messages
+
+
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # WEBSOCKET — CHAT HANDLER
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -239,6 +255,8 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     # widened pool (40 chunks) in the prompt on exactly that failure path.
     if len(chunks) > top_k:
         chunks = chunks[:top_k]
+    # Numbered once the list is final, so the stamp matches the prompt exactly.
+    rag.number_chunks(chunks)
 
     t_rag = round(time.time() - t_rag_start, 3)
 
@@ -341,7 +359,7 @@ async def handle_chat(ws: WebSocket, sid: str, msg: dict):
     # On a regenerate, truncate to the replaced answer's position first. The
     # user turn that produced it is dropped too, because it is re-appended just
     # below — truncating at the assistant index alone would duplicate the question.
-    if isinstance(replace_from, int) and 0 <= replace_from <= len(state._sessions[sid]):
+    if valid_replace_index(replace_from, len(state._sessions[sid])):
         cut = replace_from
         if cut > 0 and state._sessions[sid][cut - 1].get("role") == "user":
             cut -= 1
@@ -580,6 +598,8 @@ async def api_chat(payload: dict):
     # See handle_chat: trim unconditionally, the reranker may be a no-op.
     if len(chunks) > top_k:
         chunks = chunks[:top_k]
+    # Numbered once the list is final, so the stamp matches the prompt exactly.
+    rag.number_chunks(chunks)
 
     # Per-turn context rides on the final user turn, not the system prompt — keeps
     # the system prefix stable for provider prompt-caching and out of resent history.

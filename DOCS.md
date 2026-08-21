@@ -18,13 +18,14 @@
 10. [Multiple Redis Endpoints](#multiple-redis-endpoints)
 11. [Settings Reference](#settings-reference)
 12. [Keyboard Shortcuts](#keyboard-shortcuts)
-13. [Analytics](#analytics)
-14. [API Reference](#api-reference)
-15. [Architecture](#architecture)
-16. [Configuration File](#configuration-file)
-17. [Backup and Restore](#backup-and-restore)
-18. [Optional Dependencies](#optional-dependencies)
-19. [Acknowledgments & License](#acknowledgments--license)
+13. [Keeping an answer](#keeping-an-answer)
+14. [Analytics](#analytics)
+15. [API Reference](#api-reference)
+16. [Architecture](#architecture)
+17. [Configuration File](#configuration-file)
+18. [Backup and Restore](#backup-and-restore)
+19. [Optional Dependencies](#optional-dependencies)
+20. [Acknowledgments & License](#acknowledgments--license)
 
 ---
 
@@ -74,6 +75,14 @@ docker compose stop      # stop later (docker compose down to remove containers;
 See the README for details.
 
 On first launch a `config.json` is created (with defaults) in the per-platform data directory — `~/Library/Application Support/RediRecall` on macOS, `~/.local/share/redirecall` on Linux — not in the repo. Configure Redis and your LLM provider via **Settings** before chatting.
+
+### First run
+
+Until a provider has a usable model, the welcome screen says so and offers the two places that fix it rather than suggestion prompts that cannot work. The message names the actual obstacle — Ollama running but with nothing pulled, or a hosted provider whose key is missing or was rejected.
+
+<p align="center">
+  <img src="screenshots/features/first-run.png" alt="The welcome screen with no model configured, showing a setup card with Open provider settings and Check system status" width="76%">
+</p>
 
 ---
 
@@ -132,9 +141,11 @@ Click the 📎 button or drag an image directly onto the input box. Images are s
 
 Click the 🎤 microphone button to toggle speech-to-text. Transcribed text is inserted into the input field.
 
-### Token estimate
+### Token count
 
-The top bar shows a rough size estimate for the current conversation, split into three colour-coded pills: **input** (↑, your prompts), **output** (↓, the model's replies) and **total** (Σ). It is an approximation (≈ characters ÷ 4), not a billed token count.
+The top bar shows the token size of **the conversation you are currently viewing**, split into three colour-coded pills: **input** (↑, the full prompt each turn sent — system prompt, re-sent history and retrieved context included), **output** (↓, the model's replies) and **total** (Σ). These are the provider's own billed counts, stored with each answer. A leading `~` means at least one turn had no reported counts and was estimated instead (≈ characters ÷ 4) — cache hits and stopped answers never reach a provider, so they are always estimated.
+
+The pills reset when you switch conversations. For the running total across **every** conversation, see the Token Usage card in [Analytics](#analytics).
 
 ### Prompt templates
 
@@ -142,10 +153,19 @@ Select a system-prompt template from the dropdown left of the input box to chang
 
 ### Message actions
 
-Hover any AI message to reveal action buttons:
-- 👍 / 👎 — Like or dislike (stored as feedback)
-- 📌 — Pin the message to the pinned panel
-- ↻ — Regenerate the response
+Hover any AI message to reveal its action bar.
+
+**Output** — 📋 **Copy** (plain text), 📝 **MD** (raw markdown to the clipboard), ⬇ **.md** (download), 📄 **PDF** (print/save), ⌥ **Raw** (toggle the rendered answer against the markdown behind it).
+
+**Actions**
+
+| Button | Action |
+|---|---|
+| 👍 / 👎 | Rate the answer — stored as feedback with the question, the model and the sources used |
+| 📌 | Pin to the pinned panel for this browser session |
+| ↻ | Regenerate; a version switcher appears so attempts can be compared |
+| ⑂ | Fork the conversation here — a new session containing everything up to this answer |
+| 💾 | [Keep this answer](#keeping-an-answer) — index it into a knowledge base so it outlives the cache and the conversation |
 
 ### Question actions
 
@@ -180,7 +200,7 @@ Answers are rendered inline: the model writes a short, declarative block and the
 | ` ```molecule ` | **Chemical structure** | a SMILES string | SmilesDrawer |
 | ` ```molecule3d ` | **3D structure**, rotatable/zoomable | XYZ format: atom count, comment line, then `Element x y z` per atom | 3Dmol.js |
 | ` ```gantt ` | **Project schedule** — dates, durations, dependencies | mermaid gantt syntax (no leading `gantt` line) | mermaid |
-| ` ```timeline ` | **Dated event sequence** | mermaid timeline syntax (no leading `timeline` line) | mermaid |
+| ` ```timeline ` | **Dated event sequence** | mermaid timeline syntax (no leading `timeline` line). Times of day are written as normal — `2024-01-01 00:00 : Sunrise` — in periods, section labels and accessibility lines alike | mermaid |
 | ` ```network ` | **Force-directed graph**, draggable nodes | JSON `{"nodes":[…],"edges":[{"from":…,"to":…}]}` | vis-network |
 | ` ```geojson ` | **Geographic features** with click popups | a GeoJSON FeatureCollection (coordinates are `[lng,lat]`) | Leaflet |
 | ` ```abc ` | **Sheet music**, with a Play button | ABC notation | abcjs |
@@ -245,7 +265,15 @@ After each AI response that used RAG, a **📚 N matched chunks** badge appears 
 
 ### Citations
 
-When an answer is grounded in your knowledge base, the retrieved passages are numbered and the model marks each claim with the passage it came from — `[1]`, `[2]`, and so on. The numbers correspond to the entries in the RAG context inspector, so any individual sentence can be traced back to the chunk that supports it.
+When an answer is grounded in your knowledge base, the retrieved passages are numbered and the model marks each claim with the passage it came from — `[1]`, `[2]`, and so on.
+
+**Each marker is a button.** Click one to open the RAG inspector, expand that source and highlight it. A bracketed number inside a code sample is left alone — `arr[1]` is an array index, not a reference.
+
+`[2]` and **#2** always refer to the same passage, in a live answer, a reopened conversation and a cached one alike. The inspector lists passages best-match-first, which is not necessarily the order they were numbered in.
+
+<p align="center">
+  <img src="screenshots/features/citations-click.png" alt="An answer whose [2] marker has been clicked, opening and expanding source 2 in the matched-chunk inspector" width="88%">
+</p>
 
 <p align="center">
   <img src="screenshots/rendering/citations-scope.png" alt="An answer with [1] and [2] citation markers, the matched-chunk inspector, and a source-scope chip above the composer" width="88%">
@@ -264,6 +292,35 @@ If retrieval runs and finds nothing above the similarity threshold, the answer i
 </p>
 
 An answer with no badge at all was produced without RAG (all instances disabled, or none selected).
+
+### Finding an earlier answer
+
+**Shift+⌘/Ctrl+F** opens RediRecall's own search. Plain ⌘/Ctrl+F is left to the browser, whose find covers the rendered page.
+
+- Searches message text **and the retrieved source passages** stored with each answer
+- **All conversations** widens it beyond the current one; conversations stored only on the server are loaded on demand, and any that cannot be loaded are named
+- Reports the match count, highlights each hit in context, and names the conversation a result came from
+- Clicking a result opens that conversation at the message
+
+<p align="center">
+  <img src="screenshots/features/search.png" alt="The search overlay showing five matches across three conversations, including a hit inside a retrieved source" width="80%">
+</p>
+
+### Notifications
+
+Messages appear bottom-right. **Errors stay until dismissed**; everything else clears itself after a few seconds. Hovering pauses the countdown, and ✕ dismisses immediately.
+
+- A message repeated while it is still on screen collapses into one entry with a count
+- At most five are shown at once; the full history is kept regardless
+- **Settings → Logs → Notifications** lists every message raised this session, newest first, with an error count. It is cleared on reload
+
+<p align="center">
+  <img src="screenshots/features/notifications-toasts.png" alt="Three stacked messages: a red error, a green success and a blue info, each with a dismiss button" width="52%">
+</p>
+
+<p align="center">
+  <img src="screenshots/features/notifications-log.png" alt="The Notifications list in the Logs tab showing five messages with timestamps and severity pills" width="88%">
+</p>
 
 ### Session management
 
@@ -400,6 +457,15 @@ Each provider uses its official Python SDK for streaming:
 4. Supported formats: `.txt`, `.md`, `.csv`, `.pdf` (needs PyMuPDF), `.docx` (needs python-docx), `.xlsx` (needs openpyxl)
 
 Files are processed one by one via a streaming SSE connection. The progress bar advances per-file and shows the file name and chunk count in real time.
+
+- **✕ Cancel** stops before the next file. Everything already indexed is kept — this is a stop, not a rollback — and uploads that were never reached are removed
+- Reopening **Settings → RAG** re-attaches to an ingest still running on the server and keeps following it. If several are running, the others are offered
+- On a first run the panel reports that the embedding model is downloading (about 90 MB) before indexing starts
+- A file the indexer reports as failed — an unsupported type, a scanned PDF with no extractable text — counts towards errors, not successes
+
+<p align="center">
+  <img src="screenshots/features/ingest-progress.png" alt="File ingestion in progress showing the per-file status and a Cancel button" width="80%">
+</p>
 
 ### From a URL
 
@@ -570,7 +636,20 @@ RediRecall has **no built-in authentication**. The password field here is stored
 Session-level cache hit/miss rates, latency histogram, message statistics, and per-instance RAG performance table.
 
 #### 📋 Logs
-Last 200 ingestion events. Filter by status, instance, or source URL.
+Every message raised this session (see [Notifications](#notifications)), then the last 200 ingestion events — filterable by status, instance, or source URL.
+
+### Unsaved changes
+
+The panel mixes two kinds of control, and says which is which:
+
+- **Staged until you press Save Settings** — API keys, model choices, RAG and cache tuning, prompt templates, crawl defaults, and the selected provider
+- **Applied as you change them** — RAG instances and Redis endpoints. The sections that behave this way say so in place
+
+Editing a staged control marks the panel **Unsaved changes**, and closing it then — with Cancel, Escape or a click outside — asks before discarding. Switching provider counts as an edit: it takes effect in the browser straight away but is only remembered once you save.
+
+<p align="center">
+  <img src="screenshots/features/unsaved-settings.png" alt="A dialog asking whether to discard unsaved settings, explaining which changes are staged and which were already applied" width="62%">
+</p>
 
 ---
 
@@ -581,8 +660,38 @@ Last 200 ingestion events. Filter by status, instance, or source URL.
 | `Enter` | Send message |
 | `Shift+Enter` | New line in input |
 | `⌘/Ctrl+K` | Open Settings |
-| `⌘/Ctrl+F` | Search chat |
+| `⌘/Ctrl+Shift+F` | Search conversations |
+| `⌘/Ctrl+F` | Your browser's own find — RediRecall does not intercept it |
 | `Esc` | Close panel |
+
+---
+
+## Keeping an answer
+
+Answers are otherwise transient: the semantic cache expires on `cache.ttl` (one hour by
+default), the conversation expires on `sessions.ttl` (one day), and **📌 Pin** lasts only
+until the page is reloaded.
+
+**💾** on any answer opens a review dialog and then indexes the answer into a RAG instance,
+where it has no expiry and is retrievable in later answers.
+
+- **What is stored.** The question and the answer together (the question carries the
+  wording a later search will match on), plus the sources the answer cited, as a markdown
+  list. Everything is editable before saving.
+- **Where.** A dedicated `saved-answers` instance, created on first use; pick a different
+  one in the dialog. A saved answer is retrieved and cited *exactly* like a source document,
+  and being phrased in the language of the question it can rank above the document it came
+  from — keeping it in its own instance means it can be switched off from the top-bar
+  selector when an answer must be grounded only in real sources.
+- **Undoing it.** Each saved answer is one document named
+  `answer://<date> <title>`, listed under **Settings → RAG → Documents** and deletable on
+  its own.
+- **Re-saving.** Chunks are deduplicated per source, so saving an unchanged answer under
+  the same title again stores nothing and says so.
+
+<p align="center">
+  <img src="screenshots/tutorial/10c-keep-answer.png" alt="The Keep this answer dialog with editable title, question and answer, a toggle to append the cited sources, and a knowledge-base selector" width="66%">
+</p>
 
 ---
 
@@ -621,6 +730,26 @@ With reranking enabled (set `reranker.enabled: true` in `config.json` — there 
 
 A **⚠ threshold?** warning pill appears automatically on any instance where raw score ≥ 0.60 but hit rate < 50%.
 
+### Token Usage — all-time
+
+The **💰 Token Usage** card is the running total across **every** conversation, not just the one on screen — the top-bar pills are per-conversation and reset when you switch. One row per provider and model:
+
+| Column | Description |
+|---|---|
+| **Input** | Fresh input tokens, billed at the full rate |
+| **Cached** | Prompt-cache reads, billed at roughly 0.1× input |
+| **Cache write** | Prompt-cache creation, billed at roughly 1.25× input |
+| **Output** | Generated tokens |
+| **Cost** | Input, cache and output priced with that model's entry in the `pricing` table |
+
+The four token columns are disjoint, so they add up to the model's total. **Cached** and **Cache write** appear only when a provider reports them — currently Claude; other providers show just Input and Output.
+
+Rows are ordered by cost, most expensive first. A model with no entry in `pricing` shows **not priced**: its tokens are still counted, but it contributes nothing to the cost total, and the card says how many models are in that state so a partial figure is never mistaken for a complete one.
+
+Counts come from the provider and only from answers it actually produced. Cache hits and stopped answers never reach a provider, so they are absent here — which is why the sum of the top-bar pills across your conversations will read higher than this total.
+
+**↺ Reset tally** zeroes the counters after a confirmation. Conversations and their stored per-turn counts are not affected; only the cumulative total is cleared. **⬇ Export CSV** at the foot of the tab includes these rows.
+
 ---
 
 ## API Reference
@@ -636,19 +765,37 @@ All endpoints are served at `http://localhost:8420`.
 | `GET` | `/api/config/export` | Download config as JSON file |
 | `POST` | `/api/config/import` | Upload and replace config |
 
+### Chat
+
+| Method | Path | Description |
+|---|---|---|
+| `POST` | `/api/chat` | Non-streaming chat — same semantics as the WebSocket handler, for clients that don't use WebSockets. Body: `content` (required), plus optional `session_id`, `provider`, `model`, `system_prompt`, `rag_instance`/`rag_instances`, `source_filter`, `images` (base64 data URIs), `file_context`, `use_cache`. Returns `{session_id, response, chunks, cache_hit?, rag_used?}` |
+| `POST` | `/api/chat/upload-file` | Extract text from an attached file (TXT/MD/CSV/PDF/DOCX/XLSX) for the next chat turn — not stored or indexed. Multipart `file`; returns `{filename, chars, truncated, text}` |
+
+### Files
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/files/image?path=...` | Serve a local image (used for images the model generates via tools). Path-traversal guarded to the system tempdir/CWD |
+
 ### Status
 
 | Method | Path | Description |
 |---|---|---|
+| `GET` | `/api/health` | App status: `{status, app, version, license, source, provider, services: {...}}`. `status` is `"degraded"` only if `config.json` failed to parse — Redis reachability is checked separately below |
 | `GET` | `/api/status/redis` | Ping primary Redis |
 | `GET` | `/api/status/redis/{endpoint}` | Ping named endpoint |
 | `GET` | `/api/status/ollama` | Test Ollama server |
-| `GET` | `/api/status/claude` | Verify Claude API key |
-| `GET` | `/api/status/openai` | Verify OpenAI API key |
-| `GET` | `/api/status/qwen` | Verify Qwen API key |
-| `GET` | `/api/status/mistral` | Verify Mistral API key |
-| `GET` | `/api/status/groq` | Verify Groq API key |
-| `GET` | `/api/status/gemini` | Verify Gemini API key |
+| `GET` `POST` | `/api/status/claude` | Verify the Claude API key. `GET` checks the configured key; `POST {"key": "..."}` tests an unsaved one — the key travels in the body so it never reaches an access log or browser history |
+| `GET` `POST` | `/api/status/openai` | Verify the OpenAI API key. `GET` checks the configured key; `POST {"key": "..."}` tests an unsaved one — the key travels in the body so it never reaches an access log or browser history |
+| `GET` `POST` | `/api/status/qwen` | Verify the Qwen API key. `GET` checks the configured key; `POST {"key": "..."}` tests an unsaved one — the key travels in the body so it never reaches an access log or browser history |
+| `GET` `POST` | `/api/status/mistral` | Verify the Mistral API key. `GET` checks the configured key; `POST {"key": "..."}` tests an unsaved one — the key travels in the body so it never reaches an access log or browser history |
+| `GET` `POST` | `/api/status/groq` | Verify the Groq API key. `GET` checks the configured key; `POST {"key": "..."}` tests an unsaved one — the key travels in the body so it never reaches an access log or browser history |
+| `GET` `POST` | `/api/status/gemini` | Verify the Gemini API key. `GET` checks the configured key; `POST {"key": "..."}` tests an unsaved one — the key travels in the body so it never reaches an access log or browser history |
+
+All six key-based provider checks answer `{ok: true}` or `{ok: false, error}`. When no key
+is set at all they add `configured: false`, which distinguishes a provider that was never
+set up from one that is set up and failing.
 
 ### Models
 
@@ -663,6 +810,7 @@ All endpoints are served at `http://localhost:8420`.
 | `GET` | `/api/mistral/models` | List Mistral models |
 | `GET` | `/api/groq/models` | List Groq models (live + static fallback) |
 | `GET` | `/api/gemini/models` | List Gemini models |
+| `GET` | `/api/embedding/models` | List the embedding-model registry: `{models: [{id, field, active, ...}], active_id, default_id}`. Distinct from `/api/rag/{instance}/embedding-models` below, which shows models actually in use by one instance's chunks |
 
 ### Redis Endpoints
 
@@ -671,8 +819,12 @@ All endpoints are served at `http://localhost:8420`.
 | `GET` | `/api/redis/endpoints` | List all endpoints |
 | `POST` | `/api/redis/endpoints` | Add endpoint |
 | `DELETE` | `/api/redis/endpoints/{name}` | Remove endpoint |
-| `POST` | `/api/redis/endpoints/{name}/test` | Test connectivity |
+| `POST` | `/api/redis/test` | Ad-hoc connectivity test for a host/port/password not yet saved as an endpoint — same response shape as the test below, but doesn't touch config |
+| `POST` | `/api/redis/endpoints/{name}/test` | Test connectivity of a saved endpoint |
+| `GET` | `/api/redis/endpoints/{name}/discover` | Scan a saved endpoint's keyspace for existing RAG instances (`rag:*`/`rag_meta:*` keys) not yet registered locally |
+| `POST` | `/api/redis/endpoints/{name}/register` | Register discovered instances found by `discover` — body `{instances: [...]}` |
 | `GET` | `/api/redis/memory` | Memory usage stats |
+| `GET` | `/api/redis/all-stats` | Full per-server stats (memory, clients, keyspace, cluster, replication, RAG instances) for the primary Redis and every configured endpoint — powers the Analytics panel |
 
 ### RAG Instances
 
@@ -685,16 +837,40 @@ All endpoints are served at `http://localhost:8420`.
 | `POST` | `/api/rag/{instance}/reset` | Clear chunks, keep instance |
 | `POST` | `/api/rag/{instance}/optimize` | Remove exact-duplicate chunks |
 | `GET` | `/api/rag/{instance}/chunks` | Preview stored chunks |
+| `GET` | `/api/rag/{instance}/documents` | List indexed documents: `{total, documents: [{source, doc_id, chunks, ingested_at}]}` — the basis of the Documents panel |
+| `DELETE` | `/api/rag/{instance}/documents?source=...` | Remove every chunk belonging to one source document (optional `endpoint`). Its dedup hashes are released, so the same document can be re-ingested afterwards |
+| `GET` | `/api/rag/{instance}/sources` | Sorted list of unique source identifiers in the instance |
+| `GET` | `/api/rag/{instance}/embedding-models` | Which embedding model(s) this instance's chunks were built with — `{models: [{id, chunks, label}], mixed}`; `mixed: true` if chunks span more than one model |
 
 ### Ingestion
 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/rag/{instance}/ingest/files` | Upload and ingest files (returns JSON array) |
-| `POST` | `/api/rag/{instance}/ingest/files/stream` | Upload and ingest files with SSE progress |
+| `POST` | `/api/rag/{instance}/ingest/files/stream` | Upload and ingest files with SSE progress. First event is `{job, total}` — pass `job` to `/api/ingest/cancel` to stop it. A `{stage: "model", message}` event precedes the first file while the embedding model is being loaded. Per-file events carry `{file, status, chunks, error, index, total}`, where `status` is `ok`, `skipped` or `error` — a file the indexer *reports* as failed (an unsupported type, a scanned PDF with no extractable text) counts towards `errors`, not `ok`. Enforces `REDIRECALL_MAX_UPLOAD_MB` per file, as the non-streaming route does |
 | `POST` | `/api/rag/{instance}/ingest/url` | Crawl URL (non-streaming) |
-| `GET` | `/api/rag/{instance}/ingest/url/stream` | Crawl with SSE progress |
+| `GET` | `/api/rag/{instance}/ingest/url/stream` | Crawl with SSE progress. Each event carries `{url, status, chunks, error, pages_done, discovered, queued, resolved}`. `discovered` is how many URLs the frontier has admitted and `resolved` how many have reached a terminal state (indexed, skipped, blocked or errored), so progress can be shown when `max_pages` is `0`. Divide `resolved` by `discovered`, not `pages_done` — a URL is admitted before the robots, already-indexed and duplicate checks, any of which end it without an index |
+| `POST` | `/api/rag/{instance}/ingest/text` | Index a block of text directly — body `{text, source}`. `source` is the label the Documents view groups on and the per-document delete addresses, so anything stored here can be found and removed on its own. Returns `{chunks, duplicate}`; `duplicate: true` with `chunks: 0` means every chunk was already stored under that same source. Creates the instance's index if it does not exist. Same size cap as the file routes |
 | `GET` | `/api/rag/logs` | Last 200 ingestion events |
+| `GET` | `/api/ingest/active` | List running and recently-finished file-ingest jobs: `[{job, instance, endpoint, total, index, current, files, ok, errors, started, done, cancelled, start_ts}]`. `started: false` is a job whose stream was dropped before it began — it is expired automatically and should not be attached to. Like `/api/crawl/active`, this reflects the app's no-authentication posture: it names the files being indexed to anyone who can reach the port |
+| `POST` | `/api/ingest/cancel` | Stop a running file ingest — body `{job}`. Stops before the next file; files already indexed are kept. `404` if no job with that id is running |
+
+### Crawler Control
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/crawl/active` | List active and recently-finished crawl states: `{url, instance, pages_done, discovered, queued, resolved, max_pages, chunks, errors, blocked, skipped, paused, done, params}`. Keyed on the fragment-stripped seed URL, which is how `/api/crawl/pause` and `/api/crawl/cancel` address a crawl |
+| `POST` | `/api/crawl/pause` | Pause/resume a running crawl by URL — body `{url, paused}` (default `paused: true`). Visited pages, the queue, and indexed chunks are kept |
+| `POST` | `/api/crawl/cancel` | Cancel a running crawl by URL — body `{url}`. Unlike pause, the crawl task is stopped for good |
+
+### Scheduled Re-crawl
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/recrawl/sources` | List scheduled sources: `[{url, instance, depth, last_crawled}]` |
+| `POST` | `/api/recrawl/sources` | Schedule a URL for periodic re-crawl — body `{url, instance, depth}`. Re-adding an existing URL replaces its entry |
+| `DELETE` | `/api/recrawl/sources?url=...` | Remove a URL from the schedule |
+| `POST` | `/api/recrawl/trigger` | Re-crawl every scheduled source immediately, ignoring `interval_minutes` |
 
 #### SSE file ingest events
 
@@ -713,6 +889,7 @@ All endpoints are served at `http://localhost:8420`.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/api/rag/{instance}/export` | Download ZIP (chunks + embeddings) |
+| `GET` | `/api/rag/{instance}/export/stream` | Download the same export as newline-delimited JSON instead of a ZIP — one `{"_t":"meta",...}` line, then one `{"_t":"chunk",...}` line per chunk, then `{"_t":"done"}` |
 | `POST` | `/api/rag/{instance}/import` | Upload ZIP into instance |
 
 ### Cache
@@ -742,6 +919,13 @@ DELETE /api/cache/entry?entry_id=abc123
 | `GET` | `/api/rag/stats` | Per-instance query statistics |
 | `DELETE` | `/api/rag/stats` | Reset all counters |
 
+### Feedback
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/feedback?limit=200&value=up` | List thumbs ratings, newest first — `value` filters to `up`/`down` (or raw `1`/`-1`) |
+| `POST` | `/api/feedback` | Record a rating — free-form body; used by 👍/👎 on an answer |
+
 ### Sessions
 
 | Method | Path | Description |
@@ -750,7 +934,8 @@ DELETE /api/cache/entry?entry_id=abc123
 | `GET` | `/api/sessions/{sid}` | Fetch message history |
 | `DELETE` | `/api/sessions/{sid}` | Delete session |
 | `POST` | `/api/sessions/{sid}/fork` | Fork at a message (`{"role","content_prefix","occurrence"}`) → new session id |
-| `GET` | `/api/usage` | All-time provider-reported token usage per `provider:model` |
+| `GET` | `/api/usage` | All-time provider-reported token usage, as `{"provider:model": {in, out, cached, cache_write}}`. The four counts are disjoint: `in` is fresh input, `cached` prompt-cache reads, `cache_write` cache creation, `out` generated tokens. `cached` and `cache_write` appear only for providers that report them |
+| `DELETE` | `/api/usage` | Reset the all-time tally to zero. Conversations and their per-turn counts are untouched |
 
 ### Templates
 

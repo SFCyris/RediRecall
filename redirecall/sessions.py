@@ -65,13 +65,16 @@ def _turn_meta(chunks: list | None = None, latency: dict | None = None,
         meta["latency"] = latency
     if chunks:
         meta["chunks"] = [{
+            # The citation number this chunk was given in the prompt. Without it a
+            # reopened conversation cannot line its [n] markers up with the inspector.
+            "n":         c.get("n", i),
             "source":    c.get("source", ""),
             "score":     c.get("score", 0),
             "relevance": c.get("relevance", c.get("score", 0)),
             "lexical":   bool(c.get("lexical", False)),
             "instance":  c.get("instance", ""),
             "text":     (c.get("text", "") or "")[:_SESSION_CHUNK_TEXT_MAX],
-        } for c in chunks]
+        } for i, c in enumerate(chunks, 1)]
     return meta
 
 
@@ -179,7 +182,7 @@ def list_sessions_from_redis() -> list[dict]:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Per-turn usage lives in each turn's meta (above). This is the all-time counter
 # across every session, so the user can see what a provider/model has consumed
-# overall. One Redis hash, fields "<provider>:<model>:in|out|cached".
+# overall. One Redis hash, fields "<provider>:<model>:in|out|cached|cache_write".
 
 _USAGE_KEY = "usage:cumulative"
 
@@ -193,13 +196,23 @@ def record_usage(provider: str, model: str, usage: dict) -> None:
         pipe.hincrby(_USAGE_KEY, f"{pfx}:out", int(usage.get("completion", 0)))
         if usage.get("cached"):
             pipe.hincrby(_USAGE_KEY, f"{pfx}:cached", int(usage["cached"]))
+        if usage.get("cache_write"):   # Claude cache-creation tokens, billed ~1.25x input
+            pipe.hincrby(_USAGE_KEY, f"{pfx}:cache_write", int(usage["cache_write"]))
         pipe.execute()
     except Exception as e:
         log.debug(f"usage tally skipped: {e}")
 
 
 def usage_totals() -> dict:
-    """The all-time tally as {"provider:model": {"in": n, "out": n, "cached": n}}."""
+    """The all-time tally as {"provider:model": {"in", "out", "cached", "cache_write"}}.
+
+    The four counts are disjoint, as the providers report them: ``in`` is fresh input,
+    ``cached`` prompt-cache reads, ``cache_write`` cache creation, ``out`` generated.
+    ``cached``/``cache_write`` are absent for providers that do not report them.
+
+    Split on the LAST colon: a model id carries colons of its own (``qwen2.5:7b``),
+    so partitioning on the first would truncate it and merge two models into one row.
+    """
     out: dict = {}
     try:
         for k, v in redis_store.r().hgetall(_USAGE_KEY).items():
@@ -209,3 +222,12 @@ def usage_totals() -> dict:
     except Exception:
         pass
     return out
+
+
+def clear_usage() -> None:
+    """Reset the all-time tally. Per-turn usage already stored in session
+    history is untouched — this only zeroes the cumulative counter."""
+    try:
+        redis_store.r().delete(_USAGE_KEY)
+    except Exception as e:
+        log.debug(f"usage clear skipped: {e}")

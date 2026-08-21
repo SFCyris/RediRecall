@@ -7,11 +7,42 @@ module-qualified so runtime rebinding and test monkeypatching stay live.
 import logging
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime, timezone
+from fastapi import HTTPException
 from . import appcore, embeddings, rag, rag_admin, redis_store
 
 log = logging.getLogger(__name__)
+
+# An instance name is interpolated into Redis keys and into SCAN MATCH patterns. The
+# patterns are escaped at the point of use (rag.rag_chunk_glob), which is what actually
+# contains the blast radius; this is the second layer — reject the characters outright so
+# a name like "*" cannot exist in the first place. Only glob metacharacters and the key
+# separator are excluded: spaces and non-ASCII letters carry no glob meaning, so "My Docs"
+# and "ünïcode" are perfectly safe names and were needlessly rejected before.
+_BAD_INSTANCE_CHARS = re.compile(r"[*?\[\]\\:]")
+
+
+def _check_instance_name(name: str) -> str:
+    """Validate a RAG instance name, raising HTTPException(400) if unusable.
+
+    Shared by every route that can CREATE an instance — creation, import and ingest —
+    because gating only POST /api/rag/instances left ``POST /api/rag/*/import`` able to
+    make one called "*". Destructive routes are deliberately NOT gated: a legacy instance
+    with an awkward name must stay deletable.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise HTTPException(400, "Instance name is required.")
+    if len(name) > 64:
+        raise HTTPException(400, "Instance name must be 64 characters or fewer.")
+    if _BAD_INSTANCE_CHARS.search(name):
+        raise HTTPException(
+            400,
+            r"Instance name must not contain any of  * ? [ ] \ :  — these are pattern "
+            "characters in Redis keys and would make the instance overlap with others.",
+        )
+    return name
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -81,7 +112,7 @@ async def api_create_instance(payload: dict):
     Create a new RAG instance with optional metadata.
     Accepts redis_endpoint to store this instance on a specific Redis server.
     """
-    name     = payload.get("name", f"rag_{uuid.uuid4().hex[:6]}")
+    name     = _check_instance_name(payload.get("name") or f"rag_{uuid.uuid4().hex[:6]}")
     ep_name  = payload.get("redis_endpoint", "default")
     rc       = redis_store.r_for(ep_name)
     meta = {
@@ -161,7 +192,7 @@ def api_rag_chunks(instance: str, limit: int = 50, offset: int = 0, endpoint: st
         # offset by skipping that many keys before collecting up to `limit`.
         log.warning(f"api_rag_chunks: search failed for '{instance}', scanning instead: {e}")
         keys, skipped = [], 0
-        for k in rc.scan_iter(f"{prefix}:chunk:*", count=500):
+        for k in rc.scan_iter(rag.rag_chunk_glob(instance), count=500):
             if skipped < max(0, offset):
                 skipped += 1
                 continue
