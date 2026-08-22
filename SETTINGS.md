@@ -15,7 +15,7 @@ This document explains the main settings in the application: what each controls,
 7. [Web Crawler Settings](#web-crawler-settings)
 8. [Scheduled Re-crawl](#scheduled-re-crawl)
 9. [Watched Folders](#watched-folders)
-10. [Token Usage & Pricing](#token-usage--pricing)
+10. [Token Usage](#token-usage)
 11. [Prompt Templates & Base Instruction](#prompt-templates--base-instruction)
 12. [Security Settings](#security-settings)
 
@@ -71,7 +71,7 @@ Multiple Redis servers can be registered under custom names. Each RAG instance c
 
 Found in **Settings → RAG**.
 
-![RAG settings — chunk size, top-K, similarity threshold, the token-cost estimate, and the chat-history budget](screenshots/features/settings-rag.png)
+![RAG settings — chunk size, top-K, similarity threshold, and the chat-history budget](screenshots/features/settings-rag.png)
 
 ### Chunk Size
 - **Default:** `180` words
@@ -446,11 +446,11 @@ Found in **Settings → Web Sources** when configuring a URL crawl.
 
 ---
 
-## Token Usage & Pricing
+## Token Usage
 
 - The topbar shows this session's tokens: **↑ input · ↓ output · Σ total**. Exact numbers are the provider's own reported billed counts (stored with each answer); a `~` marks a session where at least one turn had to be estimated (≈ characters ÷ 4). Measured input counts the *full prompt the provider processed* — system prompt, re-sent history, retrieved context — so it grows with conversation length.
-- **Cost pill** (config key `pricing`, config.json only): USD per 1M tokens per model id, fields `in`, `out`, optional `cached_in` (provider cache re-reads) and `cache_write`. Ships with approximate defaults for a few common paid models — **edit to match your actual bill**. A model with no entry contributes $0 to the figure.
-- **All-time totals** live in **Analytics → 💰 Token Usage**: every provider and model since the counter was last reset, with fresh input, cache reads, cache writes and output as separate columns, ordered by cost. Models missing from `pricing` are listed by name so a partial cost total is never mistaken for a complete one. `GET /api/usage` returns the same tally; `DELETE /api/usage` (the card's **Reset tally** button) zeroes it without touching your conversations.
+- **All-time totals** live in **Analytics → 🔢 Token Usage**: every provider and model since the counter was last reset, with fresh input, cache reads, cache writes and output as separate columns, ordered by total tokens. `GET /api/usage` returns the same tally; `DELETE /api/usage` (the card's **Reset tally** button) zeroes it without touching your conversations.
+- **No cost figure.** RediRecall reports tokens only. Provider rates vary by model and change without notice, so an estimate baked into the app would go stale silently and read as an authority it is not — price these counts against your provider's own billing page.
 
 ---
 

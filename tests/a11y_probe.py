@@ -66,8 +66,15 @@ def main(index: pathlib.Path) -> None:
                            return .2126*f(c[0])+.7152*f(c[1])+.0722*f(c[2]); };
           const ratio = (a,b) => { const x=L(a), y=L(b), hi=Math.max(x,y), lo=Math.min(x,y);
                                    return (hi+.05)/(lo+.05); };
+          // Keep the alpha channel. Dropping it treated rgba(255,255,255,.04) — the glass
+          // fills the app uses on most controls — as opaque white, so a translucent surface
+          // could not be measured at all: it reported ~1:1 in dark and ~17:1 in light, both
+          // of them artefacts of the missing composite rather than anything on screen.
           const nums = s => (s.match(/rgba?\([^)]+\)/g) || [])
-                              .map(c => c.match(/[\d.]+/g).slice(0,3).map(Number));
+                              .map(c => { const n = c.match(/[\d.]+/g).map(Number);
+                                          return [n[0], n[1], n[2], n.length > 3 ? n[3] : 1]; });
+          const over = (fg, bg) => fg[3] >= 1 ? fg.slice(0,3)
+                     : [0,1,2].map(i => fg[3]*fg[i] + (1-fg[3])*bg[i]);
           // Every surface that paints its own text on an accent fill.
           const SPECS = [
             ['btn-primary',      'button', 'btn btn-primary',            ''],
@@ -75,13 +82,18 @@ def main(index: pathlib.Path) -> None:
             ['send-btn',         'button', '',                           'send-btn'],
             ['seg-btn-active',   'button', 'seg-btn active',             ''],
             ['prov-use-active',  'button', 'prov-use-btn is-active',     ''],
-            ['provider-active',  'button', 'active',                     '', 'provider-seg'],
+            ['mp-btn',           'button', '',                           'mp-btn'],
+            ['mp-item-selected', 'button', 'mp-item',                    '', '', {'aria-selected':'true'}],
             ['msg-bubble-user',  'div',    'msg-bubble user',            ''],
             ['msg-avatar-user',  'div',    'msg-avatar user-av',         ''],
           ];
-          // A neutral host by default: parking everything inside .provider-seg let that
-          // component's `background:transparent` base rule suppress .btn-primary's gradient,
-          // so those rows measured as "no fill" instead of being checked at all.
+          // A neutral host by default: parking everything inside a component whose base
+          // rule sets `background:transparent` suppressed .btn-primary's gradient, so those
+          // rows measured as "no fill" instead of being checked at all.
+          //
+          // Specs carry their own attributes because some states are attribute-selected
+          // (.mp-item[aria-selected="true"]); building the element without them measured
+          // the unselected variant and reported it as if it were the selected one.
           const host = document.createElement('div');
           host.style.cssText = 'position:fixed;left:-9999px;top:0';
           document.body.appendChild(host);
@@ -90,24 +102,31 @@ def main(index: pathlib.Path) -> None:
           for (const theme of ['light','dark']) {
             document.documentElement.setAttribute('data-theme', theme);
             const rows = {};
-            for (const [name, tag, cls, id, parentCls] of SPECS) {
+            for (const [name, tag, cls, id, parentCls, attrs] of SPECS) {
               const el = document.createElement(tag);
               if (cls) el.className = cls;
               if (id) el.id = id;
+              if (attrs) for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
               el.textContent = 'Xy';
               let mount = host;
               if (parentCls) { mount = document.createElement('div');
                                mount.className = parentCls; host.appendChild(mount); }
               mount.appendChild(el);
               const cs = getComputedStyle(el);
-              const fg = nums(cs.color)[0] || [255,255,255];
+              // The page paints behind every one of these; composite against it so a
+              // translucent fill is measured as the colour a reader actually sees.
+              const page = nums(getComputedStyle(document.body).backgroundColor)[0]
+                        || (theme === 'dark' ? [17,17,20,1] : [255,255,255,1]);
+              const base = page.slice(0,3);
+              const fg = over(nums(cs.color)[0] || [255,255,255,1], base);
               const stops = nums(cs.backgroundImage);
               const solid = nums(cs.backgroundColor);
-              const bgs = stops.length ? stops
-                        : (solid.length && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' ? solid : []);
+              const raw = stops.length ? stops
+                        : (solid.length && solid[0][3] > 0 ? solid : []);
+              const bgs = raw.map(b => over(b, base));
               rows[name] = bgs.length
                 ? +Math.min(...bgs.map(b => ratio(fg, b))).toFixed(2)
-                : null;   // no accent fill applied — nothing to gate
+                : null;   // no fill applied — nothing to gate
               el.remove();
               if (mount !== host) mount.remove();
             }

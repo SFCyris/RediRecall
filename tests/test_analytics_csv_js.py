@@ -2,9 +2,13 @@
 """The Analytics CSV export, run as real JavaScript.
 
 This is the file a user reconciles against a provider bill, and it had no test at all. It
-also re-implements the provider/model split and calls ``_tokenCost`` a second time, so it
-can drift away from the on-screen table silently — the two are asserted against each other
-here rather than each being checked in isolation.
+re-implements the provider/model split independently of the on-screen table, so it can
+drift away from it silently.
+
+It exports token counts only. It used to carry a Cost USD column derived from a table of
+hand-written rates that no provider supplied and nothing revalidated — a number in a
+billing spreadsheet has to be right or absent, and that one could not be guaranteed
+either way.
 
 Extracted from index.html and run under node; the DOM and fetch are stubbed so the CSV
 text itself is what gets inspected.
@@ -22,16 +26,15 @@ from _jsrun import extract_js_function, run_node
 _INDEX = pathlib.Path(__file__).resolve().parents[1] / "redirecall" / "index.html"
 
 
-def _export(usage, pricing=None, metrics=None, instances=None) -> list[list[str]]:
+def _export(usage, metrics=None, instances=None) -> list[list[str]]:
     """Run exportAnalyticsCsv against stubbed state and return the parsed CSV rows."""
     if not shutil.which("node"):
         pytest.skip("node not available")
     html = _INDEX.read_text(encoding="utf-8")
-    fns = "\n".join(extract_js_function(html, n)
-                    for n in ("_tokenCost", "exportAnalyticsCsv"))
+    fns = extract_js_function(html, "exportAnalyticsCsv")
     metrics = metrics or {"hits": 3, "misses": 1, "latencies": [0.2, 0.4]}
     js = f"""
-const S={{config:{{pricing:{json.dumps(pricing or {})}}},
+const S={{config:{{}},
           chatMetrics:{json.dumps(metrics)},
           ragInstances:{json.dumps(instances or [])}}};
 // Capture the Blob text instead of downloading it.
@@ -64,42 +67,24 @@ def test_headline_metrics_are_exported():
 
 
 def test_token_rows_are_included_with_a_header():
-    """The export shipped without any token or cost data — the one table worth putting in
-    a spreadsheet was the one you could not get out of the app."""
+    """The export shipped without any token data — the one table worth putting in a
+    spreadsheet was the one you could not get out of the app."""
     rows = _export({"claude:sonnet": {"in": 10, "cached": 4, "cache_write": 7, "out": 3}})
     hdr = _find(rows, "Provider")
-    assert hdr == ["Provider", "Model", "Input", "Cached", "Cache write", "Output", "Cost USD"]
+    assert hdr == ["Provider", "Model", "Input", "Cached", "Cache write", "Output"]
     row = _find(rows, "claude")
-    assert row[:6] == ["claude", "sonnet", "10", "4", "7", "3"], row
+    assert row == ["claude", "sonnet", "10", "4", "7", "3"], row
 
 
-def test_cost_matches_the_on_screen_table_for_the_same_input():
-    """The CSV calls _tokenCost separately from the card. Pin them to each other so the
-    exported number cannot drift away from the one the user was shown."""
-    usage = {"claude:s": {"in": 1_000_000, "cached": 0, "cache_write": 1_000_000, "out": 0}}
-    pricing = {"s": {"in": 3.0, "cache_write": 3.75, "out": 0}}
-    csv_cost = float(_find(_export(usage, pricing), "claude")[6])
-
-    # the same figure as rendered by the card
-    html = _INDEX.read_text(encoding="utf-8")
-    fns = "\n".join(extract_js_function(html, n) for n in
-                    ("_tokenCost", "_fmtCost", "escHtml", "_tokenUsageCardHTML"))
-    js = (f"const S={{config:{{pricing:{json.dumps(pricing)}}}}};\n" + fns +
-          f"\nconsole.log(JSON.stringify(_tokenUsageCardHTML({json.dumps(usage)})));\n")
-    r = run_node(js, timeout=60)
-    assert r.returncode == 0, r.stderr[:800]
-    card = json.loads(r.stdout.strip().splitlines()[-1])
-
-    assert round(csv_cost, 2) == 6.75, csv_cost          # 3.00 + 3.75
-    assert f"${csv_cost:.2f}" in card, (
-        f"the CSV says {csv_cost:.2f} but the card does not show it")
-
-
-def test_an_unpriced_model_says_so_rather_than_exporting_a_zero():
-    """A silent 0.0000 in a billing spreadsheet is worse than a gap — it reads as 'this
-    model cost nothing' when the truth is 'nobody priced it'."""
-    row = _find(_export({"ollama:llama3": {"in": 500, "out": 100}}), "ollama")
-    assert row[6] == "not priced", row
+def test_the_export_quotes_no_money(self_check=None):
+    """Guard against the cost column returning: a rate the app cannot verify has no place
+    in a file someone reconciles against a real invoice."""
+    rows = _export({"openai:gpt-4o": {"in": 1_000_000, "out": 1_000_000},
+                    "ollama:llama3": {"in": 500, "out": 100}})
+    flat = [c for r in rows for c in r]
+    assert not any("$" in c for c in flat), flat
+    assert "Cost USD" not in flat
+    assert "not priced" not in flat
 
 
 def test_a_model_name_containing_a_comma_does_not_shift_the_columns():
@@ -108,7 +93,7 @@ def test_a_model_name_containing_a_comma_does_not_shift_the_columns():
     rows = _export({"openrouter:vendor,model:beta": {"in": 5, "out": 1}})
     row = _find(rows, "openrouter")
     assert row[1] == "vendor,model:beta", row
-    assert len(row) == 7, f"the comma split the row into {len(row)} columns: {row}"
+    assert len(row) == 6, f"the comma split the row into {len(row)} columns: {row}"
 
 
 def test_a_model_name_containing_a_quote_is_escaped():

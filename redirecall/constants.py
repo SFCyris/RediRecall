@@ -326,24 +326,5 @@ DEFAULT_CONFIG: dict = {
     # background scan ingests new and changed supported files into the target RAG
     # instance (the local-disk twin of the scheduled web re-crawl).
     "watch_folders": {"enabled": False, "interval_minutes": 5, "folders": []},
-    # ── Token pricing (USD per 1M tokens) ─────────────────────────────────────
-    # Used only to estimate cost from provider-reported usage. APPROXIMATE
-    # defaults for a few common paid models — edit to match your actual bill.
-    # "cached_in" prices provider-cached input re-reads (Claude ≈ 0.1× input);
-    # cache WRITES default to 1.25× input unless a "cache_write" price is set.
-    # A model without an entry shows token counts but contributes $0 — the cost
-    # pill then shows a trailing "+" to mark the figure as partial. Qwen, Mistral,
-    # Groq and Gemini all have paid tiers too: add entries here for the models
-    # you actually pay for. Local (Ollama) models cost nothing by definition.
-    "pricing": {
-        "claude-opus-4-6":           {"in": 15.0, "out": 75.0, "cached_in": 1.50},
-        "claude-sonnet-4-6":         {"in": 3.0,  "out": 15.0, "cached_in": 0.30},
-        "claude-haiku-4-5-20251001": {"in": 1.0,  "out": 5.0,  "cached_in": 0.10},
-        "gpt-4o":                    {"in": 2.5,  "out": 10.0},
-        "gpt-4o-mini":               {"in": 0.15, "out": 0.60},
-        "gpt-4.1":                   {"in": 2.0,  "out": 8.0},
-        "gpt-4.1-mini":              {"in": 0.40, "out": 1.60},
-        "gpt-4.1-nano":              {"in": 0.10, "out": 0.40},
-    },
 }
 

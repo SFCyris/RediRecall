@@ -217,7 +217,7 @@ export MISTRAL_API_KEY=...      # Mistral
 
 **⚙️ Settings** — Redis connection (incl. multiple endpoints), embedding-model selector, chunk-size/overlap/top-K/threshold controls, a **chat-history token budget**, a **chart-authoring toggle** (drop ~2k tokens/message on text-only deployments), reusable prompt templates, dark/light/auto theme, export/import config; staged edits are marked **unsaved** and confirmed before they are discarded.
 
-**📊 Observability** — per-response latency breakdown (cache / RAG / LLM / total), Redis memory monitor, cache analytics, ingestion logs, a session notification log (errors stay until dismissed), a system-status panel covering every provider, and an all-time **token usage** table broken down by provider and model with estimated cost (CSV export included).
+**📊 Observability** — per-response latency breakdown (cache / RAG / LLM / total), Redis memory monitor, cache analytics, ingestion logs, a session notification log (errors stay until dismissed), a system-status panel covering every provider, and an all-time **token usage** table broken down by provider and model (CSV export included) — token counts only, so no stale price estimate is passed off as your bill.
 
 <p align="center">
   <img src="screenshots/features/no-rag.png" alt="The top-bar selector set to No RAG — answer with no retrieval" width="72%">

@@ -2,9 +2,13 @@
 """The Analytics "Token Usage" card, run as real JavaScript.
 
 The card is the only surface that answers "how many tokens have I actually burned"
-across every session. It reads GET /api/usage, whose fields are disjoint token classes
-(fresh input / cache read / cache write / output) priced at different rates, so the
-column semantics and the partial-cost signalling are the things worth pinning down.
+across every session. It reads GET /api/usage, whose fields are disjoint token
+classes (fresh input / cache read / cache write / output), so the column semantics
+are the thing worth pinning down.
+
+The card reports tokens and nothing else. It used to estimate a dollar cost from a
+table of hand-written rates that no provider supplied and nothing revalidated —
+prices change without notice, so the figure was as likely to be wrong as right.
 
 Extracted from index.html and run under node — pure string work, no browser.
 """
@@ -21,21 +25,17 @@ _INDEX = pathlib.Path(__file__).resolve().parents[1] / "redirecall" / "index.htm
 
 
 def _fns() -> str:
-    """The card renderer plus the helpers it calls. escHtml is pulled in too — it is the
-    only thing standing between a model-supplied model name and the Analytics DOM."""
+    """The card renderer plus escHtml — the only thing standing between a
+    provider-supplied model name and the Analytics DOM."""
     html = _INDEX.read_text(encoding="utf-8")
-    # Brace-balanced: slicing to the next line-initial '}' swallowed the following function
-    # whenever the target was a one-liner (_fmtCost), so the payload defined
-    # _tokenUsageCardHTML twice and escHtml dragged in five unrelated helpers.
     return "\n".join(extract_js_function(html, n) for n in
-                     ("_tokenCost", "_fmtCost", "escHtml", "_tokenUsageCardHTML"))
+                     ("escHtml", "_tokenUsageCardHTML"))
 
 
-def _render(usage, pricing=None) -> str:
+def _render(usage) -> str:
     if not shutil.which("node"):
         pytest.skip("node not available")
-    js = (f"const S={{config:{{pricing:{json.dumps(pricing or {})}}}}};\n"
-          + _fns()
+    js = ("const S={config:{}};\n" + _fns()
           + f"\nconsole.log(JSON.stringify(_tokenUsageCardHTML({json.dumps(usage)})));\n")
     r = run_node(js, timeout=60)
     assert r.returncode == 0, f"node exited {r.returncode}:\n{r.stderr[:1500]}"
@@ -60,7 +60,6 @@ def test_disjoint_token_classes_get_their_own_columns():
     out = _render({"claude:sonnet": {"in": 100, "cached": 40, "cache_write": 7, "out": 20}})
     cells = _cells(out)
     assert "100" in cells and "40" in cells and "7" in cells and "20" in cells, cells
-    # the header must name all four, so no column is a hidden component of another
     for head in ("Input", "Cached", "Cache write", "Output"):
         assert head in out, f"missing column header {head!r}"
 
@@ -72,36 +71,19 @@ def test_cache_columns_are_hidden_when_no_provider_reports_them():
     assert "Input" in out and "Output" in out
 
 
-def test_cost_uses_the_same_helper_as_the_topbar_pill():
-    out = _render({"openai:gpt-4o": {"in": 1_000_000, "out": 1_000_000}},
-                  {"gpt-4o": {"in": 2.5, "out": 10.0}})
-    assert "$12.50" in out, out
+def test_rows_are_ordered_by_total_tokens_so_the_heaviest_model_is_first():
+    """Cost used to decide the order. Total volume is the ordering the card can still
+    stand behind — it is measured, not inferred from a rate."""
+    out = _render({"openai:light": {"in": 1000, "out": 0},
+                   "openai:heavy": {"in": 1_000_000, "out": 0}})
+    assert out.index("heavy") < out.index("light")
 
 
-def test_unpriced_models_are_named_and_the_total_says_it_is_partial():
-    """A bare '+' suffix on the total was the only hint that some models were unpriced,
-    and nothing on screen defined it. The shortfall has to be legible: how many models,
-    and which ones."""
-    out = _render({"openai:gpt-4o": {"in": 1_000_000, "out": 0},
-                   "ollama:llama3": {"in": 500, "out": 100}},
-                  {"gpt-4o": {"in": 2.5, "out": 10.0}})
-    assert "not priced" in out
-    assert "llama3" in out
-    assert "1 of 2 model" in out, out
-    assert "partial" in out.lower()
-
-
-def test_no_partial_warning_when_every_model_is_priced():
-    out = _render({"openai:gpt-4o": {"in": 1000, "out": 100}},
-                  {"gpt-4o": {"in": 2.5, "out": 10.0}})
-    assert "partial" not in out.lower() and "not priced" not in out
-
-
-def test_rows_are_ordered_by_cost_so_the_expensive_model_is_first():
-    out = _render({"openai:cheap": {"in": 1000, "out": 0},
-                   "openai:dear": {"in": 1_000_000, "out": 0}},
-                  {"cheap": {"in": 0.1, "out": 0}, "dear": {"in": 50.0, "out": 0}})
-    assert out.index("dear") < out.index("cheap")
+def test_cache_classes_count_towards_the_row_ordering():
+    """A model whose volume is mostly cache reads still burned those tokens."""
+    out = _render({"claude:mostly-cache": {"in": 10, "cached": 900_000, "out": 10},
+                   "claude:plain": {"in": 5000, "out": 5000}})
+    assert out.index("mostly-cache") < out.index("plain")
 
 
 def test_a_model_name_containing_colons_is_shown_whole():
@@ -134,37 +116,27 @@ def test_totals_row_sums_every_token_column():
     out = _render({"claude:a": {"in": 10, "cached": 1, "cache_write": 2, "out": 3},
                    "claude:b": {"in": 20, "cached": 4, "cache_write": 5, "out": 6}})
     cells = _foot_cells(out)
-    assert cells == ["Total", "30", "5", "7", "9", "$0.00"], cells
+    assert cells == ["Total", "30", "5", "7", "9"], cells
 
 
 def test_each_row_shows_its_own_cache_write_count():
     """The totals row alone cannot catch a per-row cell hardcoded to 0 — both had to be
     broken together before any assertion noticed."""
     out = _render({"claude:a": {"in": 10, "cached": 1, "cache_write": 2, "out": 3}})
-    cells = _cells(out)
-    assert "2" in cells, f"the row's cache-write count is missing: {cells}"
+    assert "2" in _cells(out), f"the row's cache-write count is missing: {_cells(out)}"
 
 
-def test_cache_write_tokens_are_priced():
-    """Cache creation is billed at ~1.25x input and is the most expensive token class in
-    the table. Nothing anywhere exercised its pricing term: deleting it from _tokenCost
-    left both JS test files green."""
-    out = _render({"claude:s": {"in": 0, "cached": 0, "cache_write": 1_000_000, "out": 0}},
-                  {"s": {"in": 3.0, "cache_write": 3.75, "out": 0}})
-    assert "$3.75" in out, f"cache-write tokens are not priced: {_cells(out)}"
+def test_the_card_quotes_no_money_at_all():
+    """Guard against the estimate returning: no currency, no Cost column, and no claim
+    that a total is partial for want of a rate."""
+    out = _render({"openai:gpt-4o": {"in": 1_000_000, "cached": 5, "cache_write": 5,
+                                     "out": 1_000_000}})
+    assert "$" not in out, out
+    assert "Cost" not in out
+    assert "not priced" not in out and "partial" not in out.lower()
 
 
-def test_cache_write_falls_back_to_1_25x_input_when_unpriced():
-    """With no explicit cache_write rate the code bills 1.25x input — 1M x $4.00 x 1.25."""
-    out = _render({"claude:s": {"in": 0, "cache_write": 1_000_000, "out": 0}},
-                  {"s": {"in": 4.0, "out": 0}})
-    assert "$5.00" in out, f"the 1.25x fallback is not applied: {_cells(out)}"
-
-
-def test_zero_cost_renders_as_a_dollar_amount_not_an_empty_or_dash():
-    # an all-free (local) setup must read as "$0.00", never as an ambiguous dash
-    out = _render({"ollama:llama3": {"in": 500, "out": 100}}, {"llama3": {"in": 0, "out": 0}})
-    # the ROW, not the totals line: the total prints $0.00 regardless, so checking the
-    # whole document passed even when a free model's row read "not priced"
-    assert "$0.00" in _cells(out), f"the free model's row does not show $0.00: {_cells(out)}"
-    assert "not priced" not in out
+def test_the_card_says_where_the_rate_question_belongs():
+    """Removing the figure without saying why just looks like a missing feature."""
+    out = _render({"openai:gpt-4o": {"in": 10, "out": 5}})
+    assert "your own bill" in out.lower(), out

@@ -127,6 +127,9 @@ body{background:radial-gradient(ellipse 120% 80% at 20% 0%,rgba(99,102,241,0.07)
 .sidebar-btn{display:flex;align-items:center;gap:8px;width:100%;padding:9px 10px;border:none;background:transparent;color:var(--text1);font-size:13px;border-radius:var(--r3);cursor:pointer;transition:var(--transition);text-align:left}
 .sidebar-btn:hover{background:var(--glass2);color:var(--text0)}
 .sidebar-btn.active{background:linear-gradient(135deg,rgba(124,111,247,.2),rgba(96,165,250,.1));color:var(--accent3);border:1px solid rgba(124,111,247,.25)}
+/* Destructive, so it reads as such on hover — it sits beside Export and Theme,
+   which are not. The confirmation dialog is still the actual guard. */
+.sidebar-btn-danger:hover{background:rgba(239,68,68,.10);color:var(--red)}
 .sidebar-btn .icon{font-size:15px;flex-shrink:0;width:20px;text-align:center}
 .new-chat-btn{display:flex;align-items:center;justify-content:center;gap:8px;width:calc(100% - 16px);margin:8px;padding:10px;background:linear-gradient(135deg,var(--accent-fill),var(--accent-fill2));color:#fff;border:none;border-radius:var(--r2);cursor:pointer;font-size:13px;font-weight:600;transition:var(--transition);box-shadow:0 4px 16px rgba(124,111,247,.3)}
 .new-chat-btn:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(124,111,247,.45)}
@@ -134,19 +137,27 @@ body{background:radial-gradient(ellipse 120% 80% at 20% 0%,rgba(99,102,241,0.07)
 .session-preview{font-size:11px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:160px}
 #sidebar-footer{padding:8px;border-top:1px solid var(--border);flex-shrink:0}
 /* Topbar */
-#topbar{display:flex;flex-direction:column;gap:8px;padding:10px 20px;background:var(--glass);backdrop-filter:var(--blur);border-bottom:1px solid var(--border);flex-shrink:0}
-.topbar-row{display:flex;align-items:center;gap:12px;min-width:0}
-.topbar-row-main{min-height:34px}
-.topbar-row-controls{flex-wrap:wrap;row-gap:8px}
-.topbar-ctrl-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;margin-left:auto;min-width:0}
+/* position+z-index are load-bearing: backdrop-filter makes this a stacking context,
+   so the model picker's popover cannot escape it however high its own z-index is.
+   #chat-area follows in the DOM, so without a z-index here the popover paints
+   underneath answer cards and tables. Below #pinned-panel (50) and every overlay. */
+/* One row. It was two — a title row and a controls row — because the seven-button
+   provider strip needed a line of its own; with that gone everything fits, and the bar
+   no longer grows a second line (and ~44px of chat height) the moment a session title
+   or a token count gets long. */
+#topbar{display:flex;flex-direction:row;align-items:center;gap:12px;min-height:52px;
+  padding:8px 20px;background:var(--glass);backdrop-filter:var(--blur);
+  border-bottom:1px solid var(--border);flex-shrink:0;position:relative;z-index:30}
+.topbar-ctrl-right{display:flex;align-items:center;gap:8px;justify-content:flex-end;
+  margin-left:auto;flex-shrink:0}
 #toggle-sidebar{background:transparent;border:1px solid var(--border);color:var(--text1);padding:7px 10px;border-radius:var(--r3);cursor:pointer;font-size:14px;transition:var(--transition);flex-shrink:0}
 #toggle-sidebar:hover{background:var(--glass2);border-color:var(--border2)}
-#session-title{font-weight:600;font-size:15px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#session-title{font-weight:600;font-size:15px;flex:1 1 0;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 /* width:auto keeps the settings-form select{width:100%} rule from stretching topbar selects */
 .topbar-select{width:auto;max-width:200px;background:var(--glass2);border:1px solid var(--border);color:var(--text0);padding:7px 12px;border-radius:var(--r3);font-size:13px;cursor:pointer;outline:none;text-overflow:ellipsis}
 .topbar-select option{background:var(--bg1);color:var(--text0)}
 .vision-badge{font-size:10px;padding:2px 8px;background:rgba(96,165,250,.15);border:1px solid rgba(96,165,250,.3);color:var(--blue);border-radius:10px;white-space:nowrap}
-#topbar-actions{display:flex;gap:6px}
+#topbar-actions{display:flex;gap:6px;flex-shrink:0}
 .icon-btn{background:var(--glass2);border:1px solid var(--border);color:var(--text1);width:34px;height:34px;border-radius:var(--r3);cursor:pointer;font-size:15px;display:flex;align-items:center;justify-content:center;transition:var(--transition)}
 .icon-btn:hover{border-color:var(--border2);color:var(--text0)}
 /* Token meter — a rough conversation-size estimate, split into input (your prompts),
@@ -157,8 +168,6 @@ body{background:radial-gradient(ellipse 120% 80% at 20% 0%,rgba(99,102,241,0.07)
 .tok-in{background:rgba(96,165,250,.15);border-color:rgba(96,165,250,.32);color:var(--blue)}
 .tok-out{background:rgba(74,222,128,.16);border-color:rgba(74,222,128,.34);color:var(--green)}
 .tok-total{background:var(--glass);color:var(--text2)}
-.tok-cost{background:rgba(251,191,36,.16);border-color:rgba(251,191,36,.35);color:var(--yellow)}
-@media (max-width:640px){.tok-total,.tok-cost{display:none!important}}   /* keep the topbar tidy on phones */
 /* The dismiss affordance. Errors no longer expire on their own, so there has to be a way
    to get rid of one, and hovering to read a long path must not race a countdown. */
 .toast-count{font-size:11px;font-weight:700;opacity:.75;flex-shrink:0;
@@ -472,15 +481,75 @@ table.data-table tr:last-child td{border-bottom:none}
 [data-theme="dark"] .glass-card{box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 2px 8px rgba(0,0,0,0.25);}
 [data-theme="dark"] #settings-panel{background:rgba(18,18,26,0.95);box-shadow:0 32px 100px rgba(0,0,0,0.8),inset 0 1px 0 rgba(255,255,255,0.10);}
 /* ── Provider badge ── */
-.provider-seg{display:flex;flex-wrap:wrap;align-items:center;background:var(--glass2);border:1px solid var(--border);border-radius:20px;padding:2px;gap:2px}
-.provider-seg button{background:transparent;border:none;color:var(--text2);padding:5px 12px;border-radius:18px;font-size:12px;font-weight:600;cursor:pointer;transition:var(--transition);white-space:nowrap}
-.provider-seg button.active{background:var(--accent-fill);color:#fff;box-shadow:0 2px 8px rgba(124,111,247,.4)}
-.provider-seg button.active.claude-active{background:linear-gradient(135deg,#d97706,#b45309);box-shadow:0 2px 8px rgba(217,119,6,.4)}
-.provider-seg button.active.openai-active{background:linear-gradient(135deg,#10a37f,#0d8c6d);box-shadow:0 2px 8px rgba(16,163,127,.4)}
-.provider-seg button.active.qwen-active{background:linear-gradient(135deg,#6366f1,#4f46e5);box-shadow:0 2px 8px rgba(99,102,241,.4)}
-.provider-seg button.active.mistral-active{background:linear-gradient(135deg,#ff7000,#fa500f);box-shadow:0 2px 8px rgba(250,80,15,.4)}
-.provider-seg button.active.groq-active{background:linear-gradient(135deg,#f97316,#ea580c);box-shadow:0 2px 8px rgba(249,115,22,.4)}
-.provider-seg button.active.gemini-active{background:linear-gradient(135deg,#1d9bf0,#1a8cd8);box-shadow:0 2px 8px rgba(29,155,240,.4)}
+/* ── Model picker ──────────────────────────────────────────────────────────── */
+/* Replaces a seven-button provider strip (550px, 48-76% of this row) plus a
+   separate model <select>. Provider and model are one dependent choice, so they
+   are one control; availability is shown at the point of choice rather than
+   discovered by picking a provider with no key and getting an empty model list. */
+#model-picker{position:relative;display:inline-flex}
+#mp-btn{display:inline-flex;align-items:center;gap:7px;background:var(--glass2);
+  border:1px solid var(--border);border-radius:var(--r3);padding:6px 11px;
+  font-size:13px;font-weight:600;color:var(--text0);cursor:pointer;
+  transition:var(--transition);max-width:340px}
+#mp-btn:hover{border-color:var(--border2);background:var(--glass)}
+#mp-btn[aria-expanded="true"]{border-color:var(--accent);box-shadow:0 0 0 3px rgba(124,111,247,.18)}
+#mp-provider{color:var(--text2);font-weight:600;flex-shrink:0}
+.mp-sep{color:var(--text3);flex-shrink:0}
+#mp-model{color:var(--text0);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mp-caret{color:var(--text2);margin-left:1px;flex-shrink:0;font-size:11px}
+#mp-pop{position:absolute;top:calc(100% + 6px);right:0;z-index:60;width:340px;
+  max-width:min(340px,92vw);background:var(--bg1);border:1px solid var(--border2);
+  border-radius:var(--r2);box-shadow:var(--shadow);padding:6px;
+  display:flex;flex-direction:column;gap:4px}
+#mp-pop[hidden]{display:none}
+#mp-search{width:100%;padding:7px 10px;font-size:13px;border-radius:8px;
+  border:1px solid var(--border);background:var(--glass2);color:var(--text0)}
+#mp-search:focus{outline:none;border-color:var(--accent)}
+#mp-list{max-height:min(52vh,420px);overflow-y:auto;overflow-x:hidden}
+#mp-list::-webkit-scrollbar{width:4px}
+#mp-list::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.mp-group{display:flex;align-items:center;gap:7px;font-size:10px;font-weight:700;
+  letter-spacing:.06em;text-transform:uppercase;color:var(--text2);padding:9px 10px 5px}
+.mp-group .mp-note{font-weight:500;text-transform:none;letter-spacing:0;
+  color:var(--text3);font-size:11px;margin-left:auto}
+.mp-item{display:flex;align-items:center;gap:8px;width:100%;text-align:left;
+  padding:7px 10px 7px 24px;font-size:13px;border:none;background:transparent;
+  color:var(--text1);border-radius:8px;cursor:pointer;transition:var(--transition)}
+.mp-item:hover,.mp-item.mp-cursor{background:var(--glass2);color:var(--text0)}
+.mp-item[aria-selected="true"]{background:rgba(124,111,247,.14);color:var(--accent3);font-weight:600}
+.mp-item .mp-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.mp-tag{font-size:10px;color:var(--text2);background:var(--glass2);border:1px solid var(--border);
+  border-radius:6px;padding:1px 5px;flex-shrink:0}
+/* The provider's default — on Gemini and Mistral, the free-tier model. Marked in its
+   own colour so it reads apart from the purple used for the model currently in use. */
+.mp-item.mp-is-default .mp-name{color:var(--blue)}
+.mp-item.mp-is-default[aria-selected="true"] .mp-name{color:var(--accent3)}
+.mp-tag-default{color:var(--blue);border-color:color-mix(in srgb,var(--blue) 40%,transparent);
+  background:color-mix(in srgb,var(--blue) 12%,transparent);font-weight:600;letter-spacing:.02em}
+.mp-more{width:100%;text-align:left;padding:6px 10px 6px 24px;font-size:12px;
+  border:none;background:transparent;color:var(--accent3);cursor:pointer;border-radius:8px}
+.mp-more:hover{background:var(--glass2)}
+.mp-setup{display:flex;align-items:center;gap:7px;width:100%;text-align:left;
+  padding:8px 10px;font-size:12px;border:none;background:transparent;
+  color:var(--text2);cursor:pointer;border-radius:8px}
+.mp-setup:hover{background:var(--glass2);color:var(--text0)}
+.mp-setup u{color:var(--accent3);text-decoration:none;font-weight:600}
+.mp-empty{padding:14px 10px;font-size:12px;color:var(--text2);text-align:center}
+/* Single-row top bar: as it narrows the controls give way in order of value, or they
+   squeeze the session title to nothing and then overflow the bar. Least useful first —
+   the derived token pills, then the counter, then the Vision badge (the 📎 button
+   already carries that state), then the widths themselves. These must sit AFTER the
+   #mp-btn and .topbar-select base rules: same specificity, so source order decides.
+   !important where JS writes an inline style (the Vision badge). */
+@media (max-width:1300px){.tok-total{display:none!important}}
+@media (max-width:1150px){.token-counter{display:none!important}}
+@media (max-width:1000px){#vision-badge{display:none!important}}
+@media (max-width:900px){#mp-btn{max-width:200px}.topbar-select{max-width:130px}}
+@media (max-width:780px){#mp-btn{max-width:160px}.topbar-select{max-width:104px}
+  #rag-all-btn{display:none}   /* the select still offers ✦ All RAGs */
+  #topbar{padding:8px 12px;gap:8px}}
+@media (max-width:560px){#mp-btn{max-width:136px}.topbar-select{max-width:88px}}
+@media(max-width:640px){#mp-pop{width:min(340px,92vw)}}
 /* ── Generated image card ── */
 .gen-img-wrap{margin:10px 0;border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;background:var(--glass)}
 .gen-img-bar{display:flex;align-items:center;gap:6px;padding:6px 12px;background:rgba(16,185,129,.06);border-bottom:1px solid rgba(16,185,129,.2)}
@@ -867,6 +936,8 @@ button:focus-visible,a:focus-visible,[tabindex]:not([tabindex="-1"]):focus-visib
     <button class="sidebar-btn" onclick="openSettings('analytics')"><span class="icon">📊</span>Analytics</button>
     <button class="sidebar-btn" onclick="exportChat('md')"><span class="icon">💾</span>Export Chat (.md)</button>
     <button class="sidebar-btn" onclick="exportChat('txt')"><span class="icon">📄</span>Export Chat (.txt)</button>
+    <button class="sidebar-btn sidebar-btn-danger" onclick="confirmClearChat()"
+            aria-label="Clear this conversation"><span class="icon">🗑</span>Clear Chat</button>
     <button class="sidebar-btn" onclick="cycleTheme()"><span class="icon">🎨</span>Toggle Theme</button>
     <!-- AGPL-3.0 §13: anyone using this instance over a network must be offered the
          Corresponding Source. The href is filled from /api/health's `source`, so a
@@ -883,37 +954,35 @@ button:focus-visible,a:focus-visible,[tabindex]:not([tabindex="-1"]):focus-visib
 <div id="main" role="main">
   <h1 class="sr-only">RediRecall — chat with your knowledge base</h1>
   <div id="topbar" role="toolbar" aria-label="Conversation controls">
-    <div class="topbar-row topbar-row-main">
-      <button id="toggle-sidebar" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
-      <span id="session-title">New Conversation</span>
-      <div id="topbar-actions">
-        <button class="icon-btn" onclick="confirmClearChat()" title="Clear chat" aria-label="Clear this conversation">🗑</button>
-        <button class="icon-btn" onclick="openSearch()" title="Search">🔍</button>
-        <button class="icon-btn" onclick="openSettings('general')" title="Settings">⚙️</button>
-      </div>
-    </div>
-    <div class="topbar-row topbar-row-controls">
-      <div class="provider-seg">
-        <button id="prov-ollama" class="active" onclick="setProvider('ollama')">⚡ Ollama</button>
-        <button id="prov-claude" onclick="setProvider('claude')">✦ Claude</button>
-        <button id="prov-openai" onclick="setProvider('openai')">◆ OpenAI</button>
-        <button id="prov-qwen" onclick="setProvider('qwen')">◈ Qwen</button>
-        <button id="prov-mistral" onclick="setProvider('mistral')">◐ Mistral</button>
-        <button id="prov-groq" onclick="setProvider('groq')">▲ Groq</button>
-        <button id="prov-gemini" onclick="setProvider('gemini')">✧ Gemini</button>
-      </div>
-      <div class="topbar-ctrl-right">
+    <button id="toggle-sidebar" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">☰</button>
+    <span id="session-title">New Conversation</span>
+    <div class="topbar-ctrl-right">
         <select id="rag-select" aria-label="Active knowledge base" class="topbar-select" onchange="onRagSelectChange(this.value)" title="Active RAG instance"></select>
         <button id="rag-all-btn" class="icon-btn" onclick="toggleRagAll()" title="Query all enabled RAG instances in parallel (multi-server)">🔀</button>
-        <select id="model-select" aria-label="Language model" class="topbar-select" onchange="selectModel(this.value)"><option>Loading…</option></select>
+        <div id="model-picker">
+          <button id="mp-btn" aria-haspopup="listbox" aria-expanded="false" onclick="toggleModelPicker()">
+            <span class="dot" id="mp-dot" aria-hidden="true"></span>
+            <span id="mp-provider">Ollama</span>
+            <span class="mp-sep" aria-hidden="true">/</span>
+            <span id="mp-model">Loading…</span>
+            <span class="mp-caret" aria-hidden="true">▾</span>
+          </button>
+          <div id="mp-pop" hidden>
+            <input id="mp-search" type="search" autocomplete="off" spellcheck="false"
+                   placeholder="Search models…" aria-label="Search models"
+                   oninput="renderModelPickerList()" onkeydown="modelPickerKey(event)"/>
+            <div id="mp-list" role="listbox" aria-label="Models by provider"></div>
+          </div>
+        </div>
         <span id="vision-badge" class="vision-badge" style="display:none">👁 Vision</span>
         <span id="token-counter" class="token-counter" title="Session token meter. Exact numbers are the provider's reported billed tokens; a ~ means at least one turn had to be estimated (≈ characters ÷ 4).">
           <span id="tok-in" class="tok-pill tok-in" title="Input tokens billed this session. Measured turns count the full prompt the provider processed (system + re-sent history + context + question), so this grows with conversation length. ~ = includes estimated turns.">↑ ~0</span>
           <span id="tok-out" class="tok-pill tok-out" title="Output tokens generated this session (the model's replies). ~ = includes estimated turns.">↓ ~0</span>
           <span id="tok-total" class="tok-pill tok-total" title="Input + output for this session. ~ = includes estimated turns.">Σ ~0</span>
-          <span id="tok-cost" class="tok-pill tok-cost" style="display:none"
-                title="Estimated cost from provider-reported usage × the pricing table (Settings/config.json). Approximate — check your provider's bill."></span>
-        </span>
+      </span>
+      <div id="topbar-actions">
+        <button class="icon-btn" onclick="openSearch()" title="Search">🔍</button>
+        <button class="icon-btn" onclick="openSettings('general')" title="Settings">⚙️</button>
       </div>
     </div>
   </div>
@@ -1172,7 +1241,7 @@ button:focus-visible,a:focus-visible,[tabindex]:not([tabindex="-1"]):focus-visib
           <div class="form-group"><label for="s-openai-base">Base URL</label><input type="text" id="s-openai-base" placeholder="https://api.openai.com"/><div class="form-hint">Override for proxies or OpenAI-compatible APIs</div></div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
             <button class="btn btn-secondary btn-sm" onclick="testOpenAI()">🔌 Test</button>
-            <button class="btn btn-secondary btn-sm" onclick="loadOpenAIModels()">🔄 Refresh Models</button>
+            <button class="btn btn-secondary btn-sm" onclick="refreshProviderModels('openai')">🔄 Refresh Models</button>
             <div id="openai-test-result" style="font-size:12px"></div>
           </div>
         </div>
@@ -1268,7 +1337,7 @@ button:focus-visible,a:focus-visible,[tabindex]:not([tabindex="-1"]):focus-visib
           <div class="form-group"><label for="s-groq-base">Base URL</label><input type="text" id="s-groq-base" placeholder="https://api.groq.com/openai"/><div class="form-hint">OpenAI-compatible endpoint. Change only for proxies.</div></div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
             <button class="btn btn-secondary btn-sm" onclick="testGroq()">🔌 Test</button>
-            <button class="btn btn-secondary btn-sm" onclick="loadGroqModels()">🔄 Refresh Models</button>
+            <button class="btn btn-secondary btn-sm" onclick="refreshProviderModels('groq')">🔄 Refresh Models</button>
             <div id="groq-test-result" style="font-size:12px"></div>
           </div>
         </div>
@@ -1301,7 +1370,7 @@ button:focus-visible,a:focus-visible,[tabindex]:not([tabindex="-1"]):focus-visib
           </div>
           <div style="display:flex;gap:8px;align-items:center;margin-top:4px">
             <button class="btn btn-secondary btn-sm" onclick="testGemini()">🔌 Test</button>
-            <button class="btn btn-secondary btn-sm" onclick="loadGeminiModels()">🔄 Refresh Models</button>
+            <button class="btn btn-secondary btn-sm" onclick="refreshProviderModels('gemini')">🔄 Refresh Models</button>
             <div id="gemini-test-result" style="font-size:12px"></div>
           </div>
         </div>
@@ -1640,10 +1709,33 @@ const S={
   config:{},templates:[],pendingImages:[],pendingFiles:[],pinnedMsgs:[],sourceFilter:'',
   streaming:false,recognition:null,
   chatMetrics:{hits:0,misses:0,latencies:[]},msgIdCounter:0,
-  provider:'ollama',ragAllMode:true,noRag:false,
+  provider:'ollama',ragAllMode:false,noRag:false,
+  // The Ollama settings table keeps its own list; S.models is the ACTIVE provider's.
+  ollamaModels:[],modelsLoading:false,modelsError:'',
+  providerStatus:{},        // id -> {ok, configured, error} from _probeProviders()
   ragExportFormat: localStorage.getItem('ragExportFormat')||'zip',
   providerModels:{ollama:'',claude:'',openai:'',qwen:'',mistral:'',groq:'',gemini:''}
 };
+
+// ── Per-browser preferences ───────────────────────────────────────────────────
+// Provider, model and knowledge-base scope are working state, not deployment
+// config. None of the three used to survive a reload: the top-bar provider switch
+// only reached the server if you also pressed Save Settings, and ragAllMode was
+// hard-coded true at boot — so every reload silently re-scoped retrieval to "all
+// knowledge bases", overriding the single instance the config had stored.
+const _LS_PREFS='rr.prefs';
+function _loadPrefs(){
+  try{return JSON.parse(localStorage.getItem(_LS_PREFS)||'{}')||{};}catch(e){return {};}
+}
+function _savePrefs(){
+  try{
+    localStorage.setItem(_LS_PREFS,JSON.stringify({
+      provider:S.provider||'ollama',
+      model:S.currentModel||'',
+      ragScope:S.noRag?'__none__':(S.ragAllMode?'__all__':(_activeRagKey?.()||'')),
+    }));
+  }catch(e){/* private mode / quota — preferences are best-effort */}
+}
 const streamingContent={};
 // Streaming render is throttled (~14fps) instead of per-token to avoid O(n^2)
 // re-parsing the whole message on every token. KaTeX is deferred to finalize.
@@ -1689,7 +1781,7 @@ function getWelcomeHTML(){
   return `<div class="welcome-screen">
     <div class="welcome-logo">⚡</div>
     <div class="welcome-title">RediRecall</div>
-    <p class="welcome-sub">Powered by Ollama or Claude + Redis semantic search. Ask anything — I'll search your knowledge base and tell you when RAG or cache is used.</p>
+    <p class="welcome-sub">Ask anything about your knowledge base. Answers cite their sources and render themselves — more than twenty kinds of chart, diagram, map and molecule — with the maths computed rather than approximated.</p>
     <div class="welcome-version" id="welcome-version"${S.appInfo?.version?'':' hidden'}>${_welcomeVersionHTML()}</div>
     <div id="welcome-setup" hidden style="max-width:460px">
       <div class="glass-card" style="padding:16px;text-align:left">
@@ -1747,7 +1839,12 @@ window.addEventListener('load',async()=>{
   applyTheme(savedTheme);
   await loadConfig();
   applyTheme(S.config.ui?.theme||savedTheme);
-  S.provider=S.config.provider||'ollama';
+  // Per-browser preferences win over server config: provider and model are a working
+  // choice made in this browser, and server config is the default for a browser that
+  // has not made one yet.
+  const _prefs=_loadPrefs();
+  S.provider=_prefs.provider||S.config.provider||'ollama';
+  if(_prefs.model){S.providerModels=S.providerModels||{};S.providerModels[S.provider]=_prefs.model;}
   applyProvider(S.provider);
   clearChat(true);
   // Restore the sidebar from Redis, then reopen the conversation this browser was
@@ -1759,7 +1856,10 @@ window.addEventListener('load',async()=>{
   if(resumed&&S.sessions[resumed]) await switchSession(resumed);
   else newSession();
   await Promise.all([loadModels(),checkStatus(),loadRagInstances(),loadTemplates()]);
+  _restoreRagScope(_prefs.ragScope);   // after loadRagInstances — the instances must exist
   _refreshWelcomeSetupState();   // models are known now — the welcome screen can be honest
+  // Paint the picker's availability dot without waiting for the menu to be opened.
+  _probeProviders().then(st=>{S.providerStatus=st;_mpProbedAt=Date.now();renderModelPicker();}).catch(()=>{});
   setInterval(checkLocalStatus, 30000);   // Redis health + RAG-instance refresh — every 30 s
   setupKeyboardShortcuts();
   setupClipboardPaste();
@@ -1996,115 +2096,252 @@ async function deleteSession(id){
 }
 
 // ── Models ────────────────────────────────────────────────────────────────────
+// Every provider is fetched the same way and normalised to one shape. Seven
+// near-identical loaders used to do this, and only the Ollama one wrote S.models —
+// so `S.models.find(...)` in selectModel returned undefined on every hosted provider
+// and the 📎 attach button stayed disabled even on a vision model.
+const PROVIDER_META={
+  ollama :{label:'Ollama' ,glyph:'⚡',url:'/api/ollama/models' ,fallback:''},
+  claude :{label:'Claude' ,glyph:'✦',url:'/api/claude/models' ,fallback:'claude-sonnet-4-6'},
+  openai :{label:'OpenAI' ,glyph:'◆',url:'/api/openai/models' ,fallback:'gpt-4o'},
+  qwen   :{label:'Qwen'   ,glyph:'◈',url:'/api/qwen/models'   ,fallback:'qwen-plus'},
+  mistral:{label:'Mistral',glyph:'◐',url:'/api/mistral/models',fallback:'mistral-small-latest'},
+  groq   :{label:'Groq'   ,glyph:'▲',url:'/api/groq/models'   ,fallback:'llama-3.3-70b-versatile'},
+  gemini :{label:'Gemini' ,glyph:'✧',url:'/api/gemini/models' ,fallback:'gemini-3-flash-preview'},
+};
+const PROVIDER_IDS=Object.keys(PROVIDER_META);
+
+// Ollama keys on `name`; hosted providers key on `id` and use `name` as a display
+// label. One shape from here down: {id, label, vision}.
+function _normalizeModels(p,raw){
+  return (Array.isArray(raw)?raw:[]).map(m=>p==='ollama'
+    ?{id:m.name,label:m.name,vision:!!m.vision,size:m.size||0}
+    :{id:m.id,  label:m.name||m.id,vision:!!m.vision,context:m.context||0})
+    .filter(m=>m.id);
+}
+
 async function loadModels(){
-  if(S.provider==='claude'){
-    await loadClaudeModels();
-  } else if(S.provider==='openai'){
-    await loadOpenAIModels();
-  } else if(S.provider==='qwen'){
-    await loadQwenModels();
-  } else if(S.provider==='mistral'){
-    await loadMistralModels();
-  } else if(S.provider==='groq'){
-    await loadGroqModels();
-  } else if(S.provider==='gemini'){
-    await loadGeminiModels();
-  } else {
-    await loadOllamaModels();
-  }
-}
-
-async function loadOllamaModels(){
+  const p=S.provider||'ollama';
+  const meta=PROVIDER_META[p]||PROVIDER_META.ollama;
+  S.modelsLoading=true;S.modelsError='';renderModelPicker();
   try{
-    S.models=await fetch('/api/ollama/models').then(r=>r.json());
-    const sel=document.getElementById('model-select');
-    // Prefer previously-used Ollama model, fallback to config default, then first in list
-    const preferred = (S.providerModels||{}).ollama || S.config.ollama?.model || '';
-    sel.innerHTML=S.models.length
-      ?S.models.map(m=>`<option value="${m.name}" ${m.name===preferred?'selected':''}>${m.name}${m.vision?' 👁':''}</option>`).join('')
-      :'<option value="">No models found</option>';
-    if(S.models.length)selectModel(sel.value);
-    renderModelsTable();
+    const raw=await fetch(meta.url).then(r=>r.json());
+    S.models=_normalizeModels(p,raw);
+    if(p==='ollama')S.ollamaModels=Array.isArray(raw)?raw:[];
+    S.modelsError=S.models.length?'':`No ${meta.label} models found`;
   }catch(e){
-    document.getElementById('model-select').innerHTML='<option value="">Ollama offline</option>';
-    S.currentModel=''; // prevent cross-provider model leaking
+    S.models=[];
+    S.modelsError=`${meta.label} models unavailable`;
+  }
+  S.modelsLoading=false;
+  // Prefer the model last used on this provider, then the configured default, then
+  // the provider's fallback, then whatever is first.
+  const want=(S.providerModels||{})[p]||S.config?.[p]?.model||meta.fallback;
+  const hit=S.models.find(m=>m.id===want)||S.models[0];
+  if(hit){selectModel(hit.id);}
+  else{S.currentModel='';_applyModelUI();}
+  renderModelPicker();
+  if(p==='ollama')renderModelsTable();
+}
+
+// ── Model picker ──────────────────────────────────────────────────────────────
+// One control for what used to be two: a seven-button provider strip plus a model
+// <select>. Nobody picks "Claude" as an end in itself — provider is a category
+// header for models — so the two are presented as one grouped list.
+S.modelCache={};          // provider id -> normalised model list
+let _mpOpen=false, _mpShowAll={}, _mpCursor=-1;
+// /api/status/<provider> makes a real request to the provider to verify the key — it is
+// not a cheap local read. Without a TTL, every open of this menu costs one API round
+// trip per configured provider. 60s is short enough that a key added in Settings shows
+// up on the next open, and long enough that opening the menu twice does not pay twice.
+const _MP_PROBE_TTL=60000;
+let _mpProbedAt=0, _mpProbing=null;
+
+function _mpStatusOf(id){
+  const s=(S.providerStatus||{})[id]||{};
+  if(s.ok)return {cls:'ok',   title:'Reachable'};
+  if(s.configured===false)return {cls:'', title:'Not configured'};
+  if(s.configured===undefined)return {cls:'', title:'Not checked yet'};
+  return {cls:'err', title:s.error||'Configured but unreachable'};
+}
+
+// The button always reflects the live selection, including the failure states —
+// switching to a provider with no key used to leave a confident-looking pill and
+// an empty model list with no other signal.
+function renderModelPicker(){
+  const p=S.provider||'ollama', meta=PROVIDER_META[p]||PROVIDER_META.ollama;
+  const dot=document.getElementById('mp-dot');
+  const prov=document.getElementById('mp-provider');
+  const mod=document.getElementById('mp-model');
+  if(!dot||!prov||!mod)return;
+  const st=_mpStatusOf(p);
+  dot.className='dot '+st.cls;
+  dot.title=st.title;
+  prov.textContent=meta.label;
+  mod.textContent=S.modelsLoading?'Loading…':(S.currentModel||S.modelsError||'No model');
+  const btn=document.getElementById('mp-btn');
+  if(btn){
+    const desc=`${meta.label} — ${mod.textContent} (${st.title})`;
+    btn.title=desc;
+    // Named from the live selection, not a fixed string: the dot, the separator and the
+    // caret are aria-hidden, and the provider's reachability is carried only by the dot's
+    // colour, so without this neither the model nor its status reaches a screen reader.
+    btn.setAttribute('aria-label',`Model: ${desc}`);
   }
 }
 
-async function loadClaudeModels(){
-  try{
-    const models=await fetch('/api/claude/models').then(r=>r.json());
-    const sel=document.getElementById('model-select');
-    const preferred=(S.providerModels||{}).claude||S.config.claude?.model||'claude-sonnet-4-6';
-    sel.innerHTML=models.map(m=>`<option value="${m.id}" ${m.id===preferred?'selected':''}>${m.name}</option>`).join('');
-    if(sel.value)selectModel(sel.value);
-  }catch(e){
-    // Every other provider clears the <select> on failure; Claude did not, so the topbar
-    // kept listing e.g. Ollama models while sendMessage refused with "Select a model first".
-    const sel=document.getElementById('model-select');
-    if(sel)sel.innerHTML='<option value="">Claude models unavailable</option>';
-    S.currentModel='';
+async function toggleModelPicker(force){
+  const pop=document.getElementById('mp-pop'), btn=document.getElementById('mp-btn');
+  if(!pop||!btn)return;
+  _mpOpen=(force===undefined)?!_mpOpen:!!force;
+  pop.hidden=!_mpOpen;
+  btn.setAttribute('aria-expanded',String(_mpOpen));
+  if(!_mpOpen){_mpCursor=-1;return;}
+  const q=document.getElementById('mp-search');
+  if(q){q.value='';q.focus();}
+  _mpShowAll={};
+  renderModelPickerList();
+  await _mpRefresh();
+}
+
+// Probe every provider, then load model lists for the ones that answered. Only
+// configured providers are fetched — an unconfigured one has nothing to list, and
+// its row is a link to set it up instead.
+async function _mpRefresh(force){
+  const stale=force||!_mpProbedAt||(Date.now()-_mpProbedAt)>_MP_PROBE_TTL;
+  if(stale){
+    // Coalesce: opening and closing quickly must not start a second probe over the first.
+    _mpProbing=_mpProbing||_probeProviders().then(st=>{
+      S.providerStatus=st;_mpProbedAt=Date.now();return st;
+    }).finally(()=>{_mpProbing=null;});
+    await _mpProbing;
+  }
+  renderModelPicker();
+  renderModelPickerList();
+  await Promise.all(PROVIDER_IDS.map(async id=>{
+    const s=S.providerStatus[id]||{};
+    if(!s.ok)return;
+    if(id===(S.provider||'ollama')){S.modelCache[id]=S.models;return;}
+    if(S.modelCache[id])return;
+    try{
+      const raw=await fetch(PROVIDER_META[id].url).then(r=>r.json());
+      S.modelCache[id]=_normalizeModels(id,raw);
+    }catch(e){S.modelCache[id]=[];}
+    if(_mpOpen)renderModelPickerList();
+  }));
+  if(_mpOpen)renderModelPickerList();
+}
+
+// The model a provider falls back to when you have not chosen one — the configured
+// default, or the built-in one. Worth pointing out: on Gemini and Mistral it is the
+// free-tier model, so it is the one that costs nothing to try.
+function _mpDefaultFor(p){
+  return S.config?.[p]?.model || (PROVIDER_META[p]||{}).fallback || '';
+}
+
+// Pinned snapshots (…-2505, …-09-2025) are almost always a dated copy of a model
+// already listed under a stable name, so they sort last. The selected model always
+// sorts first so it can never be the thing hidden behind "Show all", and the
+// provider's default sits directly under it.
+function _mpRank(m,prov){
+  if(m.id===S.currentModel)return 0;
+  if(prov&&m.id===_mpDefaultFor(prov))return 1;
+  if(/-latest$/.test(m.id))return 2;
+  if(/\d{4}(?:-\d{2})?$|-\d{2}-\d{4}$/.test(m.id))return 4;
+  return 3;
+}
+const _MP_COLLAPSE_AT=8, _MP_SHOW=6;
+
+function renderModelPickerList(){
+  const list=document.getElementById('mp-list');
+  if(!list)return;
+  const q=(document.getElementById('mp-search')?.value||'').trim().toLowerCase();
+  const active=S.provider||'ollama';
+  const order=[active,...PROVIDER_IDS.filter(x=>x!==active)];
+  let html='', unconfigured=[];
+
+  for(const id of order){
+    const meta=PROVIDER_META[id], s=(S.providerStatus||{})[id]||{};
+    if(s.configured===false){unconfigured.push(meta.label);continue;}
+    const st=_mpStatusOf(id);
+    let models=(id===active?S.models:S.modelCache[id])||[];
+    if(q)models=models.filter(m=>m.id.toLowerCase().includes(q)||m.label.toLowerCase().includes(q));
+    if(q&&!models.length)continue;
+
+    const sorted=[...models].sort((a,b)=>_mpRank(a,id)-_mpRank(b,id));
+    const collapse=!q&&!_mpShowAll[id]&&sorted.length>_MP_COLLAPSE_AT;
+    const shown=collapse?sorted.slice(0,_MP_SHOW):sorted;
+    const note=s.ok?(models.length?`${models.length} model${models.length!==1?'s':''}`:'no models')
+                   :(st.cls==='err'?'unreachable':'not checked');
+
+    html+=`<div class="mp-group"><span class="dot ${st.cls}" title="${escHtml(st.title)}"></span>`
+        + `${escHtml(meta.glyph)} ${escHtml(meta.label)}<span class="mp-note">${escHtml(note)}</span></div>`;
+    const dflt=_mpDefaultFor(id);
+    for(const m of shown){
+      const sel=(id===active&&m.id===S.currentModel);
+      const isDefault=(m.id===dflt);
+      html+=`<button class="mp-item${isDefault?' mp-is-default':''}" role="option" `
+          + `aria-selected="${sel}" data-prov="${escHtml(id)}" data-model="${escHtml(m.id)}">`
+          + `<span class="mp-name" title="${escHtml(m.label)}">${escHtml(m.label)}</span>`
+          + `${isDefault?'<span class="mp-tag mp-tag-default">default</span>':''}`
+          + `${m.vision?'<span class="mp-tag">👁</span>':''}</button>`;
+    }
+    if(collapse)
+      html+=`<button class="mp-more" data-showall="${escHtml(id)}">Show all ${sorted.length} ${escHtml(meta.label)} models</button>`;
+  }
+
+  // Unconfigured providers stay visible as one row. Hiding them entirely would mean
+  // an install with one key never learns the other six exist, and offers no route to
+  // setting one up from the place you would look for it.
+  if(unconfigured.length&&!q)
+    html+=`<button class="mp-setup" data-setup="1"><span class="dot"></span>`
+        + `${escHtml(unconfigured.join(' · '))} — no key, <u>set up</u></button>`;
+  if(!html)html='<div class="mp-empty">No models match.</div>';
+  list.innerHTML=html;
+  _mpCursor=-1;
+}
+
+function pickModel(prov,id){
+  toggleModelPicker(false);
+  if(prov!==(S.provider||'ollama')){
+    S.providerModels=S.providerModels||{};
+    S.providerModels[prov]=id;
+    setProvider(prov);
+  }else{
+    selectModel(id);
   }
 }
 
-async function loadOpenAIModels(){
-  try{
-    const models=await fetch('/api/openai/models').then(r=>r.json());
-    const sel=document.getElementById('model-select');
-    const preferred=(S.providerModels||{}).openai||S.config.openai?.model||'gpt-4o';
-    sel.innerHTML=models.map(m=>`<option value="${m.id}" ${m.id===preferred?'selected':''}>${m.name||m.id}</option>`).join('');
-    if(sel.value)selectModel(sel.value);
-  }catch(e){document.getElementById('model-select').innerHTML='<option value="">OpenAI models unavailable</option>';S.currentModel='';}
+// Arrow keys move through the options; Enter takes the one under the cursor, or the
+// only match when a search has narrowed it to one.
+function modelPickerKey(e){
+  const items=[...document.querySelectorAll('#mp-list .mp-item')];
+  if(e.key==='Escape'){e.preventDefault();e.stopPropagation();toggleModelPicker(false);document.getElementById('mp-btn')?.focus();return;}
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault();
+    if(!items.length)return;
+    _mpCursor=e.key==='ArrowDown'?Math.min(_mpCursor+1,items.length-1):Math.max(_mpCursor-1,0);
+    items.forEach((el,i)=>el.classList.toggle('mp-cursor',i===_mpCursor));
+    items[_mpCursor]?.scrollIntoView({block:'nearest'});
+    return;
+  }
+  if(e.key==='Enter'){
+    e.preventDefault();
+    const el=items[_mpCursor]||(items.length===1?items[0]:null);
+    if(el)pickModel(el.dataset.prov,el.dataset.model);
+  }
 }
 
-async function loadQwenModels(){
-  try{
-    const models=await fetch('/api/qwen/models').then(r=>r.json());
-    const sel=document.getElementById('model-select');
-    const preferred=(S.providerModels||{}).qwen||S.config.qwen?.model||'qwen-plus';
-    sel.innerHTML=models.map(m=>`<option value="${m.id}" ${m.id===preferred?'selected':''}>${m.name||m.id}</option>`).join('');
-    if(sel.value)selectModel(sel.value);
-  }catch(e){document.getElementById('model-select').innerHTML='<option value="">Qwen models unavailable</option>';S.currentModel='';}
-}
+document.addEventListener('click',e=>{
+  const it=e.target.closest?.('#mp-list .mp-item');
+  if(it){pickModel(it.dataset.prov,it.dataset.model);return;}
+  const more=e.target.closest?.('.mp-more');
+  if(more){_mpShowAll[more.dataset.showall]=true;renderModelPickerList();return;}
+  if(e.target.closest?.('.mp-setup')){toggleModelPicker(false);openSettings('providers');return;}
+  if(_mpOpen&&!e.target.closest?.('#model-picker'))toggleModelPicker(false);
+});
 
-async function loadMistralModels(){
-  try{
-    const models=await fetch('/api/mistral/models').then(r=>r.json());
-    const sel=document.getElementById('model-select');
-    const preferred=(S.providerModels||{}).mistral||S.config.mistral?.model||'mistral-small-latest';
-    sel.innerHTML=models.map(m=>`<option value="${m.id}" ${m.id===preferred?'selected':''}>${m.name||m.id}</option>`).join('');
-    const ids=models.map(m=>m.id);
-    if(!ids.includes(preferred)&&models.length){sel.value=models[0].id;}
-    if(sel.value)selectModel(sel.value);
-  }catch(e){document.getElementById('model-select').innerHTML='<option value="">Mistral models unavailable</option>';S.currentModel='';}
-}
-
-async function loadGroqModels(){
-  try{
-    const models=await fetch('/api/groq/models').then(r=>r.json());
-    const sel=document.getElementById('model-select');
-    const preferred=(S.providerModels||{}).groq||S.config.groq?.model||'llama-3.3-70b-versatile';
-    sel.innerHTML=models.map(m=>`<option value="${m.id}" ${m.id===preferred?'selected':''}>${m.name||m.id}</option>`).join('');
-    const ids=models.map(m=>m.id);
-    if(!ids.includes(preferred)&&models.length){sel.value=models[0].id;}
-    if(sel.value)selectModel(sel.value);
-  }catch(e){document.getElementById('model-select').innerHTML='<option value="">Groq models unavailable</option>';S.currentModel='';}
-}
-
-async function loadGeminiModels(){
-  try{
-    const models=await fetch('/api/gemini/models').then(r=>r.json());
-    const sel=document.getElementById('model-select');
-    const preferred=(S.providerModels||{}).gemini||S.config.gemini?.model||'gemini-3-flash-preview';
-    sel.innerHTML=models.map(m=>`<option value="${m.id}" ${m.id===preferred?'selected':''}>${m.name||m.id}</option>`).join('');
-    // If the preferred model isn't in the list, fall back to the first available
-    const ids=models.map(m=>m.id);
-    if(!ids.includes(preferred)&&models.length){sel.value=models[0].id;}
-    if(sel.value)selectModel(sel.value);
-  }catch(e){document.getElementById('model-select').innerHTML='<option value="">Gemini models unavailable</option>';S.currentModel='';}
-}
-
-function setProvider(p){
+async function setProvider(p){
   // Save current model under the outgoing provider before switching
   if(S.provider && S.currentModel) {
     S.providerModels = S.providerModels || {};
@@ -2113,23 +2350,22 @@ function setProvider(p){
   S.provider=p;
   S.currentModel = (S.providerModels||{})[p] || ''; // restore last-used model for this provider
   applyProvider(p);
-  loadModels();
   // The dirty watch listens for input/change; a "Use" button fires neither, so switching
   // provider changed the payload Save Settings posts while _settingsTouched stayed false —
   // and the panel then closed without a word, discarding it.
   _markSettingsEdited();
-  const label={'ollama':'Ollama','claude':'Claude API','openai':'OpenAI','qwen':'Qwen','mistral':'Mistral','groq':'Groq','gemini':'Gemini'}[p]||p;
-  toast(`Provider: ${label}`,'info');
+  // Awaited, and the toast reports the outcome. It used to fire "Provider: Claude API"
+  // immediately after an un-awaited loadModels() — a success-shaped confirmation for an
+  // operation that had not finished and might fail, after which nothing said so.
+  await loadModels();
+  _savePrefs();
+  const label=(PROVIDER_META[p]||{}).label||p;
+  if(S.currentModel)toast(`${label} · ${S.currentModel}`,'success');
+  else toast(`${label}: ${S.modelsError||'no model available'} — add an API key in Settings → Providers`,'warning');
 }
 
 function applyProvider(p){
-  document.getElementById('prov-ollama').className=p==='ollama'?'active':'';
-  document.getElementById('prov-claude').className=p==='claude'?'active claude-active':'';
-  document.getElementById('prov-openai').className=p==='openai'?'active openai-active':'';
-  document.getElementById('prov-qwen').className=p==='qwen'?'active qwen-active':'';
-  document.getElementById('prov-mistral').className=p==='mistral'?'active mistral-active':'';
-  document.getElementById('prov-groq').className=p==='groq'?'active groq-active':'';
-  document.getElementById('prov-gemini').className=p==='gemini'?'active gemini-active':'';
+  renderModelPicker();
   // Update accordion card active states
   ['ollama','claude','openai','qwen','mistral','groq','gemini'].forEach(name=>{
     const card=document.getElementById('pc-'+name);
@@ -2270,34 +2506,71 @@ async function testGemini(){
   }catch(e){el.innerHTML=`<span style="color:var(--red)">✗ Network error: ${escHtml(e.message)}</span>`;}
 }
 
-function selectModel(name){
-  S.currentModel=name;
-  const m=S.models.find(x=>x.name===name);
-  document.getElementById('vision-badge').style.display=m?.vision?'inline-flex':'none';
-  document.getElementById('attach-btn').disabled=!m?.vision;
+function selectModel(id){
+  S.currentModel=id;
+  S.providerModels=S.providerModels||{};
+  if(id)S.providerModels[S.provider||'ollama']=id;
+  _applyModelUI();
+  _savePrefs();
 }
 
-// Load the Settings → Ollama "Available Models" table independently of the
-// active provider. loadOllamaModels() can't be reused here because it also
-// rewrites the top-bar model-select dropdown — calling it while another
-// provider (e.g. Mistral) is active would clobber that provider's dropdown.
-// This only fills S.models + the table.
+// Everything that depends on "which model is selected", in one place. Called by
+// selectModel and by loadModels when a provider comes back with nothing usable.
+function _applyModelUI(){
+  const m=(S.models||[]).find(x=>x.id===S.currentModel);
+  const badge=document.getElementById('vision-badge');
+  const attach=document.getElementById('attach-btn');
+  if(badge)badge.style.display=m?.vision?'inline-flex':'none';
+  if(attach)attach.disabled=!m?.vision;
+  // Send used to look live with no model selected; the failure only surfaced after
+  // clicking, via _noModelDialog(). The dialog is still the fix — but the button
+  // should not claim to be ready.
+  const send=document.getElementById('send-btn');
+  if(send&&!S.streaming){
+    send.disabled=!S.currentModel;
+    send.title=S.currentModel?'Send (Enter)':'No model selected — choose one in the model picker';
+  }
+  renderModelPicker();
+}
+
+// Load the Settings → Ollama "Available Models" table independently of the active
+// provider. It fills S.ollamaModels, never S.models: S.models holds the *active*
+// provider's list, and overwriting it here left selectModel unable to find the
+// running model — silently disabling 📎 — whenever this table was opened while a
+// hosted provider was active.
 async function loadOllamaModelTable(){
   const el=document.getElementById('models-table');
   if(el)el.textContent='Loading…';
   try{
-    S.models=await fetch('/api/ollama/models').then(r=>r.json());
+    S.ollamaModels=await fetch('/api/ollama/models').then(r=>r.json());
     renderModelsTable();
   }catch(e){
     if(el)el.textContent='Ollama offline — start Ollama and click 🔄 Refresh Models.';
   }
 }
 
+// "Refresh Models" inside a provider card. The old per-provider loaders rewrote the
+// top-bar dropdown directly, so refreshing OpenAI's list while Mistral was active
+// replaced Mistral's models with OpenAI's.
+async function refreshProviderModels(id){
+  const meta=PROVIDER_META[id];if(!meta)return;
+  if((S.provider||'ollama')===id){await loadModels();}
+  else{
+    try{
+      const raw=await fetch(meta.url).then(r=>r.json());
+      toast(`${meta.label}: ${_normalizeModels(id,raw).length} model(s) — switch to ${meta.label} to use them`,'info');
+      return;
+    }catch(e){toast(`${meta.label} models unavailable`,'error');return;}
+  }
+  toast(`${meta.label}: ${S.models.length} model(s)`,'info');
+}
+
 function renderModelsTable(){
   const el=document.getElementById('models-table');
-  if(!S.models.length){el.textContent='No models found.';return;}
+  if(!el)return;
+  if(!(S.ollamaModels||[]).length){el.textContent='No models found.';return;}
   el.innerHTML=`<table class="data-table"><thead><tr><th>Model</th><th>Size</th><th>Vision</th><th></th></tr></thead><tbody>
-    ${S.models.map(m=>{
+    ${S.ollamaModels.map(m=>{
       const active=m.name===S.currentModel;
       // escHtml + data-model (not string-interpolated into onclick) — model names
       // come from the Ollama server and must not be able to inject markup/JS.
@@ -2355,7 +2628,6 @@ async function pullOllamaModel(){
 }
 
 function selectModelFromSettings(name){
-  document.getElementById('model-select').value=name;
   selectModel(name);
   // Remember the choice per-provider and reflect it in the provider-card header
   // immediately — otherwise the hint keeps showing the old model and it looks
@@ -2551,14 +2823,32 @@ function populateRagSelects(){
 }
 
 // Handle change from the rag-select dropdown (accepts composite key or '__all__')
+// Reapply the knowledge-base scope this browser last used. Called after
+// loadRagInstances so a named instance can actually be found. Sets state directly
+// rather than going through setActiveRag/toggleRagAll, which toast.
+function _restoreRagScope(scope){
+  if(!scope)return;
+  if(scope==='__none__'){S.noRag=true;S.ragAllMode=false;}
+  else if(scope==='__all__'){S.noRag=false;S.ragAllMode=true;}
+  else{
+    const r=(Array.isArray(S.ragInstances)?S.ragInstances:[]).find(x=>_ragKey(x)===scope);
+    if(!r)return;                       // instance is gone — keep the config default
+    S.activeRag={name:r.name,ep:r.redis_endpoint||'default'};
+    S.noRag=false;S.ragAllMode=false;
+  }
+  if(typeof populateRagSelects==='function')populateRagSelects();
+  if(typeof _applyRagAllUI==='function')_applyRagAllUI();
+  if(typeof renderRagSidebar==='function')renderRagSidebar();
+}
+
 function onRagSelectChange(val){
   if(val==='__none__'){
-    S.noRag=true;S.ragAllMode=false;_applyRagAllUI();
+    S.noRag=true;S.ragAllMode=false;_applyRagAllUI();_savePrefs();
     toast('No RAG — answering without retrieval','info');
     return;
   }
   if(val==='__all__'){
-    S.noRag=false;S.ragAllMode=true;_applyRagAllUI();
+    S.noRag=false;S.ragAllMode=true;_applyRagAllUI();_savePrefs();
     const enabled=S.ragInstances.filter(r=>r.enabled!==false);
     toast(`Querying all ${enabled.length} RAG instance${enabled.length!==1?'s':''}`, 'info');
     return;
@@ -2574,7 +2864,7 @@ function setActiveRag(i){
   if(S.ragAllMode||S.noRag){S.ragAllMode=false;S.noRag=false;_applyRagAllUI();}
   const sel=document.getElementById('rag-select');
   if(sel)sel.value=_activeRagKey();
-  renderRagSidebar();renderRagInstances();
+  renderRagSidebar();renderRagInstances();_savePrefs();
   const ep=r.redis_endpoint&&r.redis_endpoint!=='default'?` (${r.redis_endpoint})`:'';
   toast(`RAG: ${r.name}${ep}`,'info');
 }
@@ -2588,7 +2878,7 @@ function _ragSetProcessing(i, on){
 function toggleRagAll(){
   S.noRag=false;
   S.ragAllMode=!S.ragAllMode;
-  _applyRagAllUI();
+  _applyRagAllUI();_savePrefs();
   const enabled=S.ragInstances.filter(r=>r.enabled!==false);
   if(S.ragAllMode){
     toast(`🔀 Querying ${enabled.length} RAG instance${enabled.length!==1?'s':''} in parallel`,'info');
@@ -3536,8 +3826,12 @@ function addTemplate(){S.templates.push({name:'New Template',system:''});renderT
 // ── Chat WebSocket handler ────────────────────────────────────────────────────
 function _setStreamingUI(active){
   S.streaming=active;
-  document.getElementById('send-btn').disabled=active;
+  // Not simply `disabled=active`: switching to a provider with no usable model while an
+  // answer is still streaming left Send lit again the moment the stream ended, because
+  // _applyModelUI skips the button during streaming and this re-enabled it blindly.
+  document.getElementById('send-btn').disabled=active||!S.currentModel;
   document.getElementById('stop-btn').classList.toggle('visible',active);
+  if(!active)_applyModelUI();
 }
 
 function handleWSMsg(msg){
@@ -3741,23 +4035,31 @@ function _linkCitations(el,msgId,maxN){
   const walker=document.createTreeWalker(bubble,NodeFilter.SHOW_TEXT,{
     acceptNode:n=>n.parentElement&&n.parentElement.closest('pre,code,a,.cite-ref,.rag-inspector,.see-also')
       ?NodeFilter.FILTER_REJECT:NodeFilter.FILTER_ACCEPT});
+  // Grouped markers count. A model asked to cite two passages writes "[3, 4]" as often
+  // as "[3] [4]", and matching only a lone number left the grouped form as dead text —
+  // the reader could see the citation but not open either source.
+  const GROUP=/\[(\d+(?:\s*,\s*\d+)*)\]/g;
   const targets=[];
   while(walker.nextNode())
-    if(/\[\d+\]/.test(walker.currentNode.nodeValue))targets.push(walker.currentNode);
+    if(/\[\d+(?:\s*,\s*\d+)*\]/.test(walker.currentNode.nodeValue))targets.push(walker.currentNode);
   for(const node of targets){
     const text=node.nodeValue;
     const frag=document.createDocumentFragment();
-    let last=0,re=/\[(\d+)\]/g,m;
+    let last=0,re=new RegExp(GROUP),m;
+    re.lastIndex=0;
     while((m=re.exec(text))!==null){
-      const n=+m[1];
-      if(n<1||n>maxN)continue;                 // not a citation into this answer's sources
+      const ns=m[1].split(',').map(x=>+x.trim()).filter(n=>n>=1&&n<=maxN);
+      if(!ns.length)continue;                  // no citation into this answer's sources
       frag.appendChild(document.createTextNode(text.slice(last,m.index)));
-      const b=document.createElement('button');
-      b.type='button';b.className='cite-ref';b.textContent=m[0];
-      b.title=`Show source ${n} for this answer`;
-      b.setAttribute('aria-label',`Show source ${n}`);
-      b.dataset.cite=String(n);b.dataset.citeMsg=msgId;
-      frag.appendChild(b);
+      ns.forEach((n,i)=>{
+        if(i)frag.appendChild(document.createTextNode(' '));
+        const b=document.createElement('button');
+        b.type='button';b.className='cite-ref';b.textContent='['+n+']';
+        b.title=`Show source ${n} for this answer`;
+        b.setAttribute('aria-label',`Show source ${n}`);
+        b.dataset.cite=String(n);b.dataset.citeMsg=msgId;
+        frag.appendChild(b);
+      });
       last=m.index+m[0].length;
     }
     if(!frag.childNodes.length)continue;
@@ -4954,6 +5256,11 @@ function _collectSettings(){
 
 async function saveSettings(){
   await _postConfig(_collectSettings());
+  // An API key may have just been added or changed. Drop the cached provider probe so
+  // the picker's dots reflect it on the next open rather than up to a minute later.
+  _mpProbedAt=0;
+  S.modelCache={};
+  if(typeof loadModels==='function')await loadModels();
 }
 
 // Settings mixes two kinds of control: most are staged until Save, but instances, Redis
@@ -5082,7 +5389,7 @@ function resetBaseInstruction(){
   setVal('base-instruction',def);
   toast('Base Instruction reset — click Save Settings to apply','success');
 }
-// `S.config={}` drops web_sources, watch_folders, redis_endpoints and pricing from memory,
+// `S.config={}` drops web_sources, watch_folders and redis_endpoints from memory,
 // and saveSettings then writes those absences to disk — so the NEXT Save silently deleted
 // them. The old dialog said only "Reset all settings to defaults?" and named none of it,
 // while the toast implied the Base Instruction was the only thing at stake.
@@ -5093,7 +5400,6 @@ function resetConfig(){
   if(n(c.web_sources))            losses.push(`${n(c.web_sources)} saved web source${n(c.web_sources)===1?'':'s'}`);
   if(n(c.watch_folders?.folders)) losses.push(`${n(c.watch_folders.folders)} watched folder${n(c.watch_folders.folders)===1?'':'s'}`);
   if(n(c.redis_endpoints))        losses.push(`${n(c.redis_endpoints)} extra Redis endpoint${n(c.redis_endpoints)===1?'':'s'}`);
-  if(c.pricing&&Object.keys(c.pricing).length) losses.push('your edited model pricing table');
   const anyKey=['claude','openai','qwen','mistral','groq','gemini'].some(p=>c[p]?.api_key);
   if(anyKey) losses.push('every stored API key');
   if(c.redis?.host) losses.push('the Redis connection settings');
@@ -5340,53 +5646,50 @@ async function loadAnalytics(){
 // moment you switch. This is the "how many tokens have I actually burned"
 // answer /api/usage exists to give, surfaced for the first time (the endpoint
 // shipped in 1.7.0 with no UI reading it).
-function _fmtCost(c){ return '$'+(c>0&&c<0.01?c.toFixed(4):c.toFixed(2)); }
-
 function _tokenUsageCardHTML(usage){
   const rows=Object.entries(usage||{});
   if(!rows.length)return '<div class="glass-card" style="margin-top:4px;color:var(--text2);font-size:13px;text-align:center;padding:20px">'
     +'No token usage recorded yet. This fills in once a provider returns billed counts with an answer — cache hits and stopped answers never reach a provider, so they are never counted here.</div>';
   // in / cached / cache_write are DISJOINT as the providers report them (Anthropic bills
-  // fresh input, cache reads and cache writes separately, at 1x / ~0.1x / ~1.25x). They get
-  // their own columns rather than being folded into one "Input" figure that a reader would
-  // then double-count against a peer "Cached" column.
+  // fresh input, cache reads and cache writes separately). They get their own columns
+  // rather than being folded into one "Input" figure that a reader would then
+  // double-count against a peer "Cached" column.
   const anyCache=rows.some(([,u])=>(u.cached||0)||(u.cache_write||0));
-  const t={in:0,cached:0,cw:0,out:0,cost:0};
-  const unpriced=[];
+  const t={in:0,cached:0,cw:0,out:0};
   const parsed=rows.map(([pfx,u])=>{
-    // rpartition on the LAST colon: an ollama tag or an openrouter id carries colons and
+    // rpartition on the FIRST colon: an ollama tag or an openrouter id carries colons and
     // slashes of its own (ollama:qwen2.5:7b), so a split(':')[1] would truncate the model.
     const cut=pfx.indexOf(':');
     const provider=cut<0?pfx:pfx.slice(0,cut), model=cut<0?'':pfx.slice(cut+1);
-    return {provider,model,u,cost:_tokenCost(model,u)};
-  }).sort((a,b)=>(b.cost??-1)-(a.cost??-1));   // most expensive first: the answer users want
-  const body=parsed.map(({provider,model,u,cost})=>{
+    const total=(u.in||0)+(u.cached||0)+(u.cache_write||0)+(u.out||0);
+    return {provider,model,u,total};
+  }).sort((a,b)=>b.total-a.total);   // heaviest first: the answer users want
+  const body=parsed.map(({provider,model,u})=>{
     t.in+=u.in||0; t.cached+=u.cached||0; t.cw+=u.cache_write||0; t.out+=u.out||0;
-    if(cost!=null)t.cost+=cost; else unpriced.push(model||provider);
     const num=v=>`<td style="text-align:right;font-variant-numeric:tabular-nums">${v?v.toLocaleString():'<span style="color:var(--text2)">0</span>'}</td>`;
     return `<tr>
       <td>${escHtml(provider)}</td>
       <td style="font-family:'SF Mono',monospace;font-size:11px">${escHtml(model)}</td>
       ${num(u.in||0)}${anyCache?num(u.cached||0)+num(u.cache_write||0):''}${num(u.out||0)}
-      <td style="text-align:right">${cost!=null?_fmtCost(cost):'<span style="color:var(--text2)" title="No entry for this model under &quot;pricing&quot; in config.json">not priced</span>'}</td>
     </tr>`;
   }).join('');
   const th=(l,t2)=>`<th style="text-align:right"${t2?` title="${t2}"`:''}>${l}</th>`;
   return `<div class="glass-card" style="margin-top:4px">
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:4px">
-      <h4 style="margin:0">💰 Token Usage</h4>
+      <h4 style="margin:0">🔢 Token Usage</h4>
       <button class="btn btn-danger" style="padding:4px 10px;font-size:11px" onclick="resetTokenUsage()">↺ Reset tally</button>
     </div>
     <div style="font-size:11px;color:var(--text2);margin-bottom:12px">
       All-time, across <b>every</b> session — unlike the token pills in the top bar, which
       count only the conversation you are currently viewing. Billed counts as the provider
-      reported them; cache hits and stopped answers are not included.
+      reported them; cache hits and stopped answers are not included. Rates differ per
+      provider, per model and over time, so work the cost out against your own bill.
     </div>
     <table class="data-table" style="font-size:12px">
       <thead><tr><th>Provider</th><th>Model</th>
-        ${th('Input','Fresh input tokens, billed at the full rate')}
-        ${anyCache?th('Cached','Prompt-cache reads, billed at about 0.1x input')+th('Cache write','Prompt-cache creation, billed at about 1.25x input'):''}
-        ${th('Output')}${th('Cost')}</tr></thead>
+        ${th('Input','Fresh input tokens')}
+        ${anyCache?th('Cached','Prompt-cache reads')+th('Cache write','Prompt-cache creation'):''}
+        ${th('Output')}</tr></thead>
       <tbody>${body}</tbody>
       <tfoot><tr style="font-weight:700;border-top:2px solid var(--border)">
         <td colspan="2">Total</td>
@@ -5394,18 +5697,14 @@ function _tokenUsageCardHTML(usage){
         ${anyCache?`<td style="text-align:right;font-variant-numeric:tabular-nums">${t.cached.toLocaleString()}</td>
         <td style="text-align:right;font-variant-numeric:tabular-nums">${t.cw.toLocaleString()}</td>`:''}
         <td style="text-align:right;font-variant-numeric:tabular-nums">${t.out.toLocaleString()}</td>
-        <td style="text-align:right">${_fmtCost(t.cost)}</td>
       </tr></tfoot>
     </table>
-    ${unpriced.length?`<div style="font-size:11px;color:var(--yellow);margin-top:10px">⚠ Cost is a partial figure: ${unpriced.length} of ${parsed.length} model${parsed.length===1?'':'s'}
-      ${unpriced.length===1?'has':'have'} no rate under <code>pricing</code> in config.json (${escHtml(unpriced.slice(0,3).join(', '))}${unpriced.length>3?`, +${unpriced.length-3} more`:''}).
-      Their tokens are counted above but contribute $0 to the total.</div>`:''}
   </div>`;
 }
 
 function resetTokenUsage(){
   showModal('Reset token tally?',
-    '<p>This clears the all-time token and cost totals for <b>every</b> provider and model, and cannot be undone.</p>'
+    '<p>This clears the all-time token totals for <b>every</b> provider and model, and cannot be undone.</p>'
     +'<p style="color:var(--text2);font-size:12px">Your conversations and their per-turn token counts are kept — only this cumulative counter is zeroed.</p>',
     [{label:'Cancel',cls:'btn-secondary'},
      {label:'Reset tally',cls:'btn-danger',cb:async()=>{
@@ -5423,19 +5722,17 @@ async function exportAnalyticsCsv(){
     ['Avg Latency ms',S.chatMetrics.latencies.length?(S.chatMetrics.latencies.reduce((a,b)=>a+b,0)/S.chatMetrics.latencies.length*1000).toFixed(0):0],
     ...S.ragInstances.map(r=>['RAG: '+r.name+' chunks',r.chunks])
   ];
-  // Token and cost totals are the rows most likely to be wanted in a spreadsheet — this
-  // export shipped without them, so the one table worth reconciling against a provider
-  // bill was the one you could not get out of the app.
+  // Token totals are the rows most likely to be wanted in a spreadsheet — this export
+  // shipped without them, so the one table worth reconciling against a provider bill was
+  // the one you could not get out of the app.
   const usage=await fetch('/api/usage').then(r=>r.json()).catch(()=>({}));
   const entries=Object.entries(usage||{});
   if(entries.length){
-    rows.push([],['Provider','Model','Input','Cached','Cache write','Output','Cost USD']);
+    rows.push([],['Provider','Model','Input','Cached','Cache write','Output']);
     for(const [pfx,u] of entries){
       const cut=pfx.indexOf(':');
-      const cost=_tokenCost(cut<0?'':pfx.slice(cut+1),u);
       rows.push([cut<0?pfx:pfx.slice(0,cut),cut<0?'':pfx.slice(cut+1),
-                 u.in||0,u.cached||0,u.cache_write||0,u.out||0,
-                 cost!=null?cost.toFixed(4):'not priced']);
+                 u.in||0,u.cached||0,u.cache_write||0,u.out||0]);
     }
   }
   // Quote every field: model ids and instance names can contain commas.
@@ -5600,6 +5897,8 @@ async function _probeProviders(){
 // called a function which does not touch them.
 async function refreshProviderDots(){
   const st=await _probeProviders();
+  S.providerStatus=st;_mpProbedAt=Date.now();   // same data the picker's dots need
+  if(typeof renderModelPicker==='function')renderModelPicker();
   for(const [id] of PROVIDER_LIST){
     const el=document.getElementById(id+'-dot-cfg');
     if(!el)continue;
@@ -5638,7 +5937,7 @@ async function loadStatus(){
     const configured=s.configured!==false;
     const active=S.provider===id;
     const detail=s.ok
-      ? (id==='ollama'?`${S.models.length} model(s) available`
+      ? (id==='ollama'?`${((S.provider==='ollama'?S.models:S.ollamaModels)||[]).length} model(s) available`
                       :`Key verified · model ${escHtml(S.config[id]?.model||'—')}`)
       : (s.error||(configured?'Unreachable':'Not configured'));
     const pill=s.ok?'<span class="status-pill pill-ok">● Online</span>'
@@ -5844,21 +6143,6 @@ function exportChat(fmt='md'){
   toast(`Exported .${ext}`,'success');
 }
 
-// Cost for one measured usage record, from the editable `pricing` config table.
-// Accepts either shape usage comes in: session/per-turn meta.usage uses
-// {prompt, completion, cached?, cache_write?}; the cumulative /api/usage tally
-// uses {in, out, cached?, cache_write?}. Both the topbar pills and the Analytics
-// Token Usage table call this, so the formula lives in exactly one place.
-// Returns null when the model has no pricing entry — callers show that as
-// unpriced ("+"-marked partial total) rather than silently treating it as $0.
-function _tokenCost(model,usage){
-  const p=(S.config?.pricing||{})[model];
-  if(!p)return null;
-  const promptTok=usage.prompt??usage.in??0, compTok=usage.completion??usage.out??0;
-  const cached=usage.cached||0, cw=usage.cache_write||0;
-  return promptTok/1e6*(p.in||0) + cached/1e6*(p.cached_in??p.in??0)
-       + cw/1e6*(p.cache_write??(p.in||0)*1.25) + compTok/1e6*(p.out||0);
-}
 function updateTokenCounter(){
   const msgs=S.sessions[S.sessionId]?.messages||[];
   // Prefer the provider-reported counts stored on each assistant turn's meta
@@ -5867,7 +6151,7 @@ function updateTokenCounter(){
   // must not also be estimated on top. Turns without usage (cache hits, aborted
   // streams, providers that report nothing) fall back to the chars/4 estimate,
   // and their presence keeps the "~" prefix honest.
-  let inTok=0,outTok=0,cost=0,estimated=false,unpriced=false;
+  let inTok=0,outTok=0,estimated=false;
   for(let i=0;i<msgs.length;i++){
     const m=msgs[i];
     if(m.role!=='assistant'){
@@ -5881,8 +6165,6 @@ function updateTokenCounter(){
     if(u&&u.prompt!=null){
       const cached=u.cached||0, cw=u.cache_write||0;
       inTok+=u.prompt+cached+cw; outTok+=u.completion||0;
-      const c=_tokenCost(m.meta?.model,u);
-      if(c!=null)cost+=c; else unpriced=true;   // measured but no pricing entry — partial
     }else{
       outTok+=Math.round((m.content||'').length/4);
       estimated=true;
@@ -5894,13 +6176,6 @@ function updateTokenCounter(){
   set('tok-in',   `↑ ${tilde}${fmt(inTok)}`);
   set('tok-out',  `↓ ${tilde}${fmt(outTok)}`);
   set('tok-total',`Σ ${tilde}${fmt(inTok+outTok)}`);
-  const cEl=document.getElementById('tok-cost');
-  if(cEl){
-    cEl.style.display=cost>0?'':'none';
-    // "+" marks a partial figure: some measured turn has no pricing entry, so the
-    // real spend is at least this much.
-    if(cost>0)cEl.textContent='$'+(cost<0.01?cost.toFixed(4):cost.toFixed(2))+(unpriced?'+':'');
-  }
 }
 
 // ── Markdown + Math ───────────────────────────────────────────────────────────
@@ -8293,6 +8568,16 @@ function _plotEsc(t){ return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;'
 // The definitions the plot draws, coloured to match the curves. Rendered as a block
 // in FRONT of the graph card (see renderPlotBlocks) so the reader knows what each
 // curve is before seeing it — a legend of bare "f(x)" does not say what f is.
+// A definition line: "y = …", "f(x) = …", or any single-argument call on the left such
+// as "log(N_line) = …". Only a literal "(x)" used to be accepted, so a log-log relation
+// — log(N) = -D * log(x) — fell through as if the whole line were the expression. mathjs
+// then read it as *defining* a function called log, which compiles happily and evaluates
+// to a function rather than a number: every sample became NaN and the plot failed with a
+// generic "no finite values" that named nothing. Shared by the plot and its definitions
+// block so the two cannot disagree about what counts as a definition.
+const _PLOT_DEF=/^\s*([A-Za-z]\w*)\s*(\(\s*[^()=]*?\s*\))?\s*=\s*(.+)$/;
+function _plotDefLabel(m){ return m[1]+(m[2]?'('+m[2].slice(1,-1).trim()+')':'(x)'); }
+
 function _plotDefsHtml(spec){
   const colors=['#2563eb','#dc2626','#059669','#d97706','#7c3aed'];
   const fns=[];
@@ -8305,8 +8590,8 @@ function _plotDefsHtml(spec){
     const dm=line.match(/^(?:x\s*=|x\s+(?:from|in)|domain)\s*:?\s*\[?\s*(.+?)\s*(?:\.\.|\bto\b|,|;)\s*(.+?)\s*\]?$/i)
           || line.match(/^\s*(-?[\w.+\-*/^()\s]+?)\s*\.\.\s*(-?[\w.+\-*/^()\s]+?)\s*$/);
     if(dm){ const a=_plotNum(dm[1]),b=_plotNum(dm[2]); if(isFinite(a)&&isFinite(b)&&b>a) return; }
-    const fm=line.match(/^\s*([A-Za-z]\w*)\s*(?:\(\s*x\s*\))?\s*=\s*(.+)$/);
-    if(fm)fns.push({name:fm[1]+'(x)', expr:fm[2].trim()});
+    const fm=line.match(_PLOT_DEF);
+    if(fm)fns.push({name:_plotDefLabel(fm), expr:fm[3].trim()});
     else fns.push({name:'y', expr:line});
   });
   if(!fns.length)return '';
@@ -8326,8 +8611,8 @@ function _buildFunctionPlot(spec, params){
     if(m){ const a=_plotNum(m[1]),b=_plotNum(m[2]); if(isFinite(a)&&isFinite(b)&&b>a){ xmin=a; xmax=b; return; } }
     // function: strip an optional "y =", "f(x) =", "g(x) =" prefix
     let label=null, expr=line;
-    const fm=line.match(/^\s*([A-Za-z]\w*)\s*(?:\(\s*x\s*\))?\s*=\s*(.+)$/);
-    if(fm){ label=fm[1]+'(x)'; expr=fm[2]; }
+    const fm=line.match(_PLOT_DEF);
+    if(fm){ label=_plotDefLabel(fm); expr=fm[3]; }
     fns.push({label, expr:expr.trim()});
   });
   if(!fns.length) throw new Error('no function to plot');
@@ -8335,10 +8620,14 @@ function _buildFunctionPlot(spec, params){
   const N=300;
   const series=fns.map((f,i)=>{
     let code; try{ code=math.compile(f.expr); }catch(e){ throw new Error('cannot parse "'+f.expr+'"'); }
-    const pts=[]; let firstErr=null;
+    const pts=[]; let firstErr=null, nonNumeric=null;
     for(let k=0;k<=N;k++){ const x=xmin+(xmax-xmin)*k/N; let y;
       try{ y=code.evaluate(Object.assign({},params||{},{x})); }
       catch(e){ y=NaN; if(firstErr==null)firstErr=e; }
+      // An expression can compile and evaluate without throwing yet hand back something
+      // that is not a number — mathjs returns a function for "name(arg) = …". Remember
+      // what it was, or the failure surfaces as the generic "no finite values" below.
+      if(nonNumeric==null&&typeof y!=='number') nonNumeric=(y&&y.type)||typeof y;
       y=(typeof y==='number'&&isFinite(y))?y:NaN; pts.push({x,y}); }
     // A symbol other than x (and any declared param) is undefined in every evaluation,
     // so the whole series is NaN and the generic "no finite values" message below would
@@ -8349,6 +8638,8 @@ function _buildFunctionPlot(spec, params){
       const m=/^Undefined symbol (\w+)$/i.exec(firstErr.message||'');
       if(m)throw new Error(`'${m[1]}' is not defined — add \`param: ${m[1]} = <lo> .. <hi> (<init>)\` for a slider, or replace it with a plain number.`);
     }
+    if(nonNumeric&&!pts.some(p=>isFinite(p.y)))
+      throw new Error(`"${f.expr}" evaluates to a ${nonNumeric}, not a number — put the value to plot on the right of the "=".`);
     return {label:f.label||('f'+(i+1)), color:colors[i%colors.length], pts};
   });
   let ys=[]; series.forEach(s=>s.pts.forEach(p=>{ if(isFinite(p.y)) ys.push(p.y); }));
@@ -8490,6 +8781,14 @@ function setupKeyboardShortcuts(){
       // same double-close the search box had.
       if(_isOpen(document.getElementById('img-lightbox'))
          ||_isOpen(document.getElementById('viz-max-overlay')))return;
+      // The model picker is a popover, not a .open/.visible layer, so it is not in
+      // _ESC_LAYERS. Without this an Escape pressed while it is open reached the loop
+      // and closed whatever was behind it instead.
+      const _mpPop=document.getElementById('mp-pop');
+      if(_mpPop&&!_mpPop.hidden){
+        e.preventDefault();toggleModelPicker(false);
+        document.getElementById('mp-btn')?.focus();return;
+      }
       for(const [id,close] of _ESC_LAYERS){
         const el=document.getElementById(id);
         if(el&&(el.classList.contains('open')||el.classList.contains('visible'))){

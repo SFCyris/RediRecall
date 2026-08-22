@@ -230,6 +230,65 @@ async def ollama_stream(messages: list, model: str, images: list[str] | None = N
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 # Static model list (Claude API doesn't have a /models endpoint that lists them)
+# Which hosted models accept an image part alongside the text prompt.
+#
+# Ollama answers this itself (family tags on /api/tags); no hosted provider exposes an
+# equivalent field on its model list, so this is a table. It is deliberately biased
+# towards False: a model wrongly marked False leaves 📎 disabled, which is exactly how
+# every hosted provider behaved before this table existed. One wrongly marked True lets
+# a user attach an image and collect an API error on send.
+_VISION_PREFIXES = (
+    "claude-",      # Claude 3 onward accepts image blocks on every model
+    "gpt-4o", "gpt-4.1",
+    "gemini-",      # the chat-capable Gemini families are all multimodal
+    "pixtral-",
+)
+_VISION_EXACT = {"o1", "o3", "o4-mini"}   # note: o3-mini is text-only, so exact not prefix
+
+
+def supports_vision(model_id: str) -> bool:
+    """True when a hosted model accepts image input. Conservative — see _VISION_PREFIXES."""
+    mid = (model_id or "").lower()
+    return mid in _VISION_EXACT or mid.startswith(_VISION_PREFIXES)
+
+
+def filter_mistral_models(data: list[dict]) -> list[dict]:
+    """Keep the chat-capable entries from Mistral's /v1/models, sorted by id.
+
+    Mistral reports per-model capabilities, so chat-capability and vision are answers
+    rather than guesses. The route used to keep every id it was handed while its
+    comment claimed the list was chat-only, so embedding, OCR, moderation and voxtral
+    audio models all reached the model picker.
+    """
+    out = {}
+    for m in data or []:
+        mid = m.get("id")
+        caps = m.get("capabilities") or {}
+        if not mid or not caps.get("completion_chat"):
+            continue
+        # Prefer the curated label where there is one. The live endpoint returns bare
+        # ids, so building the name from the id alone discarded the "(free tier)" hint
+        # the static list carries — the same merge gemini_models already does.
+        name = next((x["name"] for x in MISTRAL_MODELS_STATIC if x["id"] == mid), mid)
+        out[mid] = {"id": mid, "name": name,
+                    "context": m.get("max_context_length") or 0,
+                    "vision": bool(caps.get("vision"))}
+    return [out[i] for i in sorted(out)]
+
+
+def stamp_vision(models: list[dict]) -> list[dict]:
+    """Add a ``vision`` flag to hosted model dicts that do not already carry one.
+
+    Mistral reports vision itself and is left alone; the rest fall back to the table.
+    The frontend gates the 📎 button on this key, and a missing key reads as False.
+
+    Returns fresh dicts. The hosted fetchers hand back the module-level *_STATIC lists
+    on fallback, so stamping in place would permanently mutate those constants.
+    """
+    return [dict(m, vision=m.get("vision", supports_vision(m.get("id", ""))))
+            for m in models]
+
+
 CLAUDE_MODELS = [
     {"id": "claude-opus-4-6",           "name": "Claude Opus 4.6",   "context": 200000},
     {"id": "claude-sonnet-4-6",         "name": "Claude Sonnet 4.6", "context": 200000},
@@ -705,8 +764,34 @@ def _gemini_err_msg(exc: Exception) -> str:
     return f"Gemini error: {exc}"
 
 
+# Gemini's ListModels returns everything the key can reach, not just chat models.
+# Two gates, in order of authority:
+#
+#   1. supported_actions — the API's own answer. A model without "generateContent"
+#      cannot be prompted at all (embeddings, native-audio and live-translate models
+#      speak embedContent / bidiGenerateContent instead). Dropping these needs no
+#      maintenance and cannot go stale as Google ships new families.
+#   2. Purpose — a model can accept generateContent and still be the wrong tool for a
+#      chat box: TTS models want an audio response modality, image and robotics models
+#      return something other than a reply. This gate is a name heuristic, so it stays
+#      deliberately narrow; a model that slips through is merely odd, one wrongly
+#      excluded is invisible.
+_GEMINI_CHAT_ACTION = "generateContent"
+_GEMINI_NON_CHAT = (
+    "embedding", "-tts", "native-audio", "-image", "robotics", "computer-use",
+    "-live-", "translate",
+)
+
+
+def _gemini_is_chat(model_id: str, actions) -> bool:
+    """True when a Gemini model id is usable as a conversational model."""
+    if _GEMINI_CHAT_ACTION not in set(actions or ()):
+        return False
+    return not any(tok in model_id for tok in _GEMINI_NON_CHAT)
+
+
 async def gemini_models() -> list[dict]:
-    """Fetch available Gemini models via the native SDK. Falls back to static list."""
+    """Fetch chat-capable Gemini models via the native SDK. Falls back to static list."""
     api_key = state._config.get("gemini", {}).get("api_key", "")
     if not api_key or not _GENAI_AVAILABLE:
         return GEMINI_MODELS_STATIC
@@ -721,9 +806,12 @@ async def gemini_models() -> list[dict]:
                 mid = mid[7:]
             if not mid.startswith("gemini"):
                 continue
+            if not _gemini_is_chat(mid, getattr(m, "supported_actions", None)):
+                continue
             name = next((x["name"] for x in GEMINI_MODELS_STATIC if x["id"] == mid), mid)
             ctx  = next((x["context"] for x in GEMINI_MODELS_STATIC if x["id"] == mid), 1048576)
-            result.append({"id": mid, "name": name, "context": ctx})
+            result.append({"id": mid, "name": name, "context": ctx,
+                           "vision": supports_vision(mid)})
         return result if result else GEMINI_MODELS_STATIC
     except Exception as e:
         log.error(f"Gemini models error: {e}")

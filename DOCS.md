@@ -326,6 +326,8 @@ Messages appear bottom-right. **Errors stay until dismissed**; everything else c
 
 Sessions are listed in the left sidebar. Click any session to switch to it, or the ✕ to delete it (with confirmation).
 
+The foot of the sidebar holds the actions that apply to the conversation you are in — **Export Chat** as `.md` or `.txt`, and **🗑 Clear Chat**, which empties the current conversation after a confirmation and leaves every other one alone.
+
 Conversations are **persisted in Redis and restored on reload** — closing the tab or restarting the browser no longer loses them, and the conversation you were last in is reopened automatically. The sidebar lists conversations started in *this* browser; because RediRecall has no user accounts, it deliberately does not list sessions created elsewhere.
 
 Each message records the provider and model that produced it. Sessions are automatically titled from the first message.
@@ -396,15 +398,43 @@ All providers are configured in **Settings → Providers** — a unified accordi
 |---|---|---|
 | ⚡ Ollama | Local | Any model installed locally; vision auto-detected |
 | ✦ Claude | API | Anthropic native SDK; `claude-opus-4-6`, `claude-sonnet-4-6`, etc. |
-| ◆ OpenAI | API | OpenAI native SDK; GPT-4o, o-series |
+| ◆ OpenAI | API | OpenAI native SDK; GPT-4o, GPT-4.1, o-series |
 | 🟣 Qwen | API | Alibaba DashScope (OpenAI-compatible), `qwen-max`, `qwen-plus`, etc. |
 | ⚡ Groq | API | Ultra-fast inference (OpenAI-compatible), Llama / Mixtral / Gemma |
 | ◐ Mistral | API | EU-hosted (OpenAI-compatible), free "Experiment" tier; `mistral-large-latest`, `mistral-small-latest` |
-| ✦ Gemini | API | Google AI native SDK; `gemini-2.0-flash`, `gemini-1.5-pro`, etc. |
+| ✦ Gemini | API | Google AI native SDK; chat-capable `gemini-*` models, listed live from your key |
 
-### Switching providers
+### Choosing a provider and model
 
-Click the **Use** button inside any provider card, or use the provider selector in the topbar.
+The top bar carries one model picker, reading `● Ollama / gemma4:31b-mlx`. Opening it
+lists every model grouped by provider, with a status dot on each group — green when the
+provider is reachable, red when it is configured but failing. Type to filter across all
+of them. Choosing a model switches the provider with it, so the pair is always
+consistent.
+
+Providers with no API key are collapsed into a single row at the bottom that links
+straight to **Settings → Providers**; they stay listed rather than being hidden, so a
+provider you have not set up is still visible as something you could use.
+
+Each provider's **default** model is marked with its own colour and a `default` badge.
+That is the model you get on switching to a provider you have not chosen one for — on
+Gemini and Mistral it is the free-tier model.
+
+A provider offering more than eight models shows the first few behind a **Show all N**
+row. The order is: the model in use, then the provider's default, then `-latest`
+aliases, then stable names, with pinned dated snapshots last. The model in use and the
+default are always shown.
+
+Models are filtered to those that can hold a conversation. Where a provider reports
+per-model capabilities, that report is used: Gemini models without `generateContent`
+and Mistral models without `completion_chat` are not offered, which excludes embedding,
+OCR, moderation, text-to-speech, image, robotics and live-audio models from the list.
+
+The 👁 marker on a model means it accepts image attachments, which enables the 📎
+button in the composer.
+
+The **Use** button inside a provider card in **Settings → Providers** still switches
+provider too.
 
 ### Environment variables
 
@@ -732,19 +762,20 @@ A **⚠ threshold?** warning pill appears automatically on any instance where ra
 
 ### Token Usage — all-time
 
-The **💰 Token Usage** card is the running total across **every** conversation, not just the one on screen — the top-bar pills are per-conversation and reset when you switch. One row per provider and model:
+The **🔢 Token Usage** card is the running total across **every** conversation, not just the one on screen — the top-bar pills are per-conversation and reset when you switch. One row per provider and model:
 
 | Column | Description |
 |---|---|
-| **Input** | Fresh input tokens, billed at the full rate |
-| **Cached** | Prompt-cache reads, billed at roughly 0.1× input |
-| **Cache write** | Prompt-cache creation, billed at roughly 1.25× input |
+| **Input** | Fresh input tokens |
+| **Cached** | Prompt-cache reads |
+| **Cache write** | Prompt-cache creation |
 | **Output** | Generated tokens |
-| **Cost** | Input, cache and output priced with that model's entry in the `pricing` table |
 
-The four token columns are disjoint, so they add up to the model's total. **Cached** and **Cache write** appear only when a provider reports them — currently Claude; other providers show just Input and Output.
+The four columns are disjoint, so they add up to the model's total. **Cached** and **Cache write** appear only when a provider reports them — currently Claude; other providers show just Input and Output.
 
-Rows are ordered by cost, most expensive first. A model with no entry in `pricing` shows **not priced**: its tokens are still counted, but it contributes nothing to the cost total, and the card says how many models are in that state so a partial figure is never mistaken for a complete one.
+Rows are ordered by total tokens, heaviest first.
+
+RediRecall reports tokens and no money. Rates differ by provider, by model and over time, and change without notice, so any figure the app derived would be a guess presented as an amount — work the cost out from these counts against your provider's own bill.
 
 Counts come from the provider and only from answers it actually produced. Cache hits and stopped answers never reach a provider, so they are absent here — which is why the sum of the top-bar pills across your conversations will read higher than this total.
 

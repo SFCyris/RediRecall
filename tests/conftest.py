@@ -64,13 +64,22 @@ def redis_client():
 
 
 def _purge(rc):
-    """Delete only this run's namespaced keys and indexes."""
-    for key in rc.scan_iter(f"{KEY_PREFIX}*", count=500):
-        rc.delete(key)
+    """Delete only this run's namespaced keys and indexes.
+
+    Matches the prefix ANYWHERE in the name, not just at the start. A test that builds a
+    RAG instance called ``<prefix>kept`` produces keys named ``rag:<prefix>kept:chunk:1``
+    and an index called ``rag:<prefix>kept:idx`` — both begin with ``rag:``, so a
+    startswith test matched neither and every run left its indexes and chunks behind in
+    the shared database. Containment is still exact enough to be safe: the prefix carries
+    the pid and cannot occur in real data.
+    """
+    for pattern in (f"{KEY_PREFIX}*", f"*{KEY_PREFIX}*"):
+        for key in rc.scan_iter(pattern, count=500):
+            rc.delete(key)
     try:
         for name in rc.execute_command("FT._LIST"):
             name = name.decode() if isinstance(name, bytes) else name
-            if name.startswith(KEY_PREFIX):
+            if KEY_PREFIX in name:
                 rc.execute_command("FT.DROPINDEX", name)
     except Exception:
         pass

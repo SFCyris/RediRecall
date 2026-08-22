@@ -33,7 +33,7 @@ def extract_js_function(source: str, name: str) -> str:
     """Return exactly one function's source, matched by brace balance.
 
     Slicing from `function name(` to the next line-initial `}` is wrong for a one-liner:
-    `_fmtCost` is a single line, so its slice ran on to the next function's closing brace
+    A one-liner such as `_ragKey` slices on to the next function's closing brace
     and swallowed the whole of `_tokenUsageCardHTML` — which the test payload then defined
     twice. `escHtml` likewise dragged in five unrelated helpers. Neither broke a test, but
     the extraction was not doing what it read as, and a genuine second definition would

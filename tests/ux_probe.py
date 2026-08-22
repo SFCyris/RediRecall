@@ -54,7 +54,7 @@ def main(index: pathlib.Path) -> None:
           S.templates = []; S.ragInstances = []; S.models = [];
           S.config = Object.assign({rag:{}, cache:{}, ui:{}, crawl:{}, security:{},
                                     recrawl:{}, watch_folders:{folders:[]},
-                                    pricing:{}, web_sources:[]}, S.config || {});
+                                    web_sources:[]}, S.config || {});
         }""")
 
         # ── 1 + 2: crawl progress is a measured ratio, not a hard-coded 50% ──────
@@ -840,6 +840,440 @@ def main(index: pathlib.Path) -> None:
           const el = document.getElementById('mCode');
           return {refs: [...el.querySelectorAll('.cite-ref')].map(r => r.textContent),
                   codeUntouched: !el.querySelector('code .cite-ref')};
+        }""")
+
+        # ── model picker ──────────────────────────────────────────────────
+        # Provider availability is decided by /api/status/<id>; three configured,
+        # four without a key — the shape of a typical install.
+        OUT["picker"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          for (const id of ['ollama','mistral','gemini'])
+            window.__routes['/api/status/' + id] = {ok: true, configured: true};
+          for (const id of ['claude','openai','qwen','groq'])
+            window.__routes['/api/status/' + id] = {ok: false, configured: false};
+          window.__routes['/api/ollama/models'] = [
+            {name: 'gemma4:31b-mlx', size: 1e10, vision: true},
+            {name: 'llama3:latest',  size: 4e9,  vision: false}];
+          window.__routes['/api/gemini/models'] = Array.from({length: 12},
+            (_, i) => ({id: 'gemini-x-' + i, name: 'gemini-x-' + i, vision: true}));
+          window.__routes['/api/mistral/models'] = [
+            {id: 'mistral-large-latest', name: 'mistral-large-latest', vision: true},
+            {id: 'codestral-latest',     name: 'codestral-latest',     vision: false}];
+          S.provider = 'ollama';
+          await loadModels();
+          await _mpRefresh(true);   // the status routes above were stubbed after boot
+          const closed = {label: document.getElementById('mp-model').textContent,
+                          popHidden: document.getElementById('mp-pop').hidden,
+                          expanded: document.getElementById('mp-btn').getAttribute('aria-expanded')};
+          await toggleModelPicker(true);
+          await wait(500);
+          // Resolve --green the way the browser paints it. Comparing a computed rgb()
+          // string against the raw custom-property text never matches, so the green/grey
+          // distinction the dots exist for would read as "every provider is grey".
+          const swatch = document.createElement('div');
+          swatch.style.cssText = 'position:fixed;left:-9999px;background:var(--green)';
+          document.body.appendChild(swatch);
+          const GREEN = getComputedStyle(swatch).backgroundColor;
+          swatch.remove();
+          const groups = [...document.querySelectorAll('.mp-group')].map(g => ({
+            text: g.textContent.replace(/\s+/g, ' ').trim(),
+            dot: getComputedStyle(g.querySelector('.dot')).backgroundColor,
+            green: getComputedStyle(g.querySelector('.dot')).backgroundColor === GREEN}));
+          const open = {
+            groups,
+            // 12 Gemini models is over the collapse threshold, 2 Mistral is not
+            collapsed: [...document.querySelectorAll('.mp-more')].map(b => b.textContent.trim()),
+            setupRow: document.querySelector('.mp-setup')?.textContent
+                        .replace(/\s+/g, ' ').trim() || null,
+            setupDot: getComputedStyle(document.querySelector('.mp-setup .dot')).backgroundColor,
+            setupIsGreen: getComputedStyle(document.querySelector('.mp-setup .dot')).backgroundColor === GREEN,
+            visionTags: document.querySelectorAll('.mp-item .mp-tag').length,
+            selected: [...document.querySelectorAll('.mp-item[aria-selected="true"] .mp-name')]
+                        .map(e => e.textContent)};
+          // picking a model from a different provider switches provider and model
+          document.querySelector('.mp-item[data-prov="mistral"][data-model="mistral-large-latest"]').click();
+          await wait(600);
+          const picked = {provider: S.provider, model: S.currentModel,
+                          popHidden: document.getElementById('mp-pop').hidden,
+                          attachEnabled: !document.getElementById('attach-btn').disabled,
+                          visionBadge: getComputedStyle(document.getElementById('vision-badge')).display};
+          // and a text-only model turns the attach button back off
+          await toggleModelPicker(true); await wait(400);
+          document.querySelector('.mp-item[data-model="codestral-latest"]').click();
+          await wait(500);
+          const textOnly = {model: S.currentModel,
+                            attachEnabled: !document.getElementById('attach-btn').disabled};
+          return {closed, open, picked, textOnly};
+        }""")
+
+        # A provider with no usable model must not leave Send looking ready.
+        OUT["picker_no_model"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          window.__routes['/api/status/claude'] = {ok: true, configured: true};
+          window.__routes['/api/claude/models'] = [];
+          await setProvider('claude');
+          await wait(400);
+          return {model: S.currentModel,
+                  label: document.getElementById('mp-model').textContent,
+                  sendDisabled: document.getElementById('send-btn').disabled,
+                  attachDisabled: document.getElementById('attach-btn').disabled};
+        }""")
+
+        # Escape inside the picker must close the picker and nothing else — the
+        # popover is not a .open/.visible layer, so it is not in _ESC_LAYERS.
+        OUT["picker_escape"] = pg.evaluate(r"""async () => {
+          // Poll for each state rather than sleeping a fixed span. Fixed waits passed on
+          // an idle machine and failed under a parallel mutation sweep, where this showed
+          // up as a spurious "killer" for mutations that touch none of this.
+          const until = async (fn, ms = 3000) => {
+            const t0 = Date.now();
+            while (Date.now() - t0 < ms) {
+              if (fn()) return true;
+              await new Promise(r => setTimeout(r, 25));
+            }
+            return false;
+          };
+          // Earlier probe sections can leave a layer open, and _ESC_LAYERS closes the
+          // innermost first — so without this the second Escape below would close a
+          // modal from another test and the pinned panel would look stuck.
+          for (const id of ['modal-overlay','search-overlay','settings-overlay']) {
+            const el = document.getElementById(id);
+            if (el) el.classList.remove('open','visible');
+          }
+          const pinned = document.getElementById('pinned-panel');
+          if (pinned.classList.contains('open')) {
+            togglePinned();
+            await until(() => !pinned.classList.contains('open'));
+          }
+          togglePinned();
+          const under = await until(() => pinned.classList.contains('open'));
+
+          await toggleModelPicker(true);
+          const opened = await until(() => !document.getElementById('mp-pop').hidden);
+          document.getElementById('mp-search').dispatchEvent(
+            new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+          const closed = await until(() => document.getElementById('mp-pop').hidden);
+          const first = {pickerClosed: closed,
+                         pinnedStillOpen: pinned.classList.contains('open')};
+
+          document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true}));
+          await until(() => !pinned.classList.contains('open'));
+          const second = {pinnedStillOpen: pinned.classList.contains('open')};
+          if (pinned.classList.contains('open')) togglePinned();
+          return {under, opened, first, second};
+        }""")
+
+        # Send must not come back lit when the stream ends and no model is selected.
+        OUT["picker_stream_end"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          window.__routes['/api/status/claude'] = {ok: true, configured: true};
+          window.__routes['/api/claude/models'] = [];
+          _setStreamingUI(true);
+          await setProvider('claude');
+          await wait(250);
+          const during = document.getElementById('send-btn').disabled;
+          _setStreamingUI(false);
+          await wait(150);
+          return {during, model: S.currentModel,
+                  after: document.getElementById('send-btn').disabled};
+        }""")
+
+        # Model ids and display names come from a provider's API — and an
+        # OpenAI-compatible provider can be pointed at any base URL. They are
+        # interpolated into an attribute and into text, so both contexts are checked.
+        OUT["picker_xss"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          window.__routes['/api/status/gemini'] = {ok: true, configured: true};
+          window.__routes['/api/gemini/models'] = [
+            {id: '"><img src=x onerror=window.__pwned=1>', name: 'evil-attr'},
+            {id: 'ok-model', name: '<script>window.__pwned2=1</script>'},
+            {id: "quote'test", name: "quote'test"}];
+          delete S.modelCache['gemini'];
+          S.provider = 'gemini';
+          await loadModels();
+          await _mpRefresh(true);
+          await toggleModelPicker(true);
+          await wait(400);
+          const out = {pwned: !!window.__pwned, pwned2: !!window.__pwned2,
+            imgs: document.querySelectorAll('#mp-list img').length,
+            scripts: document.querySelectorAll('#mp-list script').length,
+            ids: [...document.querySelectorAll('.mp-item')].map(e => e.dataset.model),
+            labels: [...document.querySelectorAll('.mp-item .mp-name')].map(e => e.textContent)};
+          await toggleModelPicker(false);
+          return out;
+        }""")
+
+        # /api/status/<provider> makes a real request to the provider to verify the
+        # key. Opening the menu must not pay that cost again on every open.
+        OUT["picker_probe_ttl"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          let probes = 0;
+          const inner = window.fetch;
+          window.fetch = async (u, o) => { if (String(u).includes('/api/status/')) probes++;
+                                           return inner(u, o); };
+          await _mpRefresh(true);            // prime
+          await wait(200);
+          const primed = probes;
+          probes = 0;
+          for (let i = 0; i < 4; i++) {
+            await toggleModelPicker(true); await wait(150);
+            await toggleModelPicker(false); await wait(50);
+          }
+          const repeats = probes;
+          probes = 0;
+          await _mpRefresh(true);            // an explicit refresh still re-probes
+          await wait(200);
+          const forced = probes;
+          window.fetch = inner;
+          return {primed, repeats, forced};
+        }""")
+
+        # "Refresh Models" lives inside each provider card in Settings. The old
+        # per-provider loaders wrote straight into the top-bar dropdown, so refreshing
+        # one provider's list replaced the ACTIVE provider's models with it.
+        OUT["picker_refresh"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          window.__routes['/api/ollama/models'] = [
+            {name: 'gemma4:31b-mlx', size: 1e10, vision: true},
+            {name: 'llama3:latest',  size: 4e9,  vision: false}];
+          S.provider = 'ollama';
+          await loadModels();
+          const before = {model: S.currentModel, ids: S.models.map(m => m.id)};
+          await refreshProviderModels('gemini');      // a provider that is NOT active
+          await wait(300);
+          const other = {model: S.currentModel, ids: S.models.map(m => m.id)};
+          // ...and the active provider's own refresh does pick up a new model
+          window.__routes['/api/ollama/models'] = [{name: 'newly-pulled:7b', size: 7e9, vision: false}];
+          await refreshProviderModels('ollama');
+          await wait(300);
+          const own = {model: S.currentModel, ids: S.models.map(m => m.id)};
+          return {before, other, own};
+        }""")
+
+        # The collapsed no-key row is the only route to provider setup from here.
+        OUT["picker_setup_link"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          await _mpRefresh(true);
+          await toggleModelPicker(true);
+          await wait(350);
+          const row = document.querySelector('.mp-setup');
+          if (!row) return {noRow: true};
+          row.click();
+          await wait(350);
+          const out = {settingsOpen: document.getElementById('settings-overlay').classList.contains('open'),
+                       tab: [...document.querySelectorAll('.tab-pane')]
+                              .find(p => p.classList.contains('active'))?.id,
+                       pickerClosed: document.getElementById('mp-pop').hidden};
+          closeSettings(true);
+          await wait(200);
+          return out;
+        }""")
+
+        # The dot, the separator and the caret are aria-hidden, so the button's
+        # accessible name has to carry the selection and its status itself.
+        OUT["picker_a11y_name"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          const label = () => document.getElementById('mp-btn').getAttribute('aria-label');
+          window.__routes['/api/status/ollama'] = {ok: true, configured: true};
+          window.__routes['/api/ollama/models'] = [{name: 'gemma4:31b-mlx', size: 1e10, vision: true}];
+          S.provider = 'ollama';
+          await loadModels(); await _mpRefresh(true); await wait(200);
+          const ollama = label();
+          window.__routes['/api/status/gemini'] = {ok: true, configured: true};
+          window.__routes['/api/gemini/models'] = [{id: 'gemini-2.5-pro', name: 'gemini-2.5-pro'}];
+          await setProvider('gemini'); await wait(300);
+          return {ollama, gemini: label(),
+                  isStatic: ollama === label()};
+        }""")
+
+        # #topbar carries backdrop-filter, which makes it a stacking context — so the
+        # popover cannot escape it however high its own z-index is, and #chat-area
+        # follows in the DOM. Hit-tested, because the popover is still "visible" in the
+        # DOM sense while an answer card paints over it.
+        OUT["picker_stacking"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          clearChat(true);
+          // sendMessage removes the welcome screen, appendMessage does not — leave it
+          // and the hit-test lands on the welcome card instead of the answer.
+          document.querySelector('.welcome-screen')?.remove();
+          appendMessage('user', 'sugar molecule', {id: 'uZ'});
+          appendMessage('assistant',
+            'Glucose.\n\n| Atom | Count |\n|---|---|\n| C | 6 |\n| H | 12 |\n| O | 6 |', {id: 'aZ'});
+          await wait(500);
+          document.getElementById('aZ')?.scrollIntoView({block: 'center'});
+          await wait(250);
+          await _mpRefresh(true);
+          await toggleModelPicker(true);
+          await wait(400);
+          const popEl = document.getElementById('mp-pop');
+          const pop = popEl.getBoundingClientRect();
+          // Sample down the popover. For each point, ask what is underneath it with the
+          // menu momentarily hidden — that is what the menu has to beat, and it proves
+          // the points sit over chat content rather than over empty page.
+          const fracs = [0.25, 0.5, 0.75, 0.95];
+          const xs = fracs.map(f => [pop.left + pop.width / 2, pop.top + pop.height * f]);
+          const over = xs.map(([x, y]) => document.elementFromPoint(x, y));
+          popEl.style.display = 'none';
+          void popEl.offsetHeight;                       // force the recalc
+          const under = xs.map(([x, y]) => document.elementFromPoint(x, y));
+          popEl.style.display = '';
+          const out = {inChatArea: under.filter(e => e && e.closest('#chat-area')).length,
+                       sampled: xs.length,
+                       beneath: under.map(e => e ? (e.className || e.tagName) : null),
+                       allInsidePopover: over.every(e => e && e.closest('#mp-pop')),
+                       topmost: over.map(e => e ? (e.className || e.tagName) : null),
+                       topbarZ: getComputedStyle(document.getElementById('topbar')).zIndex,
+                       topbarPosition: getComputedStyle(document.getElementById('topbar')).position};
+          await toggleModelPicker(false);
+          clearChat(true);
+          return out;
+        }""")
+
+        # The provider's default — the free-tier model on Gemini and Mistral.
+        OUT["picker_default"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          S.config = S.config || {};
+          S.config.gemini = {model: 'gemini-2.5-pro'};
+          window.__routes['/api/status/gemini'] = {ok: true, configured: true};
+          window.__routes['/api/gemini/models'] = [
+            {id: 'gemini-flash-latest', name: 'gemini-flash-latest'},
+            {id: 'gemini-2.5-pro',      name: 'gemini-2.5-pro'},
+            {id: 'gemini-2.5-flash',    name: 'gemini-2.5-flash'}];
+          S.provider = 'gemini';
+          await loadModels();
+          // The model IN USE must not also be the default, or rank 0 masks the default
+          // rule entirely and removing it changes nothing about the order.
+          selectModel('gemini-2.5-flash');
+          delete S.modelCache['gemini'];
+          await _mpRefresh(true);
+          await toggleModelPicker(true);
+          await wait(400);
+          const marked = [...document.querySelectorAll('.mp-item.mp-is-default')];
+          const badge = document.querySelector('.mp-item.mp-is-default .mp-tag-default');
+          const plain = document.querySelector('.mp-item:not(.mp-is-default) .mp-name');
+          // Null-safe on purpose: reading a style off a missing element throws, the probe
+          // reports an error, and every browser test SKIPS — so removing the marking
+          // entirely made these tests pass rather than fail.
+          const dfltName = document.querySelector('.mp-item.mp-is-default .mp-name');
+          const out = {
+            markedIds: marked.map(e => e.dataset.model),
+            badgeText: badge ? badge.textContent : null,
+            defaultColour: dfltName ? getComputedStyle(dfltName).color : null,
+            plainColour: plain ? getComputedStyle(plain).color : null,
+            inUse: S.currentModel,
+            // the default must sort above the plain entries and the -latest aliases
+            order: [...document.querySelectorAll('#mp-list .mp-item')].map(e => e.dataset.model)};
+          await toggleModelPicker(false);
+          return out;
+        }""")
+
+        # A model citing two passages writes "[3, 4]" as readily as "[3] [4]".
+        OUT["citations_grouped"] = pg.evaluate(r"""async () => {
+          const wait = ms => new Promise(r => setTimeout(r, ms));
+          clearChat(true);
+          document.querySelector('.welcome-screen')?.remove();
+          appendMessage('assistant',
+            'A symlink holds a pathname [3, 4]. It is resolved at open time [1,2]. '
+            + 'Out of range [9] stays text.', {id: 'mGrp'});
+          updateRagContext('mGrp', [
+            {n: 1, text: 'one',   source: 'symlink.7', relevance: 0.9},
+            {n: 2, text: 'two',   source: 'symlink.7', relevance: 0.8},
+            {n: 3, text: 'three', source: 'path_resolution.7', relevance: 0.7},
+            {n: 4, text: 'four',  source: 'open.2', relevance: 0.6}], {rag: 0.1}, '');
+          await wait(200);
+          const el = document.getElementById('mGrp');
+          const bubble = el.querySelector('.msg-bubble');
+          return {refs: [...el.querySelectorAll('.cite-ref')].map(r => r.textContent),
+                  targets: [...el.querySelectorAll('.cite-ref')].map(r => r.dataset.cite),
+                  // the out-of-range marker must be left alone, not silently dropped
+                  keptOutOfRange: bubble.textContent.includes('[9]'),
+                  // and the surrounding prose must survive intact
+                  prose: bubble.textContent.replace(/\s+/g, ' ').trim()};
+        }""")
+
+        # The top bar is one row. It was two, and the second one wrapped again as the
+        # session title and the token counter grew — so the bar was 99px on a fresh
+        # session and 198px in use, all of it taken from the conversation.
+        SEED_BAR = """() => {
+          document.getElementById('tok-in').textContent = '↑ 128,402';
+          document.getElementById('tok-out').textContent = '↓ 9,731';
+          document.getElementById('tok-total').textContent = 'Σ 138,133';
+          document.getElementById('vision-badge').style.display = 'inline-flex';
+          document.getElementById('session-title').textContent =
+            'Ubuntu kernel boot parameters and initramfs';
+        }"""
+        MEASURE_BAR = """() => {
+          const bar = document.getElementById('topbar');
+          return {h: Math.round(bar.getBoundingClientRect().height),
+                  rows: bar.children.length,
+                  overflows: bar.scrollWidth > bar.clientWidth + 1,
+                  titleClipped: document.getElementById('session-title').scrollWidth >
+                                document.getElementById('session-title').clientWidth};
+        }"""
+        bar_by_width = {}
+        for w in (1680, 1440, 1280, 1024, 900, 820, 768, 640, 375):
+            pg.set_viewport_size({"width": w, "height": 900})
+            pg.wait_for_timeout(180)
+            pg.evaluate(SEED_BAR)
+            pg.wait_for_timeout(120)
+            bar_by_width[w] = pg.evaluate(MEASURE_BAR)
+        pg.set_viewport_size({"width": 1400, "height": 950})
+        pg.wait_for_timeout(200)
+        OUT["topbar_single_row"] = bar_by_width
+
+        # Clear chat lives in the sidebar now, not the top bar.
+        OUT["clear_chat_home"] = pg.evaluate(r"""() => ({
+          inTopbar: !!document.querySelector('#topbar [onclick*=confirmClearChat]'),
+          inSidebar: !!document.querySelector('#sidebar-footer [onclick*=confirmClearChat]'),
+          label: document.querySelector('#sidebar-footer [onclick*=confirmClearChat]')
+                   ?.textContent.trim() || null,
+          footerOrder: [...document.querySelectorAll('#sidebar-footer .sidebar-btn, #sidebar-footer a')]
+                   .map(e => e.textContent.trim())})""")
+
+        # ── function plot: definition lines whose argument is not "x" ─────
+        # A log-log relation is written log(N) = -D * log(x). Only a literal "(x)" was
+        # accepted as a definition, so the line fell through as the expression — and
+        # mathjs read it as *defining* a function called log, which compiles and
+        # evaluates to a function rather than a number. Every sample was NaN and the
+        # card showed "no finite values", naming nothing.
+        pg.wait_for_function("() => typeof math !== 'undefined'", timeout=15000)
+        OUT["plot_defs"] = pg.evaluate(r"""() => {
+          const build = s => { try { return {ok: true, svg: _buildFunctionPlot(s, {})}; }
+                               catch (e) { return {ok: false, error: String(e.message || e)}; } };
+          const paths = svg => {
+            const d = document.createElement('div'); d.innerHTML = svg;
+            return [...d.querySelectorAll('path')]
+              .map(p => ({len: (p.getAttribute('d') || '').length, stroke: p.getAttribute('stroke')}))
+              .filter(p => p.len > 50);
+          };
+          const labels = svg => {
+            const d = document.createElement('div'); d.innerHTML = svg;
+            return [...d.querySelectorAll('text')].map(t => t.textContent);
+          };
+          const SPEC = 'log(N_line) = -1 * log(x) + 0\n'
+                     + 'log(N_sq) = -2 * log(x) + 0\n'
+                     + 'log(N_Sierpinski) = -1.585 * log(x) + 0\n'
+                     + 'log(N_Koch) = -1.262 * log(x) + 0\n'
+                     + 'x = 0.01 .. 1';
+          const r = build(SPEC);
+          const out = {ok: r.ok, error: r.error || null};
+          if (r.ok) {
+            const ps = paths(r.svg);
+            out.series = ps.length;
+            out.distinctStrokes = [...new Set(ps.map(p => p.stroke))].length;
+            out.labels = labels(r.svg).filter(t => t.startsWith('log('));
+          }
+          // regressions: the shapes that already worked must keep working
+          out.plainY   = build('y = sin(x)\nx = -3 .. 3').ok;
+          out.fOfX     = build('f(x) = sin(x)\ng(x) = cos(x)\nx = -3 .. 3').ok;
+          out.bareExpr = build('sin(x)*x\nx = -5 .. 5').ok;
+          out.undefSym = build('y = a*x\nx = 0 .. 1').error || '';
+          // and something that evaluates to a non-number must say so. "sin" instead of
+          // "sin(x)" is the everyday version: it compiles, evaluates, and hands back a
+          // function — no exception, so it used to surface as "no finite values".
+          out.nonNumeric = build('sin\nx = 0 .. 1').error || '';
+          out.nonNumericMatrix = build('[1,2,3]\nx = 0 .. 1').error || '';
+          return out;
         }""")
 
         b.close()

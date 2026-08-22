@@ -145,8 +145,8 @@ def test_white_text_on_every_accent_filled_control_is_readable(a11y, theme):
 
 @pytest.mark.parametrize("control", ["btn-primary", "new-chat-btn", "send-btn",
                                      "seg-btn-active", "prov-use-active",
-                                     "provider-active", "msg-bubble-user",
-                                     "msg-avatar-user"])
+                                     "mp-btn", "mp-item-selected",
+                                     "msg-bubble-user", "msg-avatar-user"])
 def test_every_accent_filled_control_is_actually_measured(a11y, control):
     """A `None` here means the control painted no accent fill, so the contrast check
     silently skipped it — which is how five of these went unnoticed. Fail loudly instead

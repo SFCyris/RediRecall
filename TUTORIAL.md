@@ -361,15 +361,15 @@ If retrieval isn't working well, open **Settings → Analytics → RAG Performan
 
 See [SETTINGS.md](SETTINGS.md) for the full explanation of every knob.
 
-### Checking what you've spent
+### Checking what you've used
 
-Further down the same tab, the **💰 Token Usage** card totals every conversation you have had, per provider and model, with an estimated cost:
+Further down the same tab, the **🔢 Token Usage** card totals every conversation you have had, per provider and model:
 
-![Settings → Analytics — the Token Usage table with per-model input, cache, output and cost columns](screenshots/tutorial/13b-token-usage.png)
+![Settings → Analytics — the Token Usage table with per-model input, cache and output columns](screenshots/tutorial/13b-token-usage.png)
 
 This is the all-time figure. The token pills in the top bar count only the conversation you are looking at and reset when you switch, so the two will not match.
 
-If a model shows **not priced**, add its rate to the `pricing` block in `config.json` — the card names the models it is missing, and the cost total says how many it could not price. Local Ollama models are genuinely free, so `$0.00` is the right answer for them.
+The card reports tokens, not money. Provider rates change without notice, so RediRecall does not guess at a price — take these counts to your provider's own billing page. **⬇ Export CSV** at the foot of the tab gives you the same rows in a spreadsheet.
 
 ---
 
