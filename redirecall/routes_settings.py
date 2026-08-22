@@ -596,15 +596,15 @@ async def api_ollama_delete(name: str):
 
 @appcore.app.get("/api/claude/models")
 def api_claude_models():
-    return providers.CLAUDE_MODELS
+    return providers.stamp_vision(providers.CLAUDE_MODELS)
 
 @appcore.app.get("/api/openai/models")
 async def api_openai_models():
-    return await providers.openai_models()
+    return providers.stamp_vision(await providers.openai_models())
 
 @appcore.app.get("/api/qwen/models")
 def api_qwen_models():
-    return providers.QWEN_MODELS_STATIC
+    return providers.stamp_vision(providers.QWEN_MODELS_STATIC)
 
 @appcore.app.get("/api/mistral/models")
 async def api_mistral_models():
@@ -612,26 +612,26 @@ async def api_mistral_models():
     api_key  = state._config.get("mistral", {}).get("api_key", "")
     base_url = state._config.get("mistral", {}).get("base_url", "https://api.mistral.ai/v1").rstrip("/")
     if not api_key:
-        return providers.MISTRAL_MODELS_STATIC
+        return providers.stamp_vision(providers.MISTRAL_MODELS_STATIC)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             res = await client.get(f"{base_url}/models",
                                    headers={"Authorization": f"Bearer {api_key}"})
             if res.status_code == 200:
-                data = res.json().get("data", [])
-                # Chat-capable models only; keep the ids, sort for stable display.
-                ids = sorted({m.get("id") for m in data if m.get("id")})
-                if ids:
-                    return [{"id": i, "name": i, "context": 0} for i in ids]
+                models = providers.filter_mistral_models(res.json().get("data", []))
+                if models:
+                    return models
     except Exception:
         pass
-    return providers.MISTRAL_MODELS_STATIC
+    return providers.stamp_vision(providers.MISTRAL_MODELS_STATIC)
 
 @appcore.app.get("/api/groq/models")
 async def api_groq_models():
-    return await providers.groq_models()
+    return providers.stamp_vision(await providers.groq_models())
 
 @appcore.app.get("/api/gemini/models")
 async def api_gemini_models():
-    return await providers.gemini_models()
+    # The live path stamps vision itself; this covers the static fallback taken when
+    # there is no key or the fetch fails, whose entries carry no flag at all.
+    return providers.stamp_vision(await providers.gemini_models())
 

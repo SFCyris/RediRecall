@@ -10,6 +10,7 @@ the block stops listing the expressions, mis-colours them, or swallows the domai
 line as if it were a function. Guarded by mutations.json entries shown to make it red.
 """
 import pathlib
+import re
 import shutil
 
 from _jsrun import run_node
@@ -41,8 +42,15 @@ def _defs(spec: str) -> str:
     if not shutil.which("node"):
         pytest.skip("node not available")
     html = _INDEX.read_text(encoding="utf-8")
+    # _PLOT_DEF is a const, not a function: pull its literal out of the source rather
+    # than re-typing it here, or the test would validate a copy of the regex instead of
+    # the one the app runs.
+    m = re.search(r"^const _PLOT_DEF=(/.+/);$", html, re.M)
+    assert m, "the shared definition-line regex is gone"
     js = (
         "const math = { evaluate:(s)=>Number(s) };\n"
+        + f"const _PLOT_DEF={m.group(1)};\n"
+        + _fn(html, "function _plotDefLabel(") + "\n"
         + _fn(html, "function _plotEsc(") + "\n"
         + _fn(html, "function _plotNum(") + "\n"
         + _fn(html, "function _plotDefsHtml(") + "\n"
@@ -103,3 +111,30 @@ def test_defs_are_inserted_in_front_of_the_card():
     # and the plot builder itself must NOT re-embed them (they'd duplicate on re-render)
     builder = _fn(html, "function _buildFunctionPlot(")
     assert "plot-defs" not in builder, "defs leaked back into the re-rendered SVG"
+
+
+def test_a_definition_whose_argument_is_not_x_is_still_a_definition():
+    """A log-log relation is written log(N) = -D * log(x). Only a literal "(x)" used to
+    be accepted as a definition, so the whole line fell through as the expression — and
+    mathjs read it as *defining* a function called log, which evaluates to a function
+    rather than a number. Every sample became NaN and the plot died with a generic
+    "no finite values"."""
+    html = _defs("log(N_line) = -1 * log(x) + 0\n"
+                 "log(N_Koch) = -1.262 * log(x) + 0\n"
+                 "x = 0.01 .. 1")
+    assert "log(N_line)" in html and "log(N_Koch)" in html, html
+    # the RHS is the expression, and the LHS is not repeated into it
+    assert "-1 * log(x) + 0" in html
+    assert "log(N_line) = -1" not in html.replace("</b> = ", "</b>|")
+
+
+def test_the_argument_name_is_preserved_verbatim():
+    html = _defs("f(t) = t*2\nx = 0 .. 1")
+    assert "f(t)" in html, html
+    assert "f(x)" not in html
+
+
+def test_a_bare_name_still_gains_the_x_argument():
+    """`y = sin(x)` has always been labelled y(x); the broader match must not change it."""
+    html = _defs("y = sin(x)\nx = 0 .. 1")
+    assert "y(x)" in html, html

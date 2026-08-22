@@ -5,6 +5,89 @@ All notable changes to RediRecall are recorded here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.5] — 2026-08-21
+
+### Added
+- **One model picker in the top bar.** Provider and model are chosen together from a
+  single control reading `● Ollama / gemma4:31b-mlx`. It lists every model grouped by
+  provider with a status dot on each group — green when the provider is reachable, red
+  when it is configured but failing — and filters as you type. Providers with no API key
+  are collapsed into one row that links to *Settings → Providers*. A provider offering
+  more than eight models shows the model in use, `-latest` aliases and stable names
+  first, with pinned dated snapshots behind a *Show all N* row. Replaces the seven
+  provider buttons and the separate model dropdown.
+- **Provider, model and knowledge-base scope are remembered per browser** and restored
+  on reload.
+- **The top bar is a single row.** It was two, and the second wrapped again as the
+  session title and the token count grew — 99px on a fresh conversation, up to 198px in
+  use, all of it taken from the chat. It is now a constant 52px at every width, and the
+  controls give way in order of value as the window narrows rather than wrapping.
+- **Clear chat moved to the sidebar**, beside the other actions that act on the current
+  conversation.
+- **The provider's default model is marked in the picker** — the free-tier model on
+  Gemini and Mistral — in its own colour, with a `default` badge, and sorted directly
+  below the model in use so it is never hidden behind *Show all N*.
+
+### Removed
+- **The estimated cost figure, everywhere it appeared** — the top-bar cost pill, the
+  *Cost* column and partial-total warning in Analytics → Token Usage, the *Cost USD*
+  column in the Analytics CSV, and the `pricing` block in `config.json`. The rates
+  behind it were shipped constants that no provider supplied and nothing revalidated;
+  prices change without notice, so the amount shown could go stale silently while still
+  reading as an authority. Token counts are unaffected and remain the provider's own
+  reported figures — price them against your provider's billing page.
+
+  An existing `pricing` block in your `config.json` is now ignored. It is left in place
+  rather than deleted, so nothing is lost if you kept notes there.
+
+### Fixed
+- **Image attachment did not work on any hosted provider.** The 📎 button and the 👁
+  Vision badge were decided by looking the selected model up in a list only Ollama ever
+  filled, and keyed on a display name while being called with a model id — so attaching
+  an image was impossible on Claude, OpenAI, Gemini, Mistral, Groq and Qwen whatever the
+  model supported, and pasting one reported *"Switch to a vision model to use images"*
+  on a vision model. Hosted model lists now carry a vision flag, taken from the
+  provider's own capability report where there is one. Present since 1.0.0.
+- **Every page load reset the knowledge-base scope to "All RAGs".** The scope was fixed
+  to all-instances at start-up and nothing restored the choice, so a reload silently
+  changed what grounded your answers and overrode the instance the configuration
+  stored. Present since 1.4.0.
+- **Models that cannot hold a conversation were offered as chat models.** Gemini's list
+  was filtered on the model id alone, so 37 entries reached the picker of which 21 could
+  not answer a question — embedding, text-to-speech, image, robotics, computer-use and
+  live-audio models among them. Mistral's list was not filtered at all despite claiming
+  to be, adding embedding, OCR, moderation and audio models. Both now use the capability
+  each API reports.
+- **Switching provider announced success before it knew.** *"Provider: Claude API"*
+  appeared the moment the button was pressed, while the model list was still loading and
+  might come back empty; nothing said so afterwards, and the top bar showed the new
+  provider beside the previous provider's model. The confirmation now names the model
+  that was selected, or says the provider has none.
+- **Send looked ready with no model selected.** The button stayed lit and the problem
+  only surfaced after pressing it.
+- **"Refresh Models" in a provider card replaced the active provider's model list**
+  with that provider's, leaving the top bar offering models the running provider cannot
+  use.
+- **Opening *Settings → Ollama* while a hosted provider was active** replaced the active
+  model list with Ollama's, silently disabling image attachment until the provider was
+  switched.
+- **The model list rendered underneath answer cards and tables.** The top bar applies a
+  backdrop blur, which confines anything inside it to its own stacking layer, so the open
+  menu was painted over by the conversation behind it.
+- **A function plot failed whenever a definition's argument was not literally `x`.**
+  A log-log relation is written `log(N) = -1.585 * log(x)`, and only `name(x) = …` was
+  recognised as a definition — so the whole line was taken as the expression, read as
+  *defining* a function called `log`, and every sample came back as a function rather
+  than a number. The card reported `Plot error: no finite values`. Any argument name now
+  works, and the legend keeps what you wrote. An expression that evaluates to something
+  other than a number — writing `sin` where `sin(x)` was meant — now says so and names
+  the type, instead of the same generic message.
+- **Grouped citation markers were not clickable.** A model citing two passages writes
+  `[3, 4]` as readily as `[3] [4]`, and only the lone form was linked — so the grouped
+  one read as a citation but opened nothing.
+- **The Mistral model list showed bare ids.** Fetched live it dropped the readable
+  labels — including the *(free tier)* marks — that the built-in list carries.
+
 ## [1.8.1] — 2026-08-21
 
 ### Fixed

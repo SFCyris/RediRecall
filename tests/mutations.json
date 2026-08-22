@@ -1485,14 +1485,6 @@
     "expect": "test_pause_and_cancel_key_on_the_same_url_the_crawler_does"
   },
   {
-    "id": "M184_cache_write_not_priced",
-    "file": "redirecall/index.html",
-    "find": "       + cw/1e6*(p.cache_write??(p.in||0)*1.25) + compTok/1e6*(p.out||0);",
-    "replace": "       + compTok/1e6*(p.out||0);",
-    "defect": "cache-creation tokens are not priced -> the most expensive token class contributes $0 to the cost",
-    "expect": "test_cache_write_tokens_are_priced"
-  },
-  {
     "id": "M185_directive_hold_removed",
     "file": "redirecall/index.html",
     "find": "  s=s.replace(/%%\\{[\\s\\S]*?\\}%%/g,m=>push(m));\n",
@@ -1515,14 +1507,6 @@
     "replace": "<button id=\"toggle-sidebar\" onclick=\"toggleSidebar()\">☰</button>",
     "defect": "an icon-only button loses its accessible name -> announced as an unnamed button",
     "expect": "test_icon_only_buttons_have_accessible_names"
-  },
-  {
-    "id": "M188_csv_omits_token_rows",
-    "file": "redirecall/index.html",
-    "find": "    rows.push([],['Provider','Model','Input','Cached','Cache write','Output','Cost USD']);",
-    "replace": "    if(false){}",
-    "defect": "the analytics CSV loses its token/cost rows -> the one table worth reconciling against a bill cannot leave the app",
-    "expect": "test_token_rows_are_included_with_a_header"
   },
   {
     "id": "M189_csv_fields_not_quoted",
@@ -1944,8 +1928,8 @@
   {
     "id": "M241_provider_switch_not_dirty",
     "file": "redirecall/index.html",
-    "find": "  _markSettingsEdited();\n  const label=",
-    "replace": "  const label=",
+    "find": "  _markSettingsEdited();\n  // Awaited, and the toast reports the outcome.",
+    "replace": "  // Awaited, and the toast reports the outcome.",
     "defect": "switching provider changes what Save Settings posts without marking the panel dirty, so closing it discards the change silently",
     "expect": "test_switching_provider_counts_as_an_unsaved_change"
   },
@@ -2196,5 +2180,205 @@
     "replace": "                             \"LIMIT\", \"0\", \"1000000\", \"DIALECT\", \"2\")",
     "defect": "an aggregate asks for more rows than MAXAGGREGATERESULTS allows, which Redis refuses outright — the route 500s on a stock Redis Stack",
     "expect": "test_listing_documents_returns_every_one_not_just_the_first_page test_saving_text_makes_it_a_findable_deletable_document"
+  },
+  {
+    "id": "M273_gemini_capability_gate_removed",
+    "file": "redirecall/providers.py",
+    "find": "if _GEMINI_CHAT_ACTION not in set(actions or ()):\n        return False",
+    "replace": "if False:\n        return False",
+    "defect": "Gemini models with no generateContent (embeddings, native-audio, live-translate) reach the model picker and fail on send",
+    "expect": "test_the_capability_gate_outranks_the_name_gate"
+  },
+  {
+    "id": "M274_gemini_purpose_gate_removed",
+    "file": "redirecall/providers.py",
+    "find": "return not any(tok in model_id for tok in _GEMINI_NON_CHAT)",
+    "replace": "return True",
+    "defect": "TTS, image, robotics and computer-use Gemini models are offered as chat models",
+    "expect": "test_a_non_conversational_gemini_model_is_dropped"
+  },
+  {
+    "id": "M275_mistral_chat_filter_removed",
+    "file": "redirecall/providers.py",
+    "find": "if not mid or not caps.get(\"completion_chat\"):",
+    "replace": "if not mid:",
+    "defect": "Mistral embedding, OCR, moderation and voxtral audio models are listed as chat models",
+    "expect": "test_mistral_keeps_only_chat_capable_models"
+  },
+  {
+    "id": "M276_mistral_vision_guessed_from_name",
+    "file": "redirecall/providers.py",
+    "find": "\"vision\": bool(caps.get(\"vision\"))}",
+    "replace": "\"vision\": supports_vision(mid)}",
+    "defect": "Mistral vision is guessed from the name table instead of the capabilities the API reports, so vision models lose their attach button",
+    "expect": "test_mistral_vision_comes_from_the_api_not_the_name_table"
+  },
+  {
+    "id": "M277_o3_mini_gains_vision",
+    "file": "redirecall/providers.py",
+    "find": "_VISION_EXACT = {\"o1\", \"o3\", \"o4-mini\"}",
+    "replace": "_VISION_EXACT = {\"o1\", \"o4-mini\"}\n_VISION_PREFIXES = _VISION_PREFIXES + (\"o3\",)",
+    "defect": "o3-mini is matched by an o3 prefix and offers an attach button that errors on send",
+    "expect": "test_a_text_only_model_is_not_flagged"
+  },
+  {
+    "id": "M278_stamp_vision_mutates_statics",
+    "file": "redirecall/providers.py",
+    "find": "return [dict(m, vision=m.get(\"vision\", supports_vision(m.get(\"id\", \"\"))))\n            for m in models]",
+    "replace": "for m in models:\n        m.setdefault(\"vision\", supports_vision(m.get(\"id\", \"\")))\n    return models",
+    "defect": "stamp_vision writes into the module-level *_STATIC lists, so the constants carry a vision key for the life of the process",
+    "expect": "test_stamp_vision_never_mutates_the_shared_static_lists"
+  },
+  {
+    "id": "M279_hosted_models_keyed_on_name",
+    "file": "redirecall/index.html",
+    "find": ":{id:m.id,  label:m.name||m.id,vision:!!m.vision,context:m.context||0})",
+    "replace": ":{id:m.name,label:m.name||m.id,vision:!!m.vision,context:m.context||0})",
+    "defect": "hosted models are keyed on their display name, so selectModel never finds them and the attach button stays disabled on every vision model",
+    "expect": "test_hosted_models_key_on_id_with_name_as_the_display_label"
+  },
+  {
+    "id": "M280_model_without_id_kept",
+    "file": "redirecall/index.html",
+    "find": "    .filter(m=>m.id);",
+    "replace": "    ;",
+    "defect": "a model entry with no id renders a nameless row that selects an empty model",
+    "expect": "test_entries_without_an_id_are_dropped"
+  },
+  {
+    "id": "M281_selected_model_not_pinned_first",
+    "file": "redirecall/index.html",
+    "find": "  if(m.id===S.currentModel)return 0;\n",
+    "replace": "",
+    "defect": "the model in use can be hidden behind “Show all N” in its own picker",
+    "expect": "test_the_selected_model_always_sorts_first"
+  },
+  {
+    "id": "M282_snapshots_not_demoted",
+    "file": "redirecall/index.html",
+    "find": "  if(/\\d{4}(?:-\\d{2})?$|-\\d{2}-\\d{4}$/.test(m.id))return 4;\n",
+    "replace": "",
+    "defect": "pinned dated snapshots crowd out the stable model names in the collapsed list",
+    "expect": "test_latest_aliases_outrank_plain_names_which_outrank_dated_snapshots"
+  },
+  {
+    "id": "M283_scope_always_saved_as_all",
+    "file": "redirecall/index.html",
+    "find": "ragScope:S.noRag?'__none__':(S.ragAllMode?'__all__':(_activeRagKey?.()||'')),",
+    "replace": "ragScope:'__all__',",
+    "defect": "every reload re-scopes retrieval to all knowledge bases regardless of what was chosen",
+    "expect": "test_every_scope_state_round_trips"
+  },
+  {
+    "id": "M284_topbar_loses_its_stacking_escape",
+    "file": "redirecall/index.html",
+    "find": "flex-shrink:0;position:relative;z-index:30}",
+    "replace": "flex-shrink:0}",
+    "defect": "#topbar's backdrop-filter traps the model picker's popover in its stacking context, so the menu renders underneath answer cards and tables",
+    "expect": "test_the_picker_paints_above_the_answer_cards"
+  },
+  {
+    "id": "M285_default_model_not_marked",
+    "file": "redirecall/index.html",
+    "find": "const isDefault=(m.id===dflt);",
+    "replace": "const isDefault=false;",
+    "defect": "the provider's default model (the free-tier one on Gemini and Mistral) is indistinguishable from every other entry",
+    "expect": "test_the_default_model_is_a_different_colour_from_the_rest"
+  },
+  {
+    "id": "M286_default_not_ranked",
+    "file": "redirecall/index.html",
+    "find": "  if(prov&&m.id===_mpDefaultFor(prov))return 1;\n",
+    "replace": "",
+    "defect": "the provider's default model can be hidden behind “Show all N”",
+    "expect": "test_the_configured_default_outranks_everything_but_the_model_in_use"
+  },
+  {
+    "id": "M287_mistral_curated_names_dropped",
+    "file": "redirecall/providers.py",
+    "find": "        name = next((x[\"name\"] for x in MISTRAL_MODELS_STATIC if x[\"id\"] == mid), mid)\n",
+    "replace": "        name = mid\n",
+    "defect": "the live Mistral list shows bare ids, losing the curated labels that mark the free-tier models",
+    "expect": "test_mistral_uses_the_curated_label_where_there_is_one"
+  },
+  {
+    "id": "M290_topbar_back_to_two_rows",
+    "file": "redirecall/index.html",
+    "find": "#topbar{display:flex;flex-direction:row;align-items:center;gap:12px;min-height:52px;",
+    "replace": "#topbar{display:flex;flex-direction:column;align-items:stretch;gap:12px;min-height:52px;",
+    "defect": "the top bar stacks again, taking a second row of chat height and leaving a large empty area beside the title",
+    "expect": "test_the_top_bar_is_one_row_at_every_width"
+  },
+  {
+    "id": "M291_topbar_controls_never_yield",
+    "file": "redirecall/index.html",
+    "find": "@media (max-width:1150px){.token-counter{display:none!important}}\n",
+    "replace": "",
+    "defect": "the top-bar controls keep their full width on a narrow window and run off the edge of the bar",
+    "expect": "test_the_top_bar_never_overflows_its_own_width"
+  },
+  {
+    "id": "M292_clear_chat_leaves_the_sidebar",
+    "file": "redirecall/index.html",
+    "find": "    <button class=\"sidebar-btn sidebar-btn-danger\" onclick=\"confirmClearChat()\"\n            aria-label=\"Clear this conversation\"><span class=\"icon\">🗑</span>Clear Chat</button>\n",
+    "replace": "",
+    "defect": "Clear chat is unreachable — it is in neither the top bar nor the sidebar",
+    "expect": "test_clear_chat_lives_in_the_sidebar_not_the_top_bar"
+  },
+  {
+    "id": "M293_grouped_citations_not_linked",
+    "file": "redirecall/index.html",
+    "find": "  const GROUP=/\\[(\\d+(?:\\s*,\\s*\\d+)*)\\]/g;",
+    "replace": "  const GROUP=/\\[(\\d+)\\]/g;",
+    "defect": "a grouped citation marker like [3, 4] stays inert text — visible as a citation but opening nothing",
+    "expect": "test_a_grouped_citation_marker_links_every_source_it_names"
+  },
+  {
+    "id": "M188_csv_omits_token_rows",
+    "file": "redirecall/index.html",
+    "find": "    rows.push([],['Provider','Model','Input','Cached','Cache write','Output']);",
+    "replace": "    if(false){}",
+    "defect": "the analytics CSV loses its token rows -> the one table worth reconciling against a bill cannot leave the app",
+    "expect": "test_token_rows_are_included_with_a_header"
+  },
+  {
+    "id": "M294_token_card_quotes_money_again",
+    "file": "redirecall/index.html",
+    "find": "        ${th('Output')}</tr></thead>",
+    "replace": "        ${th('Output')}${th('Cost')}</tr></thead>",
+    "defect": "the Token Usage card advertises a Cost column the app has no verified rate to fill",
+    "expect": "test_the_card_quotes_no_money_at_all"
+  },
+  {
+    "id": "M295_token_card_drops_the_bill_note",
+    "file": "redirecall/index.html",
+    "find": " Rates differ per\n      provider, per model and over time, so work the cost out against your own bill.",
+    "replace": "",
+    "defect": "the card shows tokens with no word on why there is no cost figure, so it reads as a missing feature",
+    "expect": "test_the_card_says_where_the_rate_question_belongs"
+  },
+  {
+    "id": "M296_plot_def_requires_literal_x",
+    "file": "redirecall/index.html",
+    "find": "const _PLOT_DEF=/^\\s*([A-Za-z]\\w*)\\s*(\\(\\s*[^()=]*?\\s*\\))?\\s*=\\s*(.+)$/;",
+    "replace": "const _PLOT_DEF=/^\\s*([A-Za-z]\\w*)\\s*(\\(\\s*x\\s*\\))?\\s*=\\s*(.+)$/;",
+    "defect": "a definition whose argument is not literally x (log(N) = -D * log(x)) is treated as an expression, read by mathjs as a function definition, and the plot dies with \"no finite values\"",
+    "expect": "test_a_plot_definition_whose_argument_is_not_x_still_plots"
+  },
+  {
+    "id": "M297_plot_label_drops_the_argument",
+    "file": "redirecall/index.html",
+    "find": "function _plotDefLabel(m){ return m[1]+(m[2]?'('+m[2].slice(1,-1).trim()+')':'(x)'); }",
+    "replace": "function _plotDefLabel(m){ return m[1]+'(x)'; }",
+    "defect": "every plotted curve is labelled name(x) whatever the author wrote, so four log(N_*) series all read log(x)",
+    "expect": "test_a_definition_whose_argument_is_not_x_is_still_a_definition"
+  },
+  {
+    "id": "M298_plot_non_number_unreported",
+    "file": "redirecall/index.html",
+    "find": "    if(nonNumeric&&!pts.some(p=>isFinite(p.y)))\n      throw new Error(`\"${f.expr}\" evaluates to a ${nonNumeric}, not a number — put the value to plot on the right of the \"=\".`);\n",
+    "replace": "",
+    "defect": "an expression that compiles and evaluates to a non-number (writing \"sin\" for \"sin(x)\") reports the generic \"no finite values\", naming nothing",
+    "expect": "test_an_expression_that_is_not_a_number_says_so"
   }
 ]

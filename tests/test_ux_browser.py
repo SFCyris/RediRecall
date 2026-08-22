@@ -703,3 +703,292 @@ def test_a_kept_answer_is_written_to_the_endpoint_its_instance_lives_on(ux):
 def test_an_ungrounded_answer_offers_no_source_toggle(ux):
     """There is nothing to append, and a switch that does nothing is worse than none."""
     assert ux["save_existing"]["noToggle"]
+
+
+# ── model picker ─────────────────────────────────────────────────────────────
+def test_the_picker_names_the_provider_and_the_model_without_being_opened(ux):
+    """The strip it replaced showed the provider and nothing about the model; a
+    reader had to look at a second control to learn what was answering."""
+    assert ux["picker"]["closed"]["label"] == "gemma4:31b-mlx"
+    assert ux["picker"]["closed"]["popHidden"] is True
+    assert ux["picker"]["closed"]["expanded"] == "false"
+
+
+def test_a_reachable_provider_gets_a_green_dot(ux):
+    """Availability at the point of choice. The seven-button strip had two visual
+    states for seven options and no per-provider status of any kind, so picking a
+    provider with no key was the only way to find out it had none."""
+    groups = ux["picker"]["open"]["groups"]
+    assert len(groups) == 3, [g["text"] for g in groups]
+    assert all(g["green"] for g in groups), groups
+
+
+def test_providers_with_no_key_collapse_to_one_grey_row_rather_than_vanishing(ux):
+    """Hiding them would mean an install with one key never learns the other six
+    exist, and offers no route to setting one up from where you would look."""
+    open_ = ux["picker"]["open"]
+    assert open_["setupRow"] == "Claude · OpenAI · Qwen · Groq — no key, set up"
+    assert open_["setupIsGreen"] is False
+    assert open_["setupDot"] != ux["picker"]["open"]["groups"][0]["dot"]
+
+
+def test_a_long_model_list_collapses_and_a_short_one_does_not(ux):
+    """12 Gemini models is over the threshold; 2 Mistral and 2 Ollama are not."""
+    assert ux["picker"]["open"]["collapsed"] == ["Show all 12 Gemini models"]
+
+
+def test_the_model_in_use_is_marked_in_the_list(ux):
+    assert ux["picker"]["open"]["selected"] == ["gemma4:31b-mlx"]
+
+
+def test_choosing_a_model_from_another_provider_switches_both(ux):
+    """Provider and model are one dependent choice; picking a model is the whole act."""
+    picked = ux["picker"]["picked"]
+    assert picked["provider"] == "mistral"
+    assert picked["model"] == "mistral-large-latest"
+    assert picked["popHidden"] is True
+
+
+def test_vision_is_read_from_the_hosted_model_list(ux):
+    """selectModel looked models up by display name while being called with the id,
+    and no hosted route supplied a vision flag at all — so 📎 was disabled on every
+    hosted provider regardless of the model. Both halves are checked here: a vision
+    model enables it, a text-only one on the same provider turns it back off."""
+    assert ux["picker"]["picked"]["attachEnabled"] is True
+    assert ux["picker"]["picked"]["visionBadge"] != "none"
+    assert ux["picker"]["textOnly"]["model"] == "codestral-latest"
+    assert ux["picker"]["textOnly"]["attachEnabled"] is False
+
+
+def test_a_provider_with_no_usable_model_does_not_leave_send_looking_ready(ux):
+    """Switching to a provider whose list comes back empty used to leave a confident
+    pill, an empty model list, and a Send button that only revealed the problem after
+    it was pressed."""
+    st = ux["picker_no_model"]
+    assert st["model"] == ""
+    assert "No Claude models found" in st["label"]
+    assert st["sendDisabled"] is True
+    assert st["attachDisabled"] is True
+
+
+def test_escape_in_the_picker_closes_the_picker_and_nothing_underneath(ux):
+    """The popover is not a .open/.visible layer, so it is not in _ESC_LAYERS. Without
+    its own handling an Escape reached that loop and shut the panel behind it — the
+    same double-close the search box carries a comment about."""
+    esc = ux["picker_escape"]
+    assert esc["under"] is True, "the layer underneath never opened; the test proves nothing"
+    assert esc["opened"] is True, "the picker never opened; the test proves nothing"
+    assert esc["first"]["pickerClosed"] is True
+    assert esc["first"]["pinnedStillOpen"] is True, "Escape closed the layer underneath too"
+    # ...and once the picker is closed, Escape resumes closing the layer stack
+    assert esc["second"]["pinnedStillOpen"] is False
+
+
+def test_send_stays_disabled_when_a_stream_ends_with_no_model(ux):
+    """_setStreamingUI re-enabled Send blindly, so losing the model mid-answer left the
+    button lit the moment the stream finished."""
+    st = ux["picker_stream_end"]
+    assert st["model"] == ""
+    assert st["during"] is True
+    assert st["after"] is True
+
+
+def test_a_hostile_model_name_cannot_break_out_of_the_picker(ux):
+    """Model ids and names come from the provider's API, and an OpenAI-compatible
+    provider can be pointed at an arbitrary base URL. The id lands in a data attribute
+    and the name in text, so a quote in one and a tag in the other are both tried."""
+    x = ux["picker_xss"]
+    assert x["pwned"] is False and x["pwned2"] is False
+    assert x["imgs"] == 0 and x["scripts"] == 0
+    # the payloads were actually rendered — otherwise this proves nothing
+    assert '"><img src=x onerror=window.__pwned=1>' in x["ids"], x["ids"]
+    assert "<script>window.__pwned2=1</script>" in x["labels"], x["labels"]
+    assert "quote\'test" in x["ids"]
+
+
+def test_a_hostile_id_still_round_trips_through_the_data_attribute(ux):
+    """Escaping must survive the read back: an id that renders safely but returns
+    mangled would select a model the provider does not have."""
+    assert ux["picker_xss"]["ids"].count('"><img src=x onerror=window.__pwned=1>') == 1
+
+
+def test_opening_the_picker_repeatedly_does_not_re_probe_every_provider(ux):
+    """/api/status/<provider> is a live request to the provider that verifies the key,
+    not a local read. Probing on every open would cost one API round trip per configured
+    provider each time the menu is touched."""
+    ttl = ux["picker_probe_ttl"]
+    assert ttl["primed"] > 0, "the priming probe never ran; the rest proves nothing"
+    assert ttl["repeats"] == 0, f"four opens re-probed {ttl['repeats']} times"
+    # ...but an explicit refresh must still see a key that was just added
+    assert ttl["forced"] == ttl["primed"]
+
+
+def test_refreshing_another_providers_models_leaves_the_active_list_alone(ux):
+    """Each provider card has its own Refresh Models button. The old loaders rewrote the
+    top-bar dropdown directly, so refreshing OpenAI while Mistral was active left the bar
+    offering models the running provider cannot use."""
+    r = ux["picker_refresh"]
+    assert r["before"]["ids"] == ["gemma4:31b-mlx", "llama3:latest"]
+    assert r["other"] == r["before"], "a non-active provider's refresh changed the active list"
+
+
+def test_refreshing_the_active_provider_does_pick_up_a_new_model(ux):
+    """The other half — otherwise the non-clobber test above would pass on a button
+    that simply does nothing."""
+    assert ux["picker_refresh"]["own"]["ids"] == ["newly-pulled:7b"]
+    assert ux["picker_refresh"]["own"]["model"] == "newly-pulled:7b"
+
+
+def test_the_no_key_row_opens_provider_settings(ux):
+    """It is the only route from the picker to setting a provider up."""
+    st = ux["picker_setup_link"]
+    assert not st.get("noRow"), "the no-key row was not rendered"
+    assert st["settingsOpen"] is True
+    assert st["tab"] == "tab-providers"
+    assert st["pickerClosed"] is True
+
+
+def test_the_pickers_accessible_name_carries_the_live_selection(ux):
+    """A static aria-label would replace the button's content as its accessible name, so
+    neither the model nor the provider's reachability would reach a screen reader — the
+    dot, separator and caret are all aria-hidden."""
+    n = ux["picker_a11y_name"]
+    assert n["isStatic"] is False, "the accessible name did not change with the selection"
+    assert "Ollama" in n["ollama"] and "gemma4:31b-mlx" in n["ollama"], n["ollama"]
+    assert "Gemini" in n["gemini"] and "gemini-2.5-pro" in n["gemini"], n["gemini"]
+    # status is colour-only on the dot, so it must be spelled out here
+    assert "Reachable" in n["ollama"], n["ollama"]
+
+
+def test_the_picker_paints_above_the_answer_cards(ux):
+    """#topbar carries backdrop-filter, which makes it a stacking context — the popover
+    cannot escape it however high its own z-index is, and #chat-area follows in the DOM.
+    Without a z-index on #topbar the menu rendered underneath answer cards and tables."""
+    st = ux["picker_stacking"]
+    # With the menu hidden, those points land on conversation content — so the menu has
+    # something real to beat. Without this the hit-test could pass over empty page.
+    assert st["inChatArea"] == st["sampled"], \
+        f"only {st['inChatArea']}/{st['sampled']} sample points sat over chat: {st['beneath']}"
+    assert st["topbarPosition"] != "static", "z-index needs a positioned element"
+    assert st["topbarZ"] != "auto", "without a z-index the popover cannot leave #topbar"
+    assert st["allInsidePopover"] is True, f"something painted over the menu: {st['topmost']}"
+
+
+def test_the_provider_default_is_marked_and_sorted_near_the_top(ux):
+    """On Gemini and Mistral the default is the free-tier model — the one that costs
+    nothing to try — so it should not be buried behind "Show all N"."""
+    d = ux["picker_default"]
+    assert d["markedIds"] == ["gemini-2.5-pro"], d["markedIds"]
+    assert d["badgeText"] == "default"
+    # The model in use sorts first on its own rule, so it must NOT be the default here —
+    # otherwise rank 0 masks the default rule and this proves nothing.
+    assert d["inUse"] == "gemini-2.5-flash", d["inUse"]
+    assert d["order"][0] == "gemini-2.5-flash", d["order"]     # in use
+    assert d["order"][1] == "gemini-2.5-pro", d["order"]       # the default, above the alias
+
+
+def test_the_default_model_is_a_different_colour_from_the_rest(ux):
+    """A badge alone is easy to miss in a list; the colour is what carries at a glance."""
+    d = ux["picker_default"]
+    assert d["defaultColour"] is not None, "nothing was marked as the default"
+    assert d["plainColour"] is not None, "no plain row to compare against"
+    assert d["defaultColour"] != d["plainColour"], \
+        f"default and ordinary rows are both {d['defaultColour']}"
+
+
+def test_a_grouped_citation_marker_links_every_source_it_names(ux):
+    """"[3, 4]" is as natural for a model as "[3] [4]", and matching only a lone number
+    left the grouped form as dead text — visible as a citation, but opening nothing."""
+    g = ux["citations_grouped"]
+    assert g["refs"] == ["[3]", "[4]", "[1]", "[2]"], g["refs"]
+    assert g["targets"] == ["3", "4", "1", "2"], g["targets"]
+
+
+def test_a_marker_outside_the_answers_sources_is_left_as_text(ux):
+    """[9] with four sources is not a citation into this answer; turning it into a
+    button would offer to open a passage that does not exist."""
+    assert ux["citations_grouped"]["keptOutOfRange"] is True
+
+
+def test_linking_citations_does_not_disturb_the_prose(ux):
+    """The linker rewrites text nodes in place, so a bug here silently eats words."""
+    assert ux["citations_grouped"]["prose"] == (
+        "A symlink holds a pathname [3] [4]. It is resolved at open time [1] [2]. "
+        "Out of range [9] stays text.")
+
+
+# ── single-row top bar ───────────────────────────────────────────────────────
+def test_the_top_bar_is_one_row_at_every_width(ux):
+    """It was two rows, and the second wrapped again as the title and token counter
+    grew — 99px on a fresh session, 198px in use, every pixel taken from the chat."""
+    bars = ux["topbar_single_row"]
+    for w, m in bars.items():
+        assert m["rows"] == 3, f"{w}px: top bar has {m['rows']} direct children, expected 3"
+        assert m["h"] <= 60, f"{w}px: top bar is {m['h']}px — it has wrapped to a second line"
+
+
+def test_the_top_bar_never_overflows_its_own_width(ux):
+    """The controls do not wrap any more, so if they stop giving way they run off the
+    edge instead — silently, because nothing clips them."""
+    over = {w: m for w, m in ux["topbar_single_row"].items() if m["overflows"]}
+    assert not over, f"top bar overflows at: {sorted(over)}"
+
+
+def test_the_top_bar_height_does_not_change_with_use(ux):
+    """A long session title and a seven-digit token count used to add a whole row."""
+    heights = {m["h"] for m in ux["topbar_single_row"].values()}
+    assert len(heights) == 1, f"height varies by width: {heights}"
+
+
+def test_clear_chat_lives_in_the_sidebar_not_the_top_bar(ux):
+    c = ux["clear_chat_home"]
+    assert c["inTopbar"] is False, "the trash button is still in the top bar"
+    assert c["inSidebar"] is True
+    assert "Clear Chat" in c["label"], c["label"]
+    # ...next to the other actions that operate on the current conversation
+    order = c["footerOrder"]
+    assert order.index([x for x in order if "Clear Chat" in x][0]) == \
+           order.index([x for x in order if "Export Chat (.txt)" in x][0]) + 1, order
+
+
+# ── function plot definitions ────────────────────────────────────────────────
+def test_a_plot_definition_whose_argument_is_not_x_still_plots(ux):
+    """log(N) = -D * log(x) is how a log-log relation is written. Only a literal "(x)"
+    was accepted as a definition, so the whole line was treated as the expression —
+    mathjs then read it as *defining* a function called log, which evaluates to a
+    function rather than a number, and the card died with "no finite values"."""
+    p = ux["plot_defs"]
+    assert p["ok"] is True, p["error"]
+    assert p["series"] == 4, f"expected four curves, drew {p['series']}"
+    assert p["distinctStrokes"] == 4, "the curves are not separately coloured"
+
+
+def test_the_plot_legend_keeps_the_written_names(ux):
+    """A legend reading f1..f4 would not say which fractal is which."""
+    assert ux["plot_defs"]["labels"] == [
+        "log(N_line)", "log(N_sq)", "log(N_Sierpinski)", "log(N_Koch)"], ux["plot_defs"]["labels"]
+
+
+@pytest.mark.parametrize("shape", ["plainY", "fOfX", "bareExpr"])
+def test_the_plot_shapes_that_already_worked_still_work(ux, shape):
+    """Broadening what counts as a definition must not swallow anything else."""
+    assert ux["plot_defs"][shape] is True, shape
+
+
+def test_an_undefined_symbol_still_names_itself(ux):
+    """The specific diagnostic must survive the broader match."""
+    assert "'a' is not defined" in ux["plot_defs"]["undefSym"], ux["plot_defs"]["undefSym"]
+
+
+def test_an_expression_that_is_not_a_number_says_so(ux):
+    """The net under the fix: mathjs can compile and evaluate without throwing yet hand
+    back a function. That used to surface as the generic "no finite values"."""
+    err = ux["plot_defs"]["nonNumeric"]
+    assert "not a number" in err, err
+    assert "function" in err, err
+
+
+def test_the_non_number_message_names_the_type_it_got(ux):
+    """"not a number" alone leaves the reader guessing; the type is the clue."""
+    err = ux["plot_defs"]["nonNumericMatrix"]
+    assert "Matrix" in err and "not a number" in err, err
